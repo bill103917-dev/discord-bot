@@ -110,8 +110,9 @@ class FunCog(commands.Cog):
 class DrawCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_draws = {}
+        self.active_draws = {}  # key: guild_id, value: dict(name, max_winners, participants, task, end_time)
 
+    # 解析時間字串，支援 10s / 5m / 1h
     def parse_duration(self, timestr: str) -> int:
         pattern = r"(\d+)([smh])"
         match = re.fullmatch(pattern, timestr.strip().lower())
@@ -127,16 +128,25 @@ class DrawCog(commands.Cog):
         if guild_id in self.active_draws:
             await interaction.response.send_message("❌ 本伺服器已有正在進行的抽獎", ephemeral=True)
             return
+
         try:
             seconds = self.parse_duration(duration)
         except ValueError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
 
-        draw_info = {"name": name, "max_winners": max_winners, "participants": set(), "task": None}
+        end_time = asyncio.get_event_loop().time() + seconds
+        draw_info = {
+            "name": name,
+            "max_winners": max_winners,
+            "participants": set(),
+            "task": asyncio.create_task(self._auto_end_draw(interaction, guild_id, seconds)),
+            "end_time": end_time
+        }
         self.active_draws[guild_id] = draw_info
-        draw_info["task"] = asyncio.create_task(self._auto_end_draw(interaction, guild_id, seconds))
-        await interaction.response.send_message(f"🎉 抽獎 `{name}` 已開始！使用 /join_draw 參加。名額: {max_winners}。\n⏱ 持續 {duration} 後自動結束。")
+        await interaction.response.send_message(
+            f"🎉 抽獎 `{name}` 已開始！使用 /join_draw 參加。名額: {max_winners}。\n⏱ 持續 {duration} 後自動結束。"
+        )
 
     @app_commands.command(name="join_draw", description="參加抽獎")
     async def join_draw(self, interaction: discord.Interaction):
@@ -148,18 +158,48 @@ class DrawCog(commands.Cog):
         draw["participants"].add(interaction.user.id)
         await interaction.response.send_message(f"✅ {interaction.user.mention} 已加入 `{draw['name']}` 抽獎！", ephemeral=True)
 
-    async def _auto_end_draw(self, interaction, guild_id, duration_seconds):
-        await asyncio.sleep(duration_seconds)
+    @app_commands.command(name="draw_status", description="查看抽獎狀態")
+    async def draw_status(self, interaction: discord.Interaction):
+        guild_id = interaction.guild.id
         if guild_id not in self.active_draws:
+            await interaction.response.send_message("❌ 沒有正在進行的抽獎", ephemeral=True)
+            return
+        draw = self.active_draws[guild_id]
+        remaining = max(0, int(draw["end_time"] - asyncio.get_event_loop().time()))
+        await interaction.response.send_message(
+            f"🎯 抽獎 `{draw['name']}`\n參加人數：{len(draw['participants'])}\n剩餘時間：{remaining} 秒",
+            ephemeral=True
+        )
+
+    @app_commands.command(name="cancel_draw", description="取消抽獎（管理員限定）")
+    async def cancel_draw(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 你沒有權限取消抽獎", ephemeral=True)
+            return
+        guild_id = interaction.guild.id
+        if guild_id not in self.active_draws:
+            await interaction.response.send_message("❌ 沒有正在進行的抽獎", ephemeral=True)
             return
         draw = self.active_draws.pop(guild_id)
-        participants = list(draw["participants"])
-        if not participants:
-            await interaction.channel.send(f"❌ 抽獎 `{draw['name']}` 沒有人參加。")
+        draw["task"].cancel()
+        await interaction.response.send_message(f"⚠️ 抽獎 `{draw['name']}` 已被取消", ephemeral=False)
+
+    async def _auto_end_draw(self, interaction, guild_id, duration_seconds):
+        try:
+            await asyncio.sleep(duration_seconds)
+            if guild_id not in self.active_draws:
+                return
+            draw = self.active_draws.pop(guild_id)
+            participants = list(draw["participants"])
+            if not participants:
+                await interaction.channel.send(f"❌ 抽獎 `{draw['name']}` 沒有人參加。")
+                return
+            winners = random.sample(participants, min(draw["max_winners"], len(participants)))
+            winners_mentions = [f"<@{uid}>" for uid in winners]
+            await interaction.channel.send(f"🏆 抽獎 `{draw['name']}` 結束！得獎者：{', '.join(winners_mentions)}")
+        except asyncio.CancelledError:
+            # 抽獎被取消
             return
-        winners = random.sample(participants, min(draw["max_winners"], len(participants)))
-        winners_mentions = [f"<@{uid}>" for uid in winners]
-        await interaction.channel.send(f"🏆 抽獎 `{draw['name']}` 結束！得獎者：{', '.join(winners_mentions)}")
 
 # =========================
 # ⚡ Cog: 公告
