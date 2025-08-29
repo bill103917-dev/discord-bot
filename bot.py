@@ -213,10 +213,10 @@ async def on_ready():
     await bot.tree.sync()
 
 # 將所有 Cog 註冊到 Bot
-bot.add_cog(UtilityCog(bot))
-bot.add_cog(FunCog(bot))
-bot.add_cog(DrawCog(bot))
-bot.add_cog(AnnounceCog(bot))
-
+async def main():
+    await bot.add_cog(UtilityCog(bot))
+    await bot.add_cog(FunCog(bot))
+    await bot.add_cog(DrawCog(bot))
+    await bot.add_cog(AnnounceCog(bot))
+    await bot.start(TOKEN)
 # 啟動 Bot
-bot.run(TOKEN)
