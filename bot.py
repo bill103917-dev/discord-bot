@@ -107,6 +107,9 @@ class FunCog(commands.Cog):
 # =========================
 # ⚡ Cog: 抽獎
 # =========================
+# =========================
+# ⚡ Cog: 抽獎
+# =========================
 class DrawCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -123,6 +126,11 @@ class DrawCog(commands.Cog):
         return number * {"s":1,"m":60,"h":3600}[unit]
 
     @app_commands.command(name="start_draw", description="開始抽獎")
+    @app_commands.describe(
+        name="抽獎名稱",
+        max_winners="最多中獎人數（預設 1）",
+        duration="抽獎持續時間，例如：10s / 5m / 1h（預設 60s）"
+    )
     async def start_draw(self, interaction: discord.Interaction, name: str, max_winners: int = 1, duration: str = "60s"):
         guild_id = interaction.guild.id
         if guild_id in self.active_draws:
