@@ -26,19 +26,7 @@ MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
 def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
-# =========================
-# ⚡ 保活伺服器
-# =========================
-async def handle(request):
-    return web.Response(text="Bot is running!")
 
-def start_web():
-    app = web.Application()
-    app.add_routes([web.get("/", handle)])
-    port = int(os.environ.get("PORT", 8080))
-    web.run_app(app, host="0.0.0.0", port=port)
-
-threading.Thread(target=start_web, daemon=True).start()
 
 # =========================
 # ⚡ Cog: 工具指令
@@ -207,16 +195,32 @@ class AnnounceCog(commands.Cog):
 # =========================
 # ⚡ Bot 啟動
 # =========================
-@bot.event
-async def on_ready():
-    print(f"✅ Bot 已啟動！登入身分：{bot.user}")
-    await bot.tree.sync()
+import asyncio
+from aiohttp import web
 
-# 將所有 Cog 註冊到 Bot
+async def keep_alive():
+    async def handle(request):
+        return web.Response(text="Bot is running!")
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port=8080)
+    await site.start()
+    print("✅ HTTP server running on port 8080")
+
 async def main():
+    # 啟動 HTTP server
+    await keep_alive()
+
+    # 註冊 Cogs
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(DrawCog(bot))
     await bot.add_cog(AnnounceCog(bot))
+
+    # 啟動 Bot
     await bot.start(TOKEN)
+
+asyncio.run(main())
 # 啟動 Bot
