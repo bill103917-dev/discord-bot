@@ -10,6 +10,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+OWNER_ID = 1238436456041676853
 
 #-----------------------------
 #防多實例重複執行設定
@@ -39,10 +40,47 @@ active_giveaways = {}
 #-----------------------------
 #/say
 #-----------------------------
-@tree.command(name="say", description="讓機器人代你說話（只有自己看到）")
-@app_commands.describe(message="要說的內容")
-async def say(interaction: discord.Interaction, message: str):
-    await interaction.response.send_message(message, ephemeral=True)
+from discord import app_commands
+from discord.ext import commands
+import discord
+
+SPECIAL_USER_IDS = [OWNER_ID]
+
+class UtilityCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="say", description="讓機器人發送訊息")
+    async def say(
+        self, 
+        interaction: discord.Interaction, 
+        message: str, 
+        channel_name: str = None, 
+        user_id: str = None
+    ):
+        # 權限檢查
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+            await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+            return
+
+        # 發送給指定使用者
+        if user_id:
+            try:
+                user = await self.bot.fetch_user(int(user_id))
+                await user.send(message)
+                await interaction.response.send_message(f"✅ 已發送私訊給 {user.name}", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
+            return
+
+        # 發送到指定頻道
+        channel = discord.utils.get(interaction.guild.channels, name=channel_name) if channel_name else interaction.channel
+        if not channel:
+            await interaction.response.send_message(f"❌ 找不到頻道 `{channel_name}`", ephemeral=True)
+            return
+
+        await channel.send(message)
+        await interaction.response.send_message(f"✅ 已在 {channel.mention} 發送訊息", ephemeral=True)
 
 #-----------------------------
 #calc
