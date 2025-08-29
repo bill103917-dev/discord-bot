@@ -18,6 +18,19 @@ MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
 def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
+
+
+import os
+from aiohttp import web
+
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+app = web.Application()
+app.add_routes([web.get("/", handle)])
+
+port = int(os.environ.get("PORT", 8080))
+web.run_app(app, host="0.0.0.0", port=port)
 #-----------------------------
 #全域變數：抽獎狀態
 #-----------------------------
