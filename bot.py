@@ -190,7 +190,7 @@ class AnnounceCog(commands.Cog):
         channel="公告頻道（可不選）",
         ping_everyone="是否要 @everyone"
     )
-        async def announce(self, interaction: discord.Interaction, title: str, content: str, channel: discord.TextChannel = None, ping_everyone: bool = False):
+    async def announce(self, interaction: discord.Interaction, title: str, content: str, channel: discord.TextChannel = None, ping_everyone: bool = False):
         if not is_main_instance():
             await interaction.response.send_message("❌ 目前這個 Bot instance 不負責發送公告", ephemeral=True)
             return
