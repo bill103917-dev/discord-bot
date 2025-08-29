@@ -32,6 +32,7 @@ app.add_routes([web.get("/", handle)])
 
 port = int(os.environ.get("PORT", 8080))
 web.run_app(app, host="0.0.0.0", port=port)
+
 #-----------------------------
 #全域變數：抽獎狀態
 #-----------------------------
@@ -233,6 +234,14 @@ class DrawCog(commands.Cog):
         winners_mentions = [f"<@{uid}>" for uid in winners]
 
         await interaction.channel.send(f"🏆 抽獎 `{draw['name']}` 結束！得獎者：{', '.join(winners_mentions)}")
+
+#載入
+async def setup():
+    await bot.add_cog(UtilityCog(bot))
+    await bot.add_cog(FunCog(bot))
+    await bot.add_cog(DrawCog(bot))
+
+asyncio.run(setup())
 
 #-----------------------------
 #Bot 啟動
