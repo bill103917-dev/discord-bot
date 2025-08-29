@@ -59,6 +59,31 @@ async def calc(interaction: discord.Interaction, expr: str):
     except Exception as e:
         await interaction.response.send_message(f"計算錯誤：{e}")
 
+
+from discord.ext import commands
+from discord import app_commands
+import discord
+import random
+
+class FunCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="draw", description="隨機抽選一個選項")
+    @app_commands.describe(options="輸入多個選項，用逗號或空格分隔")
+    async def draw(self, interaction: discord.Interaction, options: str):
+        # 將使用者輸入拆分成列表
+        if "," in options:
+            items = [o.strip() for o in options.split(",") if o.strip()]
+        else:
+            items = [o.strip() for o in options.split() if o.strip()]
+
+        if len(items) < 2:
+            await interaction.response.send_message("❌ 請至少輸入兩個選項", ephemeral=True)
+            return
+
+        winner = random.choice(items)
+        await interaction.response.send_message(f"🎉 抽選結果：**{winner}**")
 #-----------------------------
 # /announce
 #-----------------------------
