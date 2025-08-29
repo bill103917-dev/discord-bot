@@ -146,92 +146,93 @@ async def announce(interaction: discord.Interaction, title: str, content: str, c
     mention = "@everyone" if ping_everyone else ""
     await target_channel.send(mention, embed=embed)
 
-#-----------------------------
-#giveaway 開始抽獎
-#-----------------------------
-@tree.command(name="giveaway", description="開啟抽獎")
-@app_commands.describe(
-    prize="獎品名稱",
-    duration="持續時間（秒）",
-    role="限定參加的角色（可不填）"
-)
-async def giveaway(interaction: discord.Interaction, prize: str, duration: int, role: discord.Role = None):
-    if not is_main_instance():
-        await interaction.response.send_message("❌ 目前這個 Bot instance 不負責抽獎", ephemeral=True)
-        return
-    
-    if interaction.channel.id in active_giveaways:
-        await interaction.response.send_message("⚠️ 這個頻道已經有正在進行的抽獎！", ephemeral=True)
-        return
+from discord.ext import commands
+from discord import app_commands
+import discord
+import random
+import asyncio
+import re
 
-    embed = discord.Embed(
-        title="🎉 抽獎開始！",
-        description=f"獎品：**{prize}**\n持續時間：{str(timedelta(seconds=duration))}\n"
-                    f"請輸入訊息參加！（{('限定角色：' + role.name) if role else '所有人可參加'})",
-        color=discord.Color.green()
-    )
-    msg = await interaction.response.send_message(embed=embed)
-    active_giveaways[interaction.channel.id] = {"prize": prize, "role": role, "active": True}
+class DrawCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.active_draws = {}  # key: guild_id, value: dict {name, max_winners, participants, task}
 
-    # 倒數計時
-    for i in range(duration, 0, -10):
-        if not active_giveaways.get(interaction.channel.id, {}).get("active"):
+    # 解析時間字串，支援 10s / 5m / 1h
+    def parse_duration(self, timestr: str) -> int:
+        pattern = r"(\d+)([smh])"
+        match = re.fullmatch(pattern, timestr.strip().lower())
+        if not match:
+            raise ValueError("時間格式錯誤，範例: 10s, 5m, 1h")
+        number, unit = match.groups()
+        number = int(number)
+        if unit == "s":
+            return number
+        elif unit == "m":
+            return number * 60
+        elif unit == "h":
+            return number * 3600
+        else:
+            raise ValueError("不支援的時間單位")
+
+    @app_commands.command(name="start_draw", description="開始一場抽獎")
+    async def start_draw(self, interaction: discord.Interaction, name: str, max_winners: int = 1, duration: str = "60s"):
+        """
+        duration: 抽獎持續時間，格式: 10s / 5m / 1h
+        """
+        guild_id = interaction.guild.id
+        if guild_id in self.active_draws:
+            await interaction.response.send_message("❌ 本伺服器已有正在進行的抽獎", ephemeral=True)
             return
-        await asyncio.sleep(10)
-        new_embed = embed.copy()
-        new_embed.description = f"獎品：**{prize}**\n剩餘時間：{str(timedelta(seconds=i))}"
-        await (await interaction.original_response()).edit(embed=new_embed)
+        
+        try:
+            seconds = self.parse_duration(duration)
+        except ValueError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
 
-    # 時間結束 -> 開獎
-    await end_giveaway(interaction.channel)
+        draw_info = {
+            "name": name,
+            "max_winners": max_winners,
+            "participants": set(),
+            "task": None
+        }
+        self.active_draws[guild_id] = draw_info
 
-#-----------------------------
-#endgiveaway 提前開獎
-# -----------------------------
-@tree.command(name="endgiveaway", description="提前結束抽獎")
-async def endgiveaway(interaction: discord.Interaction):
-    if interaction.channel.id not in active_giveaways:
-        await interaction.response.send_message("⚠️ 這個頻道沒有進行中的抽獎", ephemeral=True)
-        return
-    await interaction.response.send_message("✅ 抽獎已提前結束")
-    await end_giveaway(interaction.channel)
+        # 建立定時任務，自動結束抽獎
+        draw_info["task"] = asyncio.create_task(self._auto_end_draw(interaction, guild_id, seconds))
 
-#-----------------------------
-# /cancelgiveaway 取消抽獎
-#-----------------------------
-@tree.command(name="cancelgiveaway", description="取消進行中的抽獎")
-async def cancelgiveaway(interaction: discord.Interaction):
-    if interaction.channel.id not in active_giveaways:
-        await interaction.response.send_message("⚠️ 這個頻道沒有進行中的抽獎", ephemeral=True)
-        return
-    active_giveaways[interaction.channel.id]["active"] = False
-    del active_giveaways[interaction.channel.id]
-    await interaction.response.send_message("❌ 抽獎已取消！")
+        await interaction.response.send_message(
+            f"🎉 抽獎 `{name}` 已開始！使用 /join_draw 參加。名額: {max_winners}。\n⏱ 持續 {duration} 後自動結束。"
+        )
 
-#-----------------------------
-#開獎邏輯
-#-----------------------------
-async def end_giveaway(channel: discord.TextChannel):
-    giveaway = active_giveaways.get(channel.id)
-    if not giveaway:
-        return
-    prize = giveaway["prize"]
-    role = giveaway["role"]
+    @app_commands.command(name="join_draw", description="參加抽獎")
+    async def join_draw(self, interaction: discord.Interaction):
+        guild_id = interaction.guild.id
+        if guild_id not in self.active_draws:
+            await interaction.response.send_message("❌ 沒有正在進行的抽獎", ephemeral=True)
+            return
 
-    messages = [m async for m in channel.history(limit=200)]
-    participants = {m.author for m in messages if not m.author.bot}
+        draw = self.active_draws[guild_id]
+        draw["participants"].add(interaction.user.id)
+        await interaction.response.send_message(f"✅ {interaction.user.mention} 已加入 `{draw['name']}` 抽獎！", ephemeral=True)
 
-    # 限定角色參與
-    if role:
-        participants = {p for p in participants if role in p.roles}
+    async def _auto_end_draw(self, interaction, guild_id, duration_seconds):
+        await asyncio.sleep(duration_seconds)
+        if guild_id not in self.active_draws:
+            return
 
-    if participants:
-        winner = random.choice(list(participants))
-        await channel.send(f"🎊 恭喜 {winner.mention} 抽中 **{prize}**！")
-    else:
-        await channel.send("⚠️ 沒有人參加抽獎！")
+        draw = self.active_draws.pop(guild_id)
+        participants = list(draw["participants"])
 
-    del active_giveaways[channel.id]
+        if not participants:
+            await interaction.channel.send(f"❌ 抽獎 `{draw['name']}` 沒有人參加。")
+            return
+
+        winners = random.sample(participants, min(draw["max_winners"], len(participants)))
+        winners_mentions = [f"<@{uid}>" for uid in winners]
+
+        await interaction.channel.send(f"🏆 抽獎 `{draw['name']}` 結束！得獎者：{', '.join(winners_mentions)}")
 
 #-----------------------------
 #Bot 啟動
