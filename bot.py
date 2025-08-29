@@ -164,5 +164,10 @@ async def end_giveaway(channel: discord.TextChannel):
 async def on_ready():
     print(f"✅ Bot 已啟動！登入身分：{bot.user}")
     await tree.sync()
+import os
 
-bot.run("你的TOKEN") 
+TOKEN = os.getenv("DISCORD_TOKEN")  # 建議放在環境變數
+# 或直接
+# TOKEN = "你的真正 BOT TOKEN"
+
+bot.run(TOKEN)
