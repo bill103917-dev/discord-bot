@@ -190,4 +190,33 @@ class AnnounceCog(commands.Cog):
         channel="公告頻道（可不選）",
         ping_everyone="是否要 @everyone"
     )
-    async def
+        async def announce(self, interaction: discord.Interaction, title: str, content: str, channel: discord.TextChannel = None, ping_everyone: bool = False):
+        if not is_main_instance():
+            await interaction.response.send_message("❌ 目前這個 Bot instance 不負責發送公告", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 只有管理員能發布公告", ephemeral=True)
+            return
+        target_channel = channel or interaction.channel
+        embed = discord.Embed(title=f"📢 {title}", description=content, color=discord.Color.orange())
+        embed.set_footer(text=f"發布者：{interaction.user.display_name}")
+        await interaction.response.send_message(f"✅ 公告已發佈到 {target_channel.mention}！", ephemeral=True)
+        mention = "@everyone" if ping_everyone else ""
+        await target_channel.send(mention, embed=embed)
+
+# =========================
+# ⚡ Bot 啟動
+# =========================
+@bot.event
+async def on_ready():
+    print(f"✅ Bot 已啟動！登入身分：{bot.user}")
+    await bot.tree.sync()
+
+# 將所有 Cog 註冊到 Bot
+bot.add_cog(UtilityCog(bot))
+bot.add_cog(FunCog(bot))
+bot.add_cog(DrawCog(bot))
+bot.add_cog(AnnounceCog(bot))
+
+# 啟動 Bot
+bot.run(TOKEN)
