@@ -6,7 +6,6 @@ import random
 import asyncio
 import re
 from aiohttp import web
-import threading
 
 # =========================
 # ⚡ 基本設定
@@ -25,8 +24,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
 def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
-
-
 
 # =========================
 # ⚡ Cog: 工具指令
@@ -193,11 +190,8 @@ class AnnounceCog(commands.Cog):
         await target_channel.send(mention, embed=embed)
 
 # =========================
-# ⚡ Bot 啟動
+# ⚡ HTTP 保活
 # =========================
-import asyncio
-from aiohttp import web
-
 async def keep_alive():
     async def handle(request):
         return web.Response(text="Bot is running!")
@@ -205,10 +199,13 @@ async def keep_alive():
     app.add_routes([web.get("/", handle)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port=8080)
+    site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
     await site.start()
     print("✅ HTTP server running on port 8080")
 
+# =========================
+# ⚡ Bot 啟動
+# =========================
 async def main():
     # 啟動 HTTP server
     await keep_alive()
@@ -219,8 +216,15 @@ async def main():
     await bot.add_cog(DrawCog(bot))
     await bot.add_cog(AnnounceCog(bot))
 
+    # 同步 Slash Commands
+    await bot.wait_until_ready()
+    await bot.tree.sync()
+
     # 啟動 Bot
     await bot.start(TOKEN)
 
-asyncio.run(main())
-# 啟動 Bot
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("⚡ Bot 已停止")
