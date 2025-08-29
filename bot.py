@@ -206,6 +206,12 @@ async def keep_alive():
 # =========================
 # ⚡ Bot 啟動
 # =========================
+# 在 Bot 啟動區域
+@bot.event
+async def on_ready():
+    print(f"✅ Bot 已啟動！登入身分：{bot.user}")
+    await bot.tree.sync()  # 同步 Slash commands
+
 async def main():
     # 啟動 HTTP server
     await keep_alive()
@@ -215,10 +221,6 @@ async def main():
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(DrawCog(bot))
     await bot.add_cog(AnnounceCog(bot))
-
-    # 同步 Slash Commands
-    await bot.wait_until_ready()
-    await bot.tree.sync()
 
     # 啟動 Bot
     await bot.start(TOKEN)
