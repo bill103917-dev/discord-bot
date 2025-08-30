@@ -105,8 +105,17 @@ class FunCog(commands.Cog):
         await interaction.response.send_message(f"🎉 抽選結果：**{winner}**")
 
 # =========================
-# ⚡ Cog: 抽獎
+# ⚡ Cog: Ping 指令
 # =========================
+class PingCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="ping", description="檢查機器人延遲")
+    async def ping(self, interaction: discord.Interaction):
+        latency_ms = round(self.bot.latency * 1000)  # 轉成毫秒
+        await interaction.response.send_message(f"🏓 Pong! 延遲：{latency_ms}ms")
+        
 # =========================
 # ⚡ Cog: 抽獎
 # =========================
