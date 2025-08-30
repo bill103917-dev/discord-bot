@@ -33,46 +33,40 @@ class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="say", description="讓機器人發送訊息")
+    @app_commands.command(name="say", description="讓機器人發送訊息（可發頻道或私訊單一用戶）")
     @app_commands.describe(
         message="要發送的訊息",
-        channel_name="要發送的頻道名稱（可不填）",
-        users="要私訊的用戶（可多選）"
+        channel="選擇要發送的頻道（可選，不選則預設為當前頻道）",
+        user="選擇要私訊的使用者（可選）"
     )
     async def say(
-        self, 
-        interaction: discord.Interaction, 
-        message: str, 
-        channel_name: str = None,
-        users: Optional[List[discord.User]] = None
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        channel: discord.TextChannel = None,
+        user: discord.User = None
     ):
         # 權限檢查
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
             return
 
-        # 如果有選擇用戶，發送私訊
-        if users:
-            failed = []
-            for user in users:
-                try:
-                    await user.send(message)
-                except Exception:
-                    failed.append(user.name)
-            if failed:
-                await interaction.response.send_message(f"⚠️ 有些人無法收到訊息: {', '.join(failed)}", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"✅ 已發送私訊給 {len(users)} 位用戶", ephemeral=True)
+        # 如果有指定用戶 -> 發私訊
+        if user:
+            try:
+                await user.send(message)
+                await interaction.response.send_message(f"✅ 已私訊給 {user.mention}", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
             return
 
-        # 沒選用戶 → 發送到頻道
-        channel = discord.utils.get(interaction.guild.channels, name=channel_name) if channel_name else interaction.channel
-        if not channel:
-            await interaction.response.send_message(f"❌ 找不到頻道 `{channel_name}`", ephemeral=True)
-            return
-
-        await channel.send(message)
-        await interaction.response.send_message(f"✅ 已在 {channel.mention} 發送訊息", ephemeral=True)
+        # 如果沒指定用戶 -> 發頻道
+        target_channel = channel or interaction.channel
+        try:
+            await target_channel.send(message)
+            await interaction.response.send_message(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
         
         
     @app_commands.command(name="calc", description="簡單計算器")
