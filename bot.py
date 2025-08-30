@@ -5,6 +5,7 @@ from discord import app_commands
 import random
 import asyncio
 import re
+from typing import List, Optional
 from aiohttp import web
 
 # =========================
