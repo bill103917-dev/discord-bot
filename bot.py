@@ -81,6 +81,32 @@ class UtilityCog(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"計算錯誤：{e}")
 
+    # === /delete 指令 ===   👈 把這段放進來
+    @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
+    @app_commands.describe(
+        amount="要刪除的訊息數量（1~100）"
+    )
+    async def delete(
+        self,
+        interaction: discord.Interaction,
+        amount: int
+    ):
+        # ✅ 只有管理員 或 SPECIAL_USER_IDS 可以用
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+            await interaction.response.send_message("❌ 只有管理員可以刪除訊息", ephemeral=True)
+            return
+
+        if amount < 1 or amount > 100:
+            await interaction.response.send_message("❌ 請輸入 1 ~ 100 的數字", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            deleted = await interaction.channel.purge(limit=amount+1)  # +1 把指令那則也刪掉
+            await interaction.followup.send(f"✅ 已刪除 {len(deleted)-1} 則訊息", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ 刪除失敗: {e}", ephemeral=True)
 # =========================
 # ⚡ Cog: 遊戲指令
 # =========================
