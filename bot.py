@@ -112,102 +112,190 @@ class UtilityCog(commands.Cog):
 #=========================
 # ⚡ Cog: 反應身分組 (訊息連結版, 中文化)
 # =========================
-@app_commands.command(
-    name="reactionrole",
-    description="新增反應身分組（管理員用）"
-)
-@app_commands.describe(
-    channel="選擇發送訊息的頻道（可不選，填訊息連結就不用）",
-    message="要反應的訊息文字或訊息連結",
-    emoji="對應的表情符號",
-    role="要給的身分組"
-)
-async def reactionrole(
-    self,
-    interaction: discord.Interaction,
-    message: str,
-    emoji: str,
-    role: discord.Role,
-    channel: Optional[discord.TextChannel] = None
-):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
-        return
+from typing import Optional
+import discord
+from discord.ext import commands
+from discord import app_commands
+import re
 
-    # 發送訊息或解析訊息連結
-    msg_obj = None
-    if message.startswith("https://"):
-        try:
-            parts = message.split("/")
-            msg_id = int(parts[-1])
-            ch_id = int(parts[-2])
-            ch = interaction.guild.get_channel(ch_id)
-            msg_obj = await ch.fetch_message(msg_id)
-        except:
-            await interaction.response.send_message("❌ 無法解析訊息連結", ephemeral=True)
-            return
-    else:
-        if not channel:
-            channel = interaction.channel
-        msg_obj = await channel.send(message)
+class ReactionRoleCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        # 儲存每個伺服器的反應身分組設定
+        # 格式: {guild_id: {message_id: {"emoji": role_id}}}
+        self.reaction_roles = {}
 
-    # 設定反應身分組
-    if msg_obj.id not in self.reaction_roles:
-        self.reaction_roles[msg_obj.id] = {}
-    self.reaction_roles[msg_obj.id][emoji] = role.id
-
-    await msg_obj.add_reaction(emoji)
-    await interaction.response.send_message(f"✅ 已設定反應身分組於訊息 {msg_obj.id}", ephemeral=True)
-
+    # 新增反應身分組
     @app_commands.command(
-        name="stop_reactionrole",
-        description="停止偵測特定訊息的反應身分組（管理員用）"
+        name="reactionrole",
+        description="新增反應身分組（管理員用）"
     )
     @app_commands.describe(
-        message="要取消偵測的訊息連結"
+        message="要反應的訊息文字或訊息連結",
+        emoji="對應的表情符號",
+        role="要給的身分組",
+        channel="訊息所在頻道（可不選，用訊息連結即可）"
     )
-    async def stop_reactionrole(self, interaction: discord.Interaction, message: str):
+    async def reactionrole(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        emoji: str,
+        role: discord.Role,
+        channel: Optional[discord.TextChannel] = None
+    ):
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
+            await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
             return
 
-        try:
-            msg_id = int(message.split("/")[-1])
-        except:
-            await interaction.response.send_message("❌ 無法解析訊息連結", ephemeral=True)
-            return
-
-        if msg_id in self.reaction_roles:
-            self.reaction_roles.pop(msg_id)
-            await interaction.response.send_message("✅ 已取消此訊息的反應身分組偵測", ephemeral=True)
+        # 嘗試解析訊息連結
+        msg_obj = None
+        if re.match(r"https?://", message):
+            try:
+                # 例如連結格式: https://discord.com/channels/{guild_id}/{channel_id}/{message_id}
+                m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
+                if not m:
+                    raise ValueError
+                guild_id, channel_id, message_id = map(int, m.groups())
+                channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+                msg_obj = await channel_obj.fetch_message(message_id)
+            except Exception:
+                await interaction.response.send_message("❌ 無法解析訊息連結，請確認格式正確", ephemeral=True)
+                return
         else:
-            await interaction.response.send_message("❌ 此訊息沒有設定反應身分組", ephemeral=True)
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload):
-        if payload.message_id in self.reaction_roles:
-            guild = self.bot.get_guild(payload.guild_id)
-            member = guild.get_member(payload.user_id)
-            if member.bot:
+            if channel is None:
+                channel = interaction.channel
+            try:
+                async for msg in channel.history(limit=100):
+                    if msg.content == message:
+                        msg_obj = msg
+                        break
+                if msg_obj is None:
+                    await interaction.response.send_message("❌ 找不到符合的訊息", ephemeral=True)
+                    return
+            except Exception:
+                await interaction.response.send_message("❌ 無法取得頻道訊息", ephemeral=True)
                 return
-            emoji = str(payload.emoji)
-            role_id = self.reaction_roles[payload.message_id].get(emoji)
-            if role_id:
-                role = guild.get_role(role_id)
+
+        # 加入反應
+        try:
+            await msg_obj.add_reaction(emoji)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 無法加反應: {e}", ephemeral=True)
+            return
+
+        # 儲存設定
+        guild_roles = self.reaction_roles.setdefault(interaction.guild_id, {})
+        msg_roles = guild_roles.setdefault(msg_obj.id, {})
+        msg_roles[emoji] = role.id
+
+        await interaction.response.send_message(f"✅ 已設定 {emoji} -> {role.name} 的反應身分組", ephemeral=True)
+
+    # 刪除反應身分組
+    @app_commands.command(
+        name="removereactionrole",
+        description="刪除反應身分組（管理員用）"
+    )
+    @app_commands.describe(
+        message="訊息文字或訊息連結",
+        emoji="對應的表情符號",
+        channel="訊息所在頻道（可不選，用訊息連結即可）"
+    )
+    async def removereactionrole(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        emoji: str,
+        channel: Optional[discord.TextChannel] = None
+    ):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
+            return
+
+        # 嘗試解析訊息連結
+        msg_obj = None
+        if re.match(r"https?://", message):
+            try:
+                m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
+                if not m:
+                    raise ValueError
+                guild_id, channel_id, message_id = map(int, m.groups())
+                channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+                msg_obj = await channel_obj.fetch_message(message_id)
+            except Exception:
+                await interaction.response.send_message("❌ 無法解析訊息連結，請確認格式正確", ephemeral=True)
+                return
+        else:
+            if channel is None:
+                channel = interaction.channel
+            try:
+                async for msg in channel.history(limit=100):
+                    if msg.content == message:
+                        msg_obj = msg
+                        break
+                if msg_obj is None:
+                    await interaction.response.send_message("❌ 找不到符合的訊息", ephemeral=True)
+                    return
+            except Exception:
+                await interaction.response.send_message("❌ 無法取得頻道訊息", ephemeral=True)
+                return
+
+        # 移除設定
+        guild_roles = self.reaction_roles.get(interaction.guild_id, {})
+        msg_roles = guild_roles.get(msg_obj.id, {})
+        if emoji in msg_roles:
+            del msg_roles[emoji]
+            await interaction.response.send_message(f"✅ 已移除 {emoji} 的反應身分組", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 找不到該反應身分組設定", ephemeral=True)
+
+    # 監聽添加反應事件
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        guild_id = payload.guild_id
+        if guild_id not in self.reaction_roles:
+            return
+        guild_roles = self.reaction_roles[guild_id]
+        if payload.message_id not in guild_roles:
+            return
+        msg_roles = guild_roles[payload.message_id]
+        if str(payload.emoji) not in msg_roles:
+            return
+        guild = self.bot.get_guild(guild_id)
+        member = guild.get_member(payload.user_id)
+        if member is None or member.bot:
+            return
+        role_id = msg_roles[str(payload.emoji)]
+        role = guild.get_role(role_id)
+        if role:
+            try:
                 await member.add_roles(role)
+            except:
+                pass
 
+    # 監聽移除反應事件
     @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload):
-        if payload.message_id in self.reaction_roles:
-            guild = self.bot.get_guild(payload.guild_id)
-            member = guild.get_member(payload.user_id)
-            if member.bot:
-                return
-            emoji = str(payload.emoji)
-            role_id = self.reaction_roles[payload.message_id].get(emoji)
-            if role_id:
-                role = guild.get_role(role_id)
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        guild_id = payload.guild_id
+        if guild_id not in self.reaction_roles:
+            return
+        guild_roles = self.reaction_roles[guild_id]
+        if payload.message_id not in guild_roles:
+            return
+        msg_roles = guild_roles[payload.message_id]
+        if str(payload.emoji) not in msg_roles:
+            return
+        guild = self.bot.get_guild(guild_id)
+        member = guild.get_member(payload.user_id)
+        if member is None or member.bot:
+            return
+        role_id = msg_roles[str(payload.emoji)]
+        role = guild.get_role(role_id)
+        if role:
+            try:
                 await member.remove_roles(role)
+            except:
+                pass
 # =========================
 # ⚡ Cog: 遊戲指令
 # =========================
