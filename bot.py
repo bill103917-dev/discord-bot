@@ -7,6 +7,7 @@ import asyncio
 import re
 from typing import List, Optional
 from aiohttp import web
+from discord import ui
 
 # =========================
 # ⚡ 基本設定
