@@ -307,89 +307,63 @@ class ReactionRoleCog(commands.Cog):
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_games = {}  # {guild_id: [list of active games]}
+        # 每個 guild 可以同時有多場遊戲
+        self.active_games = {}
 
-    # -------------------------
-    # RPS 邀請指令
-    # -------------------------
-from discord import Interaction
-from discord import app_commands
-
-@app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
-async def rps_invite(
-    self, 
-    interaction: Interaction,  # <- 加上型別註解
-    rounds: int = 3,
-    opponent: discord.Member = None,
-    vs_bot: bool = True
-):
-    async def rps_invite(
-    self, 
-    interaction: Interaction, 
-    rounds: int = 3, 
-    opponent: Optional[discord.Member] = None, 
-    vs_bot: bool = True
-):
-        guild_id = interaction.guild_id
-    if guild_id not in self.active_games:
-        self.active_games[guild_id] = []
-
-    view = RPSInviteView(self.bot, interaction.user, opponent, rounds, vs_bot, self.active_games[guild_id])
-    msg = await interaction.response.send_message(
-        content=f"🎮 {interaction.user.mention} 發起剪刀石頭布對戰！\n指定對手：{opponent.mention if opponent else '不限'}\n局數：{rounds}\n是否與機器人對戰：{'是' if vs_bot else '否'}",
-        view=view,
-        ephemeral=False
+    @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
+    @app_commands.describe(
+        rounds="局數 (預設 3)",
+        opponent="指定玩家 (可選，不選則所有人可加入)",
+        vs_bot="是否與機器人對戰"
     )
-    view.message = await interaction.original_response()
-    self.active_games[guild_id].append(view)
-        
+    async def rps_invite(self, interaction, rounds: int = 3, opponent: discord.Member = None, vs_bot: bool = True):
+        guild_id = interaction.guild.id
+        if guild_id not in self.active_games:
+            self.active_games[guild_id] = []
 
-# -------------------------
-# RPS 邀請 View
-# -------------------------
-class RPSInviteView(ui.View):
-    def __init__(self, bot, host, opponent, rounds, vs_bot, active_games):
-        super().__init__(timeout=60)
+        view = RPSView(self.bot, rounds, opponent, vs_bot)
+        self.active_games[guild_id].append(view)
+
+        opponent_text = f"{opponent.mention}" if opponent else "所有人"
+        await interaction.response.send_message(
+            f"🎮 {opponent_text}，有 {rounds} 局的剪刀石頭布對戰邀請！\n按下加入開始遊戲，按取消結束邀請。",
+            view=view
+        )
+
+class RPSView(ui.View):
+    def __init__(self, bot, rounds: int, opponent: discord.Member = None, vs_bot: bool = True):
+        super().__init__(timeout=None)
         self.bot = bot
-        self.host = host
-        self.opponent = opponent
         self.rounds = rounds
+        self.opponent = opponent
         self.vs_bot = vs_bot
-        self.active_games = active_games
-        self.player1 = host
-        self.player2 = None
+        self.players = {}
+        self.current_round = 0
         self.message = None
-        self.game_started = False
 
-    async def on_timeout(self):
-        if not self.game_started:
-            await self.message.edit(content="❌ 對戰邀請已過期", view=None)
-            if self in self.active_games:
-                self.active_games.remove(self)
-
-    @ui.button(label="加入", style=discord.ButtonStyle.success)
-    async def join(self, interaction: Interaction, button: ui.Button):
-        if self.game_started:
-            await interaction.response.send_message("❌ 遊戲已經開始", ephemeral=True)
-            return
-
-        if self.opponent and interaction.user.id != self.opponent.id:
+    async def interaction_check(self, interaction):
+        if self.opponent and interaction.user != self.opponent:
             await interaction.response.send_message("❌ 你不是被邀請的人", ephemeral=True)
-            return
+            return False
+        return True
 
-        self.player2 = interaction.user
-        self.game_started = True
-        await interaction.response.edit_message(content=f"✅ {self.player1.mention} 與 {self.player2.mention} 對戰開始！", view=None)
-        await self.start_game()
-
-    @ui.button(label="取消", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: Interaction, button: ui.Button):
-        if interaction.user != self.host:
-            await interaction.response.send_message("❌ 只有發起者可以取消邀請", ephemeral=True)
+    @ui.button(label="加入", style=discord.ButtonStyle.green)
+    async def join_game(self, interaction, button):
+        if interaction.user in self.players:
+            await interaction.response.send_message("你已加入遊戲", ephemeral=True)
             return
-        await interaction.response.edit_message(content="❌ 對戰已取消", view=None)
-        if self in self.active_games:
-            self.active_games.remove(self)
+        self.players[interaction.user] = None
+        await interaction.response.send_message(f"✅ {interaction.user.mention} 已加入遊戲", ephemeral=True)
+        if self.vs_bot and not self.opponent:
+            # 自動加入機器人
+            self.players[self.bot.user] = None
+
+    @ui.button(label="取消", style=discord.ButtonStyle.red)
+    async def cancel_game(self, interaction, button):
+        await interaction.message.edit(content="❌ 遊戲已取消", view=None)
+        self.stop()
+
+# 可以後續再加出拳的邏輯
 
     async def start_game(self):
         view = RPSGameView(self.bot, self.player1, self.player2, self.rounds, self.vs_bot)
@@ -465,6 +439,7 @@ class RPSGameView(ui.View):
 
         if (self.player1.id in self.choices) and (self.player2.id in self.choices or self.vs_bot):
             await self.round_result()
+
 
     @app_commands.command(name="draw", description="隨機抽選一個選項")
     @app_commands.describe(options="輸入多個選項，用逗號或空格分隔")
