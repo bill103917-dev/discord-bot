@@ -304,19 +304,131 @@ class FunCog(commands.Cog):
         self.bot = bot
         self.rps_choices = {"剪刀":"✂️", "石頭":"🪨", "布":"📄"}
 
-    @app_commands.command(name="rps", description="剪刀石頭布")
-    async def rps(self, interaction: discord.Interaction, choice: str):
-        if choice not in self.rps_choices:
-            await interaction.response.send_message("❌ 請輸入 剪刀/石頭/布", ephemeral=True)
+
+        self.active_games = {}  # {guild_id: game_info}
+
+    class RPSView(ui.View):
+        EMOJIS = {"剪刀":"✂️","石頭":"🪨","布":"📄"}
+
+        def __init__(self, game_cog, rounds, allowed_players, vs_bot):
+            super().__init__(timeout=None)
+            self.game_cog = game_cog
+            self.rounds = rounds
+            self.allowed_players = allowed_players  # None = 所有人
+            self.vs_bot = vs_bot
+            self.players = {}  # {player_id: {"score": 0}}
+            self.current_round = 1
+            self.choices = {}  # 本局出拳
+
+        async def join_game(self, interaction: Interaction):
+            if self.allowed_players and interaction.user.id not in self.allowed_players:
+                await interaction.response.send_message("❌ 你沒有被邀請參加這場遊戲！", ephemeral=True)
+                return
+            if interaction.user.id in self.players:
+                await interaction.response.send_message("❌ 你已經加入遊戲了！", ephemeral=True)
+                return
+            self.players[interaction.user.id] = {"score": 0}
+            mention_text = f"（邀請玩家：{interaction.user.mention}）" if self.allowed_players else ""
+            await interaction.response.send_message(f"✅ {interaction.user.mention} 已加入遊戲！{mention_text}", ephemeral=True)
+            await self.update_status(interaction)
+
+        async def button_callback(self, interaction: Interaction, choice: str):
+            if interaction.user.id not in self.players:
+                await interaction.response.send_message("❌ 你不是這場遊戲的玩家！", ephemeral=True)
+                return
+
+            self.choices[interaction.user.id] = choice
+            await self.update_status(interaction)
+
+            # 檢查是否所有玩家已出拳
+            if len(self.choices) == len(self.players):
+                results_text = ""
+                # 計算每個玩家對機器人的勝負
+                if self.vs_bot:
+                    bot_choice = random.choice(["剪刀","石頭","布"])
+                    for pid, data in self.players.items():
+                        player_choice = self.choices[pid]
+                        if player_choice == bot_choice:
+                            result = "平手 🤝"
+                        elif (player_choice=="剪刀" and bot_choice=="布") or \
+                             (player_choice=="石頭" and bot_choice=="剪刀") or \
+                             (player_choice=="布" and bot_choice=="石頭"):
+                            result = "你贏了 🎉"
+                            data["score"] += 1
+                        else:
+                            result = "你輸了 😢"
+                        results_text += f"<@{pid}> {self.EMOJIS[player_choice]} vs 🤖 {self.EMOJIS[bot_choice]} → {result}\n"
+                else:
+                    # 多人對戰
+                    # 收集出拳並比對所有玩家互相計算勝負
+                    choices = {pid:self.choices[pid] for pid in self.players}
+                    for pid, data in self.players.items():
+                        wins = 0
+                        for opp_id, opp_choice in choices.items():
+                            if pid == opp_id:
+                                continue
+                            if (choices[pid]=="剪刀" and opp_choice=="布") or \
+                               (choices[pid]=="石頭" and opp_choice=="剪刀") or \
+                               (choices[pid]=="布" and opp_choice=="石頭"):
+                                wins += 1
+                        data["score"] += wins
+                        results_text += f"<@{pid}> 出 {self.EMOJIS[choices[pid]]} → 勝 {wins} 場\n"
+
+                self.current_round += 1
+                self.choices = {}
+                if self.current_round > self.rounds:
+                    final_scores = "\n".join([f"<@{pid}> 總分: {data['score']}" for pid, data in self.players.items()])
+                    await interaction.message.edit(content=f"🎮 遊戲結束！\n{results_text}\n🏆 最終結果：\n{final_scores}", view=None)
+                    self.game_cog.active_games.pop(interaction.guild_id, None)
+                else:
+                    await interaction.message.edit(content=f"第 {self.current_round} 局開始！選擇你的出拳：", view=self)
+
+        async def update_status(self, interaction: Interaction):
+            # 顯示每個玩家出拳狀態
+            status_lines = []
+            for pid in self.players:
+                if pid in self.choices:
+                    status_lines.append(f"<@{pid}> 出 {self.EMOJIS[self.choices[pid]]}")
+                else:
+                    status_lines.append(f"<@{pid}> 出 ❓")
+            await interaction.message.edit(content=f"🎮 第 {self.current_round} 局\n" + "\n".join(status_lines), view=self)
+
+    @app_commands.command(name="rps_invite", description="邀請玩家玩剪刀石頭布")
+    @app_commands.describe(
+        rounds="總局數",
+        opponent="指定玩家（可選）",
+        vs_bot="是否與機器人 PK"
+    )
+    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: app_commands.User = None, vs_bot: bool = True):
+        if interaction.guild_id in self.active_games:
+            await interaction.response.send_message("❌ 本伺服器已有進行中的 RPS 遊戲", ephemeral=True)
             return
-        bot_choice = random.choice(list(self.rps_choices.keys()))
-        if choice == bot_choice:
-            result = "平手 🤝"
-        elif (choice=="剪刀" and bot_choice=="布") or (choice=="石頭" and bot_choice=="剪刀") or (choice=="布" and bot_choice=="石頭"):
-            result = "你贏了 🎉"
+
+        allowed_players = [opponent.id] if opponent else None
+
+        view = self.RPSView(self, rounds, allowed_players, vs_bot)
+
+        # 加入按鈕
+        join_button = ui.Button(label="加入遊戲", style=discord.ButtonStyle.success)
+        join_button.callback = lambda inter: view.join_game(inter)
+        view.add_item(join_button)
+
+        # 出拳按鈕
+        for c in ["剪刀","石頭","布"]:
+            button = ui.Button(label=c, style=discord.ButtonStyle.primary)
+            button.callback = lambda inter, choice=c: view.button_callback(inter, choice)
+            view.add_item(button)
+
+        invite_text = f"🎮 {interaction.user.mention} 發起了剪刀石頭布遊戲！總局數：{rounds}\n"
+        if opponent:
+            invite_text += f"邀請玩家：{opponent.mention}\n"
         else:
-            result = "你輸了 😢"
-        await interaction.response.send_message(f"你出 {self.rps_choices[choice]} ({choice})\n我出 {self.rps_choices[bot_choice]} ({bot_choice})\n結果：{result}")
+            invite_text += "任何人都可以加入\n"
+        invite_text += f"是否與機器人 PK: {'是' if vs_bot else '否'}"
+
+        await interaction.response.send_message(invite_text, view=view)
+        self.active_games[interaction.guild_id] = {"view": view}
+
 
     @app_commands.command(name="draw", description="隨機抽選一個選項")
     @app_commands.describe(options="輸入多個選項，用逗號或空格分隔")
