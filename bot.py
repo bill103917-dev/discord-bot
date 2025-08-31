@@ -317,7 +317,6 @@ async def rps_invite(self, interaction, rounds: int = 3, opponent: discord.Membe
     rounds="遊戲局數",
     opponent="指定對手（可選）",
     vs_bot="是否跟機器人對戰"
-)
 async def rps_invite(
     self, 
     interaction: Interaction, 
