@@ -11,6 +11,7 @@ from discord import ui
 from discord import Interaction
 from discord import TextChannel, User, Message
 from discord import Interaction, User, ui
+from discord import ui, Interaction
 # =========================
 # ⚡ 基本設定
 # =========================
@@ -305,118 +306,78 @@ class ReactionRoleCog(commands.Cog):
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.rps_choices = {"剪刀":"✂️", "石頭":"🪨", "布":"📄"}
-        self.active_rps = {}  # key: message.id, value: 對戰資料
+        self.active_rps = {}  # key: message.id, value: RPSView
 
-    @app_commands.command(name="rps_invite", description="發起剪刀石頭布對戰")
-    @app_commands.describe(rounds="局數", opponent="邀請的玩家", vs_bot="是否要和機器人對戰")
-    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: discord.Member = None, vs_bot: bool = True):
-        rounds = max(1, min(rounds, 10))  # 限制 1~10 局
-        players = [interaction.user.id]
-        if opponent:
-            players.append(opponent.id)
-        elif vs_bot:
-            players.append(self.bot.user.id)
+    @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布")
+    @app_commands.describe(
+        rounds="對戰局數",
+        opponent="指定對手 (可不選)",
+        vs_bot="是否同時與機器人對戰"
+    )
+    async def rps_invite(
+        self,
+        interaction: discord.Interaction,
+        rounds: int = 3,
+        opponent: discord.User = None,
+        vs_bot: bool = True
+    ):
+        view = self.RPSView(self, rounds, opponent, vs_bot)
+        content = f"🎮 第 1 局\n"
+        msg = await interaction.response.send_message(content, view=view)
+        msg_obj = await interaction.original_response()
+        view.message_id = msg_obj.id
+        self.active_rps[msg_obj.id] = view
 
-        content = f"🎮 新的 RPS 對戰！局數：{rounds}\n"
-        if opponent:
-            content += f"邀請玩家：<@{opponent.id}>\n"
-        content += "按下加入即可參加！"
+    class RPSView(ui.View):
+        def __init__(self, cog, rounds, opponent, vs_bot):
+            super().__init__(timeout=None)
+            self.cog = cog
+            self.rounds = rounds
+            self.current_round = 1
+            self.opponent = opponent
+            self.vs_bot = vs_bot
+            self.players = {}  # user_id -> choice
+            self.message_id = None
 
-        view = RPSView(self, players, rounds)
-        await interaction.response.send_message(content, view=view)
-        # 儲存對戰資料
-        message = await interaction.original_response()
-        self.active_rps[message.id] = view
+        @ui.button(label="剪刀", style=discord.ButtonStyle.primary)
+        async def scissors(self, interaction: Interaction, button: ui.Button):
+            await self.make_choice(interaction, "剪刀")
 
-class RPSView(ui.View):
-    CHOICES = {"✂️": "剪刀", "🪨": "石頭", "📄": "布"}
+        @ui.button(label="石頭", style=discord.ButtonStyle.primary)
+        async def rock(self, interaction: Interaction, button: ui.Button):
+            await self.make_choice(interaction, "石頭")
 
-    def __init__(self, cog: FunCog, players, rounds):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.players = players  # 玩家 id
-        self.rounds = rounds
-        self.current_round = 1
-        self.choices = {}  # key: 玩家id, value: 選擇
-        self.message = None
+        @ui.button(label="布", style=discord.ButtonStyle.primary)
+        async def paper(self, interaction: Interaction, button: ui.Button):
+            await self.make_choice(interaction, "布")
 
-        # 加入按鈕
-        for emoji in self.CHOICES:
-            self.add_item(RPSButton(emoji, self))
+        async def make_choice(self, interaction: Interaction, choice: str):
+            if self.opponent and interaction.user.id != self.opponent.id and interaction.user.id != interaction.client.user.id:
+                await interaction.response.send_message("❌ 你不是被邀請的人！", ephemeral=True)
+                return
 
-        # 加入開始/取消按鈕
-        self.add_item(JoinButton("加入", self))
-        self.add_item(CancelButton("取消", self))
+            self.players[interaction.user.id] = choice
+            await interaction.response.send_message(f"✅ 你已選擇 {choice}", ephemeral=True)
 
-    async def update_message(self):
-        lines = []
-        for pid in self.players:
-            choice = self.choices.get(pid, "❓")
-            lines.append(f"<@{pid}>: {choice}")
-        content = f"🎮 第 {self.current_round} 局\n" + "\n".join(lines)
-        await self.message.edit(content=content, view=self)
+            # 檢查是否都已出手
+            expected_players = [self.opponent.id, interaction.client.user.id] if self.opponent else list(self.players.keys())
+            if all(pid in self.players for pid in expected_players):
+                await self.next_round(interaction)
 
-    async def end_round(self):
-        # 檢查出手玩家
-        if self.players[1] == self.cog.bot.user.id:
-            self.choices[self.cog.bot.user.id] = random.choice(list(self.CHOICES.values()))
+        async def next_round(self, interaction: Interaction):
+            # 判定勝負
+            results = []
+            for user_id, choice in self.players.items():
+                results.append(f"<@{user_id}> 出 {choice}")
 
-        if len(self.choices) == len(self.players):
-            p1, p2 = self.players
-            result = self.calc_result(self.choices[p1], self.choices[p2])
-            await self.message.channel.send(f"🏆 回合結果：<@{p1}> {self.choices[p1]} vs <@{p2}> {self.choices[p2]} → {result}")
-            self.choices = {}
+            content = f"🎮 第 {self.current_round} 局結果：\n" + "\n".join(results)
+            await interaction.message.edit(content=content, view=self)
             self.current_round += 1
+            self.players.clear()
+
             if self.current_round > self.rounds:
-                await self.message.channel.send("🎉 對戰結束！")
-                del self.cog.active_rps[self.message.id]
-                self.stop()
-            else:
-                await self.update_message()
-
-    def calc_result(self, c1, c2):
-        if c1 == c2:
-            return "平手 🤝"
-        wins = {"剪刀": "布", "石頭": "剪刀", "布": "石頭"}
-        return f"<@{self.players[0]}> 勝利 🎉" if wins[c1] == c2 else f"<@{self.players[1]}> 勝利 🎉"
-
-class RPSButton(ui.Button):
-    def __init__(self, emoji, view):
-        super().__init__(style=discord.ButtonStyle.secondary, emoji=emoji)
-        self.view = view
-
-    async def callback(self, interaction: Interaction):
-        if interaction.user.id not in self.view.players:
-            await interaction.response.send_message("❌ 你不是此對戰玩家", ephemeral=True)
-            return
-        self.view.choices[interaction.user.id] = self.view.CHOICES[self.emoji]
-        await interaction.response.defer()
-        await self.view.end_round()
-
-class JoinButton(ui.Button):
-    def __init__(self, label, view):
-        super().__init__(style=discord.ButtonStyle.success, label=label)
-        self.view = view
-
-    async def callback(self, interaction: Interaction):
-        if interaction.user.id not in self.view.players:
-            self.view.players.append(interaction.user.id)
-        await interaction.response.defer()
-        await self.view.update_message()
-
-class CancelButton(ui.Button):
-    def __init__(self, label, view):
-        super().__init__(style=discord.ButtonStyle.danger, label=label)
-        self.view = view
-
-    async def callback(self, interaction: Interaction):
-        if interaction.user.id not in self.view.players:
-            await interaction.response.send_message("❌ 你沒有權限取消此對戰", ephemeral=True)
-            return
-        await interaction.response.send_message("❌ 對戰已取消")
-        del self.view.cog.active_rps[self.view.message.id]
-        self.view.stop()
+                await interaction.message.edit(content=content + "\n🏆 對戰結束！", view=None)
+                del self.cog.active_rps[self.message_id]
 
 
     @app_commands.command(name="draw", description="隨機抽選一個選項")
