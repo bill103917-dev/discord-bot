@@ -306,79 +306,149 @@ class ReactionRoleCog(commands.Cog):
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_rps = {}  # key: message.id, value: RPSView
+        self.active_games = {}  # {guild_id: [list of active games]}
 
-    @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布")
-    @app_commands.describe(
-        rounds="對戰局數",
-        opponent="指定對手 (可不選)",
-        vs_bot="是否同時與機器人對戰"
-    )
-    async def rps_invite(
-        self,
-        interaction: discord.Interaction,
-        rounds: int = 3,
-        opponent: discord.User = None,
-        vs_bot: bool = True
-    ):
-        view = self.RPSView(self, rounds, opponent, vs_bot)
-        content = f"🎮 第 1 局\n"
-        msg = await interaction.response.send_message(content, view=view)
-        msg_obj = await interaction.original_response()
-        view.message_id = msg_obj.id
-        self.active_rps[msg_obj.id] = view
+    # -------------------------
+    # RPS 邀請指令
+    # -------------------------
+    @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
+    @app_commands.describe(rounds="遊戲局數", opponent="指定對手（可選）", vs_bot="是否跟機器人對戰")
+    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: app_commands.Transform[discord.Member, app_commands.Member] = None, vs_bot: bool = True):
+        guild_id = interaction.guild_id
+        if guild_id not in self.active_games:
+            self.active_games[guild_id] = []
 
-    class RPSView(ui.View):
-        def __init__(self, cog, rounds, opponent, vs_bot):
-            super().__init__(timeout=None)
-            self.cog = cog
-            self.rounds = rounds
-            self.current_round = 1
-            self.opponent = opponent
-            self.vs_bot = vs_bot
-            self.players = {}  # user_id -> choice
-            self.message_id = None
+        view = RPSInviteView(self.bot, interaction.user, opponent, rounds, vs_bot, self.active_games[guild_id])
+        msg = await interaction.response.send_message(
+            content=f"🎮 {interaction.user.mention} 發起剪刀石頭布對戰！\n指定對手：{opponent.mention if opponent else '不限'}\n局數：{rounds}\n是否與機器人對戰：{'是' if vs_bot else '否'}",
+            view=view,
+            ephemeral=False
+        )
+        view.message = await interaction.original_response()
+        self.active_games[guild_id].append(view)
+        
 
-        @ui.button(label="剪刀", style=discord.ButtonStyle.primary)
-        async def scissors(self, interaction: Interaction, button: ui.Button):
-            await self.make_choice(interaction, "剪刀")
+# -------------------------
+# RPS 邀請 View
+# -------------------------
+class RPSInviteView(ui.View):
+    def __init__(self, bot, host, opponent, rounds, vs_bot, active_games):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.host = host
+        self.opponent = opponent
+        self.rounds = rounds
+        self.vs_bot = vs_bot
+        self.active_games = active_games
+        self.player1 = host
+        self.player2 = None
+        self.message = None
+        self.game_started = False
 
-        @ui.button(label="石頭", style=discord.ButtonStyle.primary)
-        async def rock(self, interaction: Interaction, button: ui.Button):
-            await self.make_choice(interaction, "石頭")
+    async def on_timeout(self):
+        if not self.game_started:
+            await self.message.edit(content="❌ 對戰邀請已過期", view=None)
+            if self in self.active_games:
+                self.active_games.remove(self)
 
-        @ui.button(label="布", style=discord.ButtonStyle.primary)
-        async def paper(self, interaction: Interaction, button: ui.Button):
-            await self.make_choice(interaction, "布")
+    @ui.button(label="加入", style=discord.ButtonStyle.success)
+    async def join(self, interaction: Interaction, button: ui.Button):
+        if self.game_started:
+            await interaction.response.send_message("❌ 遊戲已經開始", ephemeral=True)
+            return
 
-        async def make_choice(self, interaction: Interaction, choice: str):
-            if self.opponent and interaction.user.id != self.opponent.id and interaction.user.id != interaction.client.user.id:
-                await interaction.response.send_message("❌ 你不是被邀請的人！", ephemeral=True)
-                return
+        if self.opponent and interaction.user.id != self.opponent.id:
+            await interaction.response.send_message("❌ 你不是被邀請的人", ephemeral=True)
+            return
 
-            self.players[interaction.user.id] = choice
-            await interaction.response.send_message(f"✅ 你已選擇 {choice}", ephemeral=True)
+        self.player2 = interaction.user
+        self.game_started = True
+        await interaction.response.edit_message(content=f"✅ {self.player1.mention} 與 {self.player2.mention} 對戰開始！", view=None)
+        await self.start_game()
 
-            # 檢查是否都已出手
-            expected_players = [self.opponent.id, interaction.client.user.id] if self.opponent else list(self.players.keys())
-            if all(pid in self.players for pid in expected_players):
-                await self.next_round(interaction)
+    @ui.button(label="取消", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: Interaction, button: ui.Button):
+        if interaction.user != self.host:
+            await interaction.response.send_message("❌ 只有發起者可以取消邀請", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="❌ 對戰已取消", view=None)
+        if self in self.active_games:
+            self.active_games.remove(self)
 
-        async def next_round(self, interaction: Interaction):
-            # 判定勝負
-            results = []
-            for user_id, choice in self.players.items():
-                results.append(f"<@{user_id}> 出 {choice}")
+    async def start_game(self):
+        view = RPSGameView(self.bot, self.player1, self.player2, self.rounds, self.vs_bot)
+        msg = await self.message.channel.send(f"🎮 第1局\n{self.player1.mention}: ❓\n{self.player2.mention if self.player2 else '機器人'}: ❓", view=view)
 
-            content = f"🎮 第 {self.current_round} 局結果：\n" + "\n".join(results)
-            await interaction.message.edit(content=content, view=self)
-            self.current_round += 1
-            self.players.clear()
 
-            if self.current_round > self.rounds:
-                await interaction.message.edit(content=content + "\n🏆 對戰結束！", view=None)
-                del self.cog.active_rps[self.message_id]
+# -------------------------
+# RPS 遊戲 View
+# -------------------------
+class RPSGameView(ui.View):
+    CHOICES = {"剪刀": "✂️", "石頭": "🪨", "布": "📄"}
 
+    def __init__(self, bot, player1, player2, rounds, vs_bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.player1 = player1
+        self.player2 = player2
+        self.rounds = rounds
+        self.vs_bot = vs_bot
+        self.current_round = 1
+        self.choices = {}
+        self.message = None
+
+    async def update_message(self):
+        lines = [f"🎮 第 {self.current_round} 局"]
+        p1_choice = self.CHOICES.get(self.choices.get(self.player1.id), "❓")
+        p2_choice = self.CHOICES.get(self.choices.get(self.player2.id), "❓") if self.player2 else "❓"
+        lines.append(f"{self.player1.mention}: {p1_choice}")
+        lines.append(f"{self.player2.mention if self.player2 else '機器人'}: {p2_choice}")
+        await self.message.edit(content="\n".join(lines), view=self)
+
+    async def round_result(self):
+        p1 = self.choices.get(self.player1.id)
+        p2 = self.choices.get(self.player2.id) or random.choice(list(self.CHOICES.keys())) if self.vs_bot else None
+        if not p1 or not p2:
+            return
+
+        if p1 == p2:
+            result = "平手 🤝"
+        elif (p1 == "剪刀" and p2 == "布") or (p1 == "石頭" and p2 == "剪刀") or (p1 == "布" and p2 == "石頭"):
+            result = f"{self.player1.mention} 贏了 🎉"
+        else:
+            result = f"{self.player2.mention if self.player2 else '機器人'} 贏了 😢"
+
+        await self.message.channel.send(f"第 {self.current_round} 局結果：{result}")
+        self.choices = {}
+        self.current_round += 1
+        if self.current_round > self.rounds:
+            await self.message.channel.send("🏆 遊戲結束！")
+            self.stop()
+        else:
+            await self.update_message()
+
+    @ui.button(label="剪刀", style=discord.ButtonStyle.primary)
+    async def scissor(self, interaction: Interaction, button: ui.Button):
+        await self.select(interaction, "剪刀")
+
+    @ui.button(label="石頭", style=discord.ButtonStyle.primary)
+    async def rock(self, interaction: Interaction, button: ui.Button):
+        await self.select(interaction, "石頭")
+
+    @ui.button(label="布", style=discord.ButtonStyle.primary)
+    async def paper(self, interaction: Interaction, button: ui.Button):
+        await self.select(interaction, "布")
+
+    async def select(self, interaction: Interaction, choice: str):
+        if interaction.user.id not in [self.player1.id, self.player2.id]:
+            await interaction.response.send_message("❌ 你沒有參加這場遊戲", ephemeral=True)
+            return
+
+        self.choices[interaction.user.id] = choice
+        await self.update_message()
+
+        if (self.player1.id in self.choices) and (self.player2.id in self.choices or self.vs_bot):
+            await self.round_result()
 
     @app_commands.command(name="draw", description="隨機抽選一個選項")
     @app_commands.describe(options="輸入多個選項，用逗號或空格分隔")
