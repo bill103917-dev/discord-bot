@@ -10,6 +10,7 @@ from aiohttp import web
 from discord import ui
 from discord import Interaction
 from discord import TextChannel, User, Message
+from discord import Interaction, User, ui
 # =========================
 # ⚡ 基本設定
 # =========================
@@ -401,7 +402,7 @@ class FunCog(commands.Cog):
         opponent="指定玩家（可選）",
         vs_bot="是否與機器人 PK"
     )
-    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: app_commands.User = None, vs_bot: bool = True):
+    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: discord.User = None, vs_bot: bool = True):
         if interaction.guild_id in self.active_games:
             await interaction.response.send_message("❌ 本伺服器已有進行中的 RPS 遊戲", ephemeral=True)
             return
