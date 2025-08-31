@@ -323,7 +323,7 @@ async def rps_invite(
     opponent: discord.Member = None,
     vs_bot: bool = True
 ):
-async def rps_invite(
+    async def rps_invite(
     self, 
     interaction: Interaction, 
     rounds: int = 3, 
