@@ -112,57 +112,52 @@ class UtilityCog(commands.Cog):
 #=========================
 # ⚡ Cog: 反應身分組 (訊息連結版, 中文化)
 # =========================
-class ReactionRoleCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.reaction_roles = {}  # key: message_id, value: {emoji: role_id}
+@app_commands.command(
+    name="reactionrole",
+    description="新增反應身分組（管理員用）"
+)
+@app_commands.describe(
+    channel="選擇發送訊息的頻道（可不選，填訊息連結就不用）",
+    message="要反應的訊息文字或訊息連結",
+    emoji="對應的表情符號",
+    role="要給的身分組"
+)
+async def reactionrole(
+    self,
+    interaction: discord.Interaction,
+    message: str,
+    emoji: str,
+    role: discord.Role,
+    channel: Optional[discord.TextChannel] = None
+):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
+        return
 
-    @app_commands.command(
-        name="reactionrole",
-        description="新增反應身分組（管理員用）"
-    )
-    @app_commands.describe(
-        channel="選擇發送訊息的頻道（可不選，填訊息連結就不用）",
-        message="要反應的訊息內容或訊息連結",
-        emoji="對應的表情符號",
-        role="要給的身分組"
-    )
-    async def reactionrole(
-        self,
-        interaction: discord.Interaction,
-        message: str,
-        emoji: str,
-        role: discord.Role,
-        channel: Optional[discord.TextChannel] = None
-    ):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
+    # 發送訊息或解析訊息連結
+    msg_obj = None
+    if message.startswith("https://"):
+        try:
+            parts = message.split("/")
+            msg_id = int(parts[-1])
+            ch_id = int(parts[-2])
+            ch = interaction.guild.get_channel(ch_id)
+            msg_obj = await ch.fetch_message(msg_id)
+        except:
+            await interaction.response.send_message("❌ 無法解析訊息連結", ephemeral=True)
             return
+    else:
+        if not channel:
+            channel = interaction.channel
+        msg_obj = await channel.send(message)
 
-        # 發送訊息或解析訊息連結
-        msg_obj = None
-        if message.startswith("https://"):
-            try:
-                parts = message.split("/")
-                msg_id = int(parts[-1])
-                ch_id = int(parts[-2])
-                ch = interaction.guild.get_channel(ch_id)
-                msg_obj = await ch.fetch_message(msg_id)
-            except:
-                await interaction.response.send_message("❌ 無法解析訊息連結", ephemeral=True)
-                return
-        else:
-            if not channel:
-                channel = interaction.channel
-            msg_obj = await channel.send(message)
+    # 設定反應身分組
+    if msg_obj.id not in self.reaction_roles:
+        self.reaction_roles[msg_obj.id] = {}
+    self.reaction_roles[msg_obj.id][emoji] = role.id
 
-        # 設定反應身分組
-        if msg_obj.id not in self.reaction_roles:
-            self.reaction_roles[msg_obj.id] = {}
-        self.reaction_roles[msg_obj.id][emoji] = role.id
-
-        await msg_obj.add_reaction(emoji)
-        await interaction.response.send_message(f"✅ 已設定反應身分組於訊息 {msg_obj.id}", ephemeral=True)
+    await msg_obj.add_reaction(emoji)
+    await interaction.response.send_message(f"✅ 已設定反應身分組於訊息 {msg_obj.id}", ephemeral=True)
 
     @app_commands.command(
         name="stop_reactionrole",
