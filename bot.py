@@ -312,11 +312,17 @@ class FunCog(commands.Cog):
     # -------------------------
     # RPS 邀請指令
     # -------------------------
+from discord import Interaction
+from discord import app_commands
+
 @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
-async def rps_invite(self, interaction, rounds: int = 3, opponent: discord.Member = None, vs_bot: bool = True):
-    rounds="遊戲局數",
-    opponent="指定對手（可選）",
-    vs_bot="是否跟機器人對戰"
+async def rps_invite(
+    self, 
+    interaction: Interaction,  # <- 加上型別註解
+    rounds: int = 3,
+    opponent: discord.Member = None,
+    vs_bot: bool = True
+):
 async def rps_invite(
     self, 
     interaction: Interaction, 
