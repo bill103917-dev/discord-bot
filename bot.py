@@ -12,6 +12,7 @@ from discord import Interaction
 from discord import TextChannel, User, Message
 from discord import Interaction, User, ui
 from discord import ui, Interaction
+from typing import Optional
 # =========================
 # ⚡ 基本設定
 # =========================
@@ -311,21 +312,31 @@ class FunCog(commands.Cog):
     # -------------------------
     # RPS 邀請指令
     # -------------------------
-    @app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
-    @app_commands.describe(rounds="遊戲局數", opponent="指定對手（可選）", vs_bot="是否跟機器人對戰")
-    async def rps_invite(self, interaction: Interaction, rounds: int = 3, opponent: app_commands.Transform[discord.Member, app_commands.Member] = None, vs_bot: bool = True):
-        guild_id = interaction.guild_id
-        if guild_id not in self.active_games:
-            self.active_games[guild_id] = []
+@app_commands.command(name="rps_invite", description="邀請玩家剪刀石頭布對戰")
+@app_commands.describe(
+    rounds="遊戲局數",
+    opponent="指定對手（可選）",
+    vs_bot="是否跟機器人對戰"
+)
+async def rps_invite(
+    self, 
+    interaction: Interaction, 
+    rounds: int = 3, 
+    opponent: Optional[discord.Member] = None, 
+    vs_bot: bool = True
+):
+    guild_id = interaction.guild_id
+    if guild_id not in self.active_games:
+        self.active_games[guild_id] = []
 
-        view = RPSInviteView(self.bot, interaction.user, opponent, rounds, vs_bot, self.active_games[guild_id])
-        msg = await interaction.response.send_message(
-            content=f"🎮 {interaction.user.mention} 發起剪刀石頭布對戰！\n指定對手：{opponent.mention if opponent else '不限'}\n局數：{rounds}\n是否與機器人對戰：{'是' if vs_bot else '否'}",
-            view=view,
-            ephemeral=False
-        )
-        view.message = await interaction.original_response()
-        self.active_games[guild_id].append(view)
+    view = RPSInviteView(self.bot, interaction.user, opponent, rounds, vs_bot, self.active_games[guild_id])
+    msg = await interaction.response.send_message(
+        content=f"🎮 {interaction.user.mention} 發起剪刀石頭布對戰！\n指定對手：{opponent.mention if opponent else '不限'}\n局數：{rounds}\n是否與機器人對戰：{'是' if vs_bot else '否'}",
+        view=view,
+        ephemeral=False
+    )
+    view.message = await interaction.original_response()
+    self.active_games[guild_id].append(view)
         
 
 # -------------------------
