@@ -330,7 +330,7 @@ async def rps_invite(
     opponent: Optional[discord.Member] = None, 
     vs_bot: bool = True
 ):
-    guild_id = interaction.guild_id
+        guild_id = interaction.guild_id
     if guild_id not in self.active_games:
         self.active_games[guild_id] = []
 
