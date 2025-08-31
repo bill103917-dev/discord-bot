@@ -8,7 +8,8 @@ import re
 from typing import List, Optional
 from aiohttp import web
 from discord import ui
-
+from discord import Interaction
+from discord import TextChannel, User, Message
 # =========================
 # ⚡ 基本設定
 # =========================
