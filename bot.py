@@ -378,12 +378,19 @@ async def keep_alive():
     
     return shutdown
 
-        # 註冊 Cogs
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(ReactionRoleCog(bot))
-        # DrawCog、AnnounceCog 也可以加，保持原始碼
+       async def main():
+    # 啟動 HTTP 保活
+    await keep_alive()
+
+    # 註冊 Cogs
+    await bot.add_cog(UtilityCog(bot))
+    await bot.add_cog(FunCog(bot))
+    await bot.add_cog(DrawCog(bot))
+    await bot.add_cog(AnnounceCog(bot))
+    await bot.add_cog(PingCog(bot))
+    await bot.add_cog(ReactionRoleCog(bot))
+
+    # 啟動 Bo
         shutdown_keep_alive = await keep_alive()
 try:
     await bot.start(TOKEN)
@@ -406,4 +413,5 @@ finally:
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()
+    await bot.start(TOKEN)
