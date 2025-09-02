@@ -627,23 +627,21 @@ async def on_ready():
     await bot.tree.sync()  # 同步 Slash commands
 
 async def main():
-    # 啟動 HTTP server
-    await keep_alive()
-
-    # 註冊 Cogs
-    await bot.add_cog(UtilityCog(bot))
-    await bot.add_cog(FunCog(bot))
-    await bot.add_cog(DrawCog(bot))
-    await bot.add_cog(AnnounceCog(bot))
-    await bot.add_cog(PingCog(bot))
-    await bot.add_cog(ReactionRoleCog(bot))
-    # 啟動 Bot
-  
-
-
-async def main():
     try:
+        # 啟動 HTTP 保活
+        await keep_alive()
+
+        # 註冊 Cogs
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(DrawCog(bot))
+        await bot.add_cog(AnnounceCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(ReactionRoleCog(bot))
+
+        # 啟動 Bot
         await bot.start(TOKEN)
+
     except discord.errors.HTTPException as e:
         if e.status == 429:
             print("⚠️ 觸發 Discord 429 限制：請稍等幾分鐘後再試！")
@@ -652,10 +650,11 @@ async def main():
         sys.exit(1)  # 強制結束，避免 Render / Railway 無限重啟
     except discord.LoginFailure:
         print("❌ Token 錯誤，請檢查並重新設定！")
-        sys.exit(1)  # 強制結束
+        sys.exit(1)
     except Exception as e:
         print(f"❌ 未知錯誤：{e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
