@@ -13,10 +13,15 @@ from discord import TextChannel, User, Message
 from discord import Interaction, User, ui
 from discord import ui, Interaction
 from typing import Optional
+import sys
+
 # =========================
 # ⚡ 基本設定
 # =========================
 TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN or TOKEN.strip() == "" or TOKEN.startswith(" "):
+    print("❌ TOKEN 沒有正確設定，請到環境變數檢查！")
+    sys.exit(1)
 OWNER_ID = 1238436456041676853
 SPECIAL_USER_IDS = [OWNER_ID]
 
