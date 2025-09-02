@@ -359,21 +359,24 @@ async def on_ready():
     print(f"✅ Bot 已啟動！登入身分：{bot.user}")
     await bot.tree.sync()
 
-async def main():
-    try:
-        # 保活 HTTP
-        async def keep_alive():
-            async def handle(request):
-                return web.Response(text="Bot is running!")
-            app = web.Application()
-            app.add_routes([web.get("/", handle)])
-            runner = web.AppRunner(app)
-            await runner.setup()
-            site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
-            await site.start()
-            print("✅ HTTP server running on port 8080")
-
-        await keep_alive()
+# 保活 HTTP
+async def keep_alive():
+    async def handle(request):
+        return web.Response(text="Bot is running!")
+    
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    await site.start()
+    print("✅ HTTP server running on port 8080")
+    
+    # 在程式結束時關閉
+    async def shutdown():
+        await runner.cleanup()
+    
+    return shutdown
 
         # 註冊 Cogs
         await bot.add_cog(UtilityCog(bot))
@@ -383,11 +386,10 @@ async def main():
         # DrawCog、AnnounceCog 也可以加，保持原始碼
         shutdown_keep_alive = await keep_alive()
 try:
-    await bot.start(TOKEN)
 finally:
     await shutdown_keep_alive()  # 確保 HTTP server 關閉
 
-        await bot.start(TOKEN)
+
 
     except discord.errors.HTTPException as e:
         if e.status == 429:
