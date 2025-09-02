@@ -363,7 +363,7 @@ async def on_ready():
 async def keep_alive():
     async def handle(request):
         return web.Response(text="Bot is running!")
-    
+
     app = web.Application()
     app.add_routes([web.get("/", handle)])
     runner = web.AppRunner(app)
@@ -371,48 +371,53 @@ async def keep_alive():
     site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
     await site.start()
     print("✅ HTTP server running on port 8080")
-    
+
     # 在程式結束時關閉
     async def shutdown():
         await runner.cleanup()
-    
+
     return shutdown
 
+# 主程式
 async def main():
-    # 啟動 HTTP 保活
-    await keep_alive()
+    try:
+        # 啟動 HTTP 保活
+        shutdown_keep_alive = await keep_alive()
 
-    # 註冊 Cogs
-    await bot.add_cog(UtilityCog(bot))
-    await bot.add_cog(FunCog(bot))
-    await bot.add_cog(DrawCog(bot))
-    await bot.add_cog(AnnounceCog(bot))
-    await bot.add_cog(PingCog(bot))
-    await bot.add_cog(ReactionRoleCog(bot))
+        # 註冊 Cogs
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(DrawCog(bot))
+        await bot.add_cog(AnnounceCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(ReactionRoleCog(bot))
 
-    # 啟動 Bo
-shutdown_keep_alive = await keep_alive()
-
-try:
-    await bot.start(TOKEN)
-finally:
-    await shutdown_keep_alive()  # 確保 HTTP server 關閉閉
-
-
+        # 啟動 Bot
+        await bot.start(TOKEN)
 
     except discord.errors.HTTPException as e:
         if e.status == 429:
             print("⚠️ 觸發 Discord 429 限制")
         else:
             print(f"❌ HTTP 錯誤：{e}")
-        sys.exit(1)
-    except discord.LoginFailure:
-        print("❌ Token 錯誤")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ 未知錯誤：{e}")
+        import sys
         sys.exit(1)
 
+    except discord.LoginFailure:
+        print("❌ Token 錯誤")
+        import sys
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"❌ 未知錯誤：{e}")
+        import sys
+        sys.exit(1)
+
+    finally:
+        # 確保 HTTP server 關閉
+        await shutdown_keep_alive()
+
+
 if __name__ == "__main__":
-    asyncio.run(main()
-    await bot.start(TOKEN)
+    import asyncio
+    asyncio.run(main())
