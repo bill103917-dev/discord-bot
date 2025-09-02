@@ -391,7 +391,8 @@ async def main():
     await bot.add_cog(ReactionRoleCog(bot))
 
     # 啟動 Bo
-        shutdown_keep_alive = await keep_alive()
+shutdown_keep_alive = await keep_alive()
+
 try:
     await bot.start(TOKEN)
 finally:
