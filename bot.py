@@ -386,8 +386,9 @@ async def keep_alive():
         # DrawCog、AnnounceCog 也可以加，保持原始碼
         shutdown_keep_alive = await keep_alive()
 try:
+    await bot.start(TOKEN)
 finally:
-    await shutdown_keep_alive()  # 確保 HTTP server 關閉
+    await shutdown_keep_alive()  # 確保 HTTP server 關閉閉
 
 
 
