@@ -96,20 +96,61 @@ class UtilityCog(commands.Cog):
     # ================
     # /公告 指令
     # ================
-    @app_commands.command(name="announce", description="發送公告")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def announce(self, interaction: discord.Interaction, channel: discord.TextChannel, *, content: str):
+    @app_commands.command(name="announce", description="發送公告（管理員限定）")
+    @app_commands.describe(
+        channel="要發送公告的頻道",
+        title="公告標題（可選，預設為 公告📣）",
+        content="公告內容",
+        color="Embed 顏色 (例如 red, blue, green, yellow, purple)",
+        ping_everyone="是否要 @everyone",
+        image_url="圖片網址（可選）"
+    )
+    async def announce(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        content: str,
+        title: str = None,
+        color: str = "blue",
+        ping_everyone: bool = False,
+        image_url: str = None
+    ):
+        # 檢查是否為管理員
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 你沒有管理員權限", ephemeral=True)
+            return
+
+        # 顏色轉換
+        colors = {
+            "red": discord.Color.red(),
+            "blue": discord.Color.blue(),
+            "green": discord.Color.green(),
+            "yellow": discord.Color.gold(),
+            "purple": discord.Color.purple()
+        }
+        embed_color = colors.get(color.lower(), discord.Color.blue())
+
+        # 如果沒填標題，使用預設
+        if not title:
+            title = "公告 📣"
+
+        # 建立 Embed
         embed = discord.Embed(
-            title="📢 公告",
+            title=title,
             description=content,
-            color=discord.Color.yellow()
+            color=embed_color,
+            timestamp=datetime.datetime.utcnow()
         )
+        embed.set_footer(text=f"發布者：{interaction.user.display_name}")
 
-        # ✅ 一定先回應使用者
-        await interaction.response.send_message(f"✅ 已在 {channel.mention} 發送公告", ephemeral=True)
+        if image_url:
+            embed.set_image(url=image_url)
 
-        # 再發送公告
-        await channel.send(embed=embed)
+        # 發送公告
+        msg_content = "@everyone " if ping_everyone else ""
+        await channel.send(content=msg_content, embed=embed)
+
+        await interaction.response.send_message(f"✅ 公告已發送到 {channel.mention}", ephemeral=True)
 
 
     @app_commands.command(name="calc", description="簡單計算器")
