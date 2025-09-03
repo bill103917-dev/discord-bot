@@ -55,14 +55,13 @@ class UtilityCog(commands.Cog):
 )
 async def say(
     self,
-    interaction: discord.Interaction,
+    interaction,  # ⚠️ 這裡不要加型別標註
     message: str,
     channel: Optional[discord.TextChannel] = None,
     embed: bool = False,
     title: Optional[str] = None,
     color: Optional[str] = None
 ):
-    # ✅ 只有管理員能用
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
         return
@@ -71,7 +70,6 @@ async def say(
 
     try:
         if embed:
-            # 顏色對照表
             color_map = {
                 "red": discord.Color.red(),
                 "green": discord.Color.green(),
