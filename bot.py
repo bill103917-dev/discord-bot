@@ -96,12 +96,21 @@ class UtilityCog(commands.Cog):
     # ================
     # /公告 指令
     # ================
+    import discord
+from discord.ext import commands
+from discord import app_commands
+import datetime
+
+class AnnounceCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
     @app_commands.command(name="announce", description="發送公告（管理員限定）")
     @app_commands.describe(
         channel="要發送公告的頻道",
-        title="公告標題（可選，預設為 公告📣）",
         content="公告內容",
-        color="Embed 顏色 (例如 red, blue, green, yellow, purple)",
+        title="公告標題（可選，預設為 公告📣）",
+        color="Embed 顏色 (red, blue, green, yellow, purple，預設 blue)",
         ping_everyone="是否要 @everyone",
         image_url="圖片網址（可選）"
     )
@@ -115,12 +124,12 @@ class UtilityCog(commands.Cog):
         ping_everyone: bool = False,
         image_url: str = None
     ):
-        # 檢查是否為管理員
+        # 管理員權限檢查
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ 你沒有管理員權限", ephemeral=True)
             return
 
-        # 顏色轉換
+        # 處理顏色
         colors = {
             "red": discord.Color.red(),
             "blue": discord.Color.blue(),
@@ -130,7 +139,7 @@ class UtilityCog(commands.Cog):
         }
         embed_color = colors.get(color.lower(), discord.Color.blue())
 
-        # 如果沒填標題，使用預設
+        # 標題預設
         if not title:
             title = "公告 📣"
 
@@ -146,10 +155,9 @@ class UtilityCog(commands.Cog):
         if image_url:
             embed.set_image(url=image_url)
 
-        # 發送公告
+        # 發送
         msg_content = "@everyone " if ping_everyone else ""
         await channel.send(content=msg_content, embed=embed)
-
         await interaction.response.send_message(f"✅ 公告已發送到 {channel.mention}", ephemeral=True)
 
 
