@@ -96,14 +96,6 @@ class UtilityCog(commands.Cog):
     # ================
     # /公告 指令
     # ================
-    import discord
-from discord.ext import commands
-from discord import app_commands
-import datetime
-
-class AnnounceCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
 
     @app_commands.command(name="announce", description="發送公告（管理員限定）")
     @app_commands.describe(
