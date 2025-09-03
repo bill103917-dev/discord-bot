@@ -293,24 +293,7 @@ class PingCog(commands.Cog):
     async def ping(self, interaction: Interaction):
         await interaction.response.send_message(f"🏓 Pong! 延遲：{round(self.bot.latency*1000)}ms")
 
-# -------- AnnounceCog --------
-class AnnounceCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-    @app_commands.command(name="announce", description="發布公告（管理員限定）")
-    async def announce(self, interaction: Interaction, title: str, content: str, channel: discord.TextChannel = None, ping_everyone: bool = False):
-        if not is_main_instance():
-            await interaction.response.send_message("❌ 目前這個 Bot instance 不負責發送公告", ephemeral=True)
-            return
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ 只有管理員能發布公告", ephemeral=True)
-            return
-        target_channel = channel or interaction.channel
-        embed = discord.Embed(title=f"📢 {title}", description=content, color=discord.Color.orange())
-        embed.set_footer(text=f"發布者：{interaction.user.display_name}")
-        await interaction.response.send_message(f"✅ 公告已發佈到 {target_channel.mention}！", ephemeral=True)
-        mention = "@everyone" if ping_everyone else ""
-        await target_channel.send(mention, embed=embed)
+
 
 # =========================
 # ⚡ Bot 啟動 & HTTP 保活
