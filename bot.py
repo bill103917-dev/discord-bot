@@ -323,7 +323,6 @@ async def main():
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(DrawCog(bot))
     await bot.add_cog(PingCog(bot))
-    await bot.add_cog(AnnounceCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
 
     try:
