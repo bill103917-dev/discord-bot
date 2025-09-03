@@ -42,32 +42,76 @@ def is_main_instance():
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+    # ================
+    # /say 指令
+    # ================
+@app_commands.command(name="say", description="讓機器人發送訊息（管理員限定）")
+@app_commands.describe(
+    message="要發送的訊息",
+    channel="選擇要發送的頻道（可選，不選則為當前頻道）",
+    embed="是否用 Embed 發送（預設 False）",
+    title="Embed 標題（可選，若沒填就只有內容）",
+    color="Embed 顏色（red/green/blue/orange/purple，可選）"
+)
+async def say(
+    self,
+    interaction: discord.Interaction,
+    message: str,
+    channel: Optional[discord.TextChannel] = None,
+    embed: bool = False,
+    title: Optional[str] = None,
+    color: Optional[str] = None
+):
+    # ✅ 只有管理員能用
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 只有管理員能使用此指令", ephemeral=True)
+        return
 
-    @app_commands.command(name="say", description="讓機器人發送訊息（可發頻道或私訊單一用戶）")
-    @app_commands.describe(
-        message="要發送的訊息",
-        channel="選擇要發送的頻道（可選，不選則預設為當前頻道）",
-        user="選擇要私訊的使用者（可選）"
-    )
-    async def say(self, interaction: Interaction, message: str, channel: discord.TextChannel = None, user: discord.User = None):
-        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
-            return
+    target_channel = channel or interaction.channel
 
-        if user:
-            try:
-                await user.send(message)
-                await interaction.response.send_message(f"✅ 已私訊給 {user.mention}", ephemeral=True)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
-            return
-
-        target_channel = channel or interaction.channel
-        try:
+    try:
+        if embed:
+            # 顏色對照表
+            color_map = {
+                "red": discord.Color.red(),
+                "green": discord.Color.green(),
+                "blue": discord.Color.blue(),
+                "orange": discord.Color.orange(),
+                "purple": discord.Color.purple()
+            }
+            embed_color = color_map.get(color.lower(), discord.Color.default()) if color else discord.Color.default()
+            embed_obj = discord.Embed(
+                title=title or "📢 公告",
+                description=message,
+                color=embed_color
+            )
+            embed_obj.set_footer(text=f"發布者：{interaction.user.display_name}")
+            await target_channel.send(embed=embed_obj)
+        else:
             await target_channel.send(message)
-            await interaction.response.send_message(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
+
+        await interaction.response.send_message(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ 發送失敗: {e}", ephemeral=True)
+    # ================
+    # /公告 指令
+    # ================
+    @app_commands.command(name="announce", description="發送公告")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def announce(self, interaction: discord.Interaction, channel: discord.TextChannel, *, content: str):
+        embed = discord.Embed(
+            title="📢 公告",
+            description=content,
+            color=discord.Color.yellow()
+        )
+
+        # ✅ 一定先回應使用者
+        await interaction.response.send_message(f"✅ 已在 {channel.mention} 發送公告", ephemeral=True)
+
+        # 再發送公告
+        await channel.send(embed=embed)
+
 
     @app_commands.command(name="calc", description="簡單計算器")
     @app_commands.describe(expr="例如：1+2*3")
