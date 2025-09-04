@@ -307,6 +307,32 @@ class PingCog(commands.Cog):
     @app_commands.command(name="ping", description="檢查機器人延遲")
     async def ping(self, interaction: Interaction):
         await interaction.response.send_message(f"🏓 Pong! 延遲：{round(self.bot.latency*1000)}ms")
+        
+#—————————helpCog——————————     
+        
+class HelpCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="help", description="顯示所有可用的指令")
+    async def help(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📖 指令清單",
+            description="以下是目前可用的指令：",
+            color=discord.Color.blue()
+        )
+
+        # 讀取 bot.tree 裡所有指令
+        commands_list = self.bot.tree.get_commands()
+
+        for cmd in commands_list:
+            embed.add_field(
+                name=f"/{cmd.name}",
+                value=cmd.description or "沒有描述",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 
@@ -339,6 +365,7 @@ async def main():
     await bot.add_cog(DrawCog(bot))
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
+    await bot.add_cog(HelpCog(bot))
 
     try:
         await bot.start(TOKEN)
