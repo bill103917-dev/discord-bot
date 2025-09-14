@@ -38,105 +38,126 @@ def is_main_instance():
 CHOICES = ["✌️", "✊", "🖐️"]  # 剪刀、石頭、布
 
 class RPSView(discord.ui.View):
-    def __init__(self, challenger, opponent=None, rounds=3, vs_bot=False):
-        super().__init__(timeout=60)
-        self.challenger = challenger
-        self.opponent = opponent
+    def __init__(self, player1, player2, rounds, vs_bot=False):
+        super().__init__(timeout=None)  # 我們自己管理超時
+        self.player1 = player1
+        self.player2 = player2
         self.rounds = rounds
         self.vs_bot = vs_bot
-
-        self.scores = {challenger.id: 0}
-        if opponent:
-            self.scores[opponent.id] = 0
-        else:
-            self.scores["bot"] = 0
-
+        self.scores = {player1.id: 0, player2.id if player2 else "bot": 0}
         self.choices = {}
+        self.timeout_task = None  # 計時器 Task
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # 限制只能挑戰者和被邀請的人點
-        if self.opponent and interaction.user.id not in (self.challenger.id, self.opponent.id):
-            await interaction.response.send_message("⛔ 你不是對戰雙方，不能參與喔！", ephemeral=True)
-            return False
-        elif not self.opponent and interaction.user.id != self.challenger.id:
-            await interaction.response.send_message("⛔ 這場是單人對機器人，你不能參與！", ephemeral=True)
-            return False
-        return True
+    def make_embed(self):
+        p1_choice = self.choices.get(self.player1.id, "❓")
+        p2_key = self.player2.id if self.player2 else "bot"
+        p2_choice = self.choices.get(p2_key, "❓")
 
-    async def button_callback(self, interaction: discord.Interaction, choice: str):
-        self.choices[interaction.user.id] = choice
-
-        # 如果是對機器人，馬上出
-        if self.vs_bot:
-            bot_choice = random.choice(CHOICES)
-            self.choices["bot"] = bot_choice
-            await self.finish_round(interaction)
-        else:
-            # 雙方都選完再判斷
-            if len(self.choices) == 2:
-                await self.finish_round(interaction)
-
-    async def finish_round(self, interaction: discord.Interaction):
-        c1 = self.choices.get(self.challenger.id)
-        c2 = self.choices.get(self.opponent.id if self.opponent else "bot")
-        result = self.check_winner(c1, c2)
-
-        if result == "challenger":
-            self.scores[self.challenger.id] += 1
-        elif result == "opponent":
-            key = self.opponent.id if self.opponent else "bot"
-            self.scores[key] += 1
-
-        self.choices.clear()
-
-        # 更新 Embed 顯示
-        embed = self.make_embed(c1, c2)
-        await interaction.message.edit(embed=embed, view=self)
-
-        # 判斷是否結束
-        if max(self.scores.values()) >= self.rounds:
-            self.stop()
-
-    def check_winner(self, c1, c2):
-        wins = {"✌️": "🖐️", "🖐️": "✊", "✊": "✌️"}
-        if c1 == c2:
-            return "tie"
-        elif wins[c1] == c2:
-            return "challenger"
-        else:
-            return "opponent"
-
-    def make_embed(self, c1=None, c2=None):
-        title = "✊ 猜拳"
-        desc = f"搶 {self.rounds} 勝\n\n玩家：\n"
-        desc += f"{self.challenger.mention}"
-        if self.opponent:
-            desc += f" vs {self.opponent.mention}"
-        else:
-            desc += " vs 🤖 **機器人**"
-
-        score_str = f"\n\n比數： {self.scores[self.challenger.id]} - {self.scores[self.opponent.id if self.opponent else 'bot']}"
-
-        round_result = ""
-        if c1 and c2:
-            round_result = f"\n\n{self.challenger.mention} 出 {c1}，" + \
-                           (f"{self.opponent.mention}" if self.opponent else "🤖 機器人") + f" 出 {c2}"
-
-        embed = discord.Embed(title=title, description=desc + score_str + round_result, color=0x00ff99)
+        embed = discord.Embed(
+            title="✊ 猜拳",
+            description=f"搶 {self.rounds} 勝",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(
+            name="玩家",
+            value=f"{self.player1.mention} vs {self.player2.mention if self.player2 else '🤖 機器人'}",
+            inline=False
+        )
+        embed.add_field(
+            name="比數",
+            value=f"{p1_choice} **{self.scores[self.player1.id]} : {self.scores[p2_key]}** {p2_choice}",
+            inline=False
+        )
         return embed
 
+    async def handle_turn(self, interaction: discord.Interaction, player_choice: str):
+        player = interaction.user
+        p2_key = self.player2.id if self.player2 else "bot"
+        self.choices[player.id] = player_choice
+
+        # 停止舊的超時計時，重新開始
+        if self.timeout_task:
+            self.timeout_task.cancel()
+        self.timeout_task = asyncio.create_task(self.start_timeout(interaction))
+
+        if self.vs_bot:
+            bot_choice = random.choice(["✊", "✌️", "🖐️"])
+            self.choices[p2_key] = bot_choice
+
+        await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+        if len(self.choices) == 2:
+            p1_choice = self.choices[self.player1.id]
+            p2_choice = self.choices[p2_key]
+            result = self.get_result(p1_choice, p2_choice)
+
+            if result == 1:
+                self.scores[self.player1.id] += 1
+            elif result == 2:
+                self.scores[p2_key] += 1
+
+            self.choices = {}
+
+            await interaction.edit_original_response(embed=self.make_embed(), view=self)
+            await self.check_winner(interaction)
+
+    async def check_winner(self, interaction: discord.Interaction):
+        p2_key = self.player2.id if self.player2 else "bot"
+        if self.scores[self.player1.id] >= self.rounds or self.scores[p2_key] >= self.rounds:
+            if self.timeout_task:
+                self.timeout_task.cancel()
+            winner = self.player1 if self.scores[self.player1.id] > self.scores[p2_key] else (self.player2 or "🤖 機器人")
+            embed = self.make_embed()
+            embed.title = "🏆 遊戲結束"
+            embed.description = f"勝利者：{winner.mention if hasattr(winner, 'mention') else winner}"
+            for child in self.children:
+                child.disabled = True
+            await interaction.edit_original_response(embed=embed, view=self)
+
+    async def start_timeout(self, interaction: discord.Interaction):
+        try:
+            await asyncio.sleep(60)  # 60秒沒出拳就結束
+            p2_key = self.player2.id if self.player2 else "bot"
+
+            # 判定哪一個人沒有出拳
+            missing_player = None
+            if self.player1.id not in self.choices:
+                missing_player = self.player1
+                self.scores[p2_key] = self.rounds  # 對手直接獲勝
+            elif p2_key not in self.choices and not self.vs_bot:
+                missing_player = self.player2
+                self.scores[self.player1.id] = self.rounds
+
+            if missing_player:
+                embed = self.make_embed()
+                embed.title = "⌛ 遊戲超時"
+                embed.description = f"{missing_player.mention} 超時未出拳，判定對方勝利！"
+                for child in self.children:
+                    child.disabled = True
+                await interaction.edit_original_response(embed=embed, view=self)
+        except asyncio.CancelledError:
+            pass  # 有人出拳就重置，不要觸發超時
+
+    def get_result(self, p1, p2):
+        win_map = {"✊": "✌️", "✌️": "🖐️", "🖐️": "✊"}
+        if p1 == p2:
+            return 0
+        elif win_map[p1] == p2:
+            return 1
+        else:
+            return 2
+
     @discord.ui.button(label="✌️", style=discord.ButtonStyle.primary)
-    async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "✌️")
+    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_turn(interaction, "✌️")
 
     @discord.ui.button(label="✊", style=discord.ButtonStyle.primary)
     async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "✊")
+        await self.handle_turn(interaction, "✊")
 
     @discord.ui.button(label="🖐️", style=discord.ButtonStyle.primary)
     async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "🖐️")
-        
+        await self.handle_turn(interaction, "🖐️")
 # =========================
 # ⚡ COGS
 # =========================
