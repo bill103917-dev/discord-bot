@@ -39,19 +39,22 @@ CHOICES = ["✌️", "✊", "🖐️"]  # 剪刀、石頭、布
 
 class RPSView(discord.ui.View):
     def __init__(self, player1, player2, rounds, vs_bot=False):
-        super().__init__(timeout=None)  # 我們自己管理超時
+        super().__init__(timeout=None)
         self.player1 = player1
         self.player2 = player2
         self.rounds = rounds
         self.vs_bot = vs_bot
         self.scores = {player1.id: 0, player2.id if player2 else "bot": 0}
         self.choices = {}
-        self.timeout_task = None  # 計時器 Task
+        self.revealed = False  # <-- 新增：控制是否揭示出拳
+        self.timeout_task = None
 
     def make_embed(self):
-        p1_choice = self.choices.get(self.player1.id, "❓")
+        p1_display = "✅" if self.player1.id in self.choices and not self.revealed else \
+                     self.choices.get(self.player1.id, "❓")
         p2_key = self.player2.id if self.player2 else "bot"
-        p2_choice = self.choices.get(p2_key, "❓")
+        p2_display = "✅" if p2_key in self.choices and not self.revealed else \
+                     self.choices.get(p2_key, "❓")
 
         embed = discord.Embed(
             title="✊ 猜拳",
@@ -65,7 +68,7 @@ class RPSView(discord.ui.View):
         )
         embed.add_field(
             name="比數",
-            value=f"{p1_choice} **{self.scores[self.player1.id]} : {self.scores[p2_key]}** {p2_choice}",
+            value=f"{p1_display} **{self.scores[self.player1.id]} : {self.scores[p2_key]}** {p2_display}",
             inline=False
         )
         return embed
@@ -80,13 +83,16 @@ class RPSView(discord.ui.View):
             self.timeout_task.cancel()
         self.timeout_task = asyncio.create_task(self.start_timeout(interaction))
 
+        # 如果是 vs bot，馬上決定 bot 的選擇
         if self.vs_bot:
-            bot_choice = random.choice(["✊", "✌️", "🖐️"])
-            self.choices[p2_key] = bot_choice
+            self.choices[p2_key] = random.choice(["✊", "✌️", "🖐️"])
 
+        # 暫時先用 ✅ 更新狀態
         await interaction.response.edit_message(embed=self.make_embed(), view=self)
 
         if len(self.choices) == 2:
+            # 兩人都出拳了，揭示結果
+            self.revealed = True
             p1_choice = self.choices[self.player1.id]
             p2_choice = self.choices[p2_key]
             result = self.get_result(p1_choice, p2_choice)
@@ -96,68 +102,10 @@ class RPSView(discord.ui.View):
             elif result == 2:
                 self.scores[p2_key] += 1
 
-            self.choices = {}
-
             await interaction.edit_original_response(embed=self.make_embed(), view=self)
+            self.choices = {}
+            self.revealed = False
             await self.check_winner(interaction)
-
-    async def check_winner(self, interaction: discord.Interaction):
-        p2_key = self.player2.id if self.player2 else "bot"
-        if self.scores[self.player1.id] >= self.rounds or self.scores[p2_key] >= self.rounds:
-            if self.timeout_task:
-                self.timeout_task.cancel()
-            winner = self.player1 if self.scores[self.player1.id] > self.scores[p2_key] else (self.player2 or "🤖 機器人")
-            embed = self.make_embed()
-            embed.title = "🏆 遊戲結束"
-            embed.description = f"勝利者：{winner.mention if hasattr(winner, 'mention') else winner}"
-            for child in self.children:
-                child.disabled = True
-            await interaction.edit_original_response(embed=embed, view=self)
-
-    async def start_timeout(self, interaction: discord.Interaction):
-        try:
-            await asyncio.sleep(60)  # 60秒沒出拳就結束
-            p2_key = self.player2.id if self.player2 else "bot"
-
-            # 判定哪一個人沒有出拳
-            missing_player = None
-            if self.player1.id not in self.choices:
-                missing_player = self.player1
-                self.scores[p2_key] = self.rounds  # 對手直接獲勝
-            elif p2_key not in self.choices and not self.vs_bot:
-                missing_player = self.player2
-                self.scores[self.player1.id] = self.rounds
-
-            if missing_player:
-                embed = self.make_embed()
-                embed.title = "⌛ 遊戲超時"
-                embed.description = f"{missing_player.mention} 超時未出拳，判定對方勝利！"
-                for child in self.children:
-                    child.disabled = True
-                await interaction.edit_original_response(embed=embed, view=self)
-        except asyncio.CancelledError:
-            pass  # 有人出拳就重置，不要觸發超時
-
-    def get_result(self, p1, p2):
-        win_map = {"✊": "✌️", "✌️": "🖐️", "🖐️": "✊"}
-        if p1 == p2:
-            return 0
-        elif win_map[p1] == p2:
-            return 1
-        else:
-            return 2
-
-    @discord.ui.button(label="✌️", style=discord.ButtonStyle.primary)
-    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_turn(interaction, "✌️")
-
-    @discord.ui.button(label="✊", style=discord.ButtonStyle.primary)
-    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_turn(interaction, "✊")
-
-    @discord.ui.button(label="🖐️", style=discord.ButtonStyle.primary)
-    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_turn(interaction, "🖐️")
 # =========================
 # ⚡ COGS
 # =========================
