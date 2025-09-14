@@ -355,36 +355,37 @@ class FunCog(commands.Cog):
         self.active_games = {}
 
     # 🎮 剪刀石頭布
-    @app_commands.command(name="rps", description="剪刀石頭布")
-    @app_commands.describe(
-        rounds="搶幾勝 (預設 3)",
-        opponent="要挑戰的對象 (可選)",
-        vs_bot="是否對機器人玩 (可選)"
-    )
-    async def rps(
-        self,
-        interaction: discord.Interaction,
-        rounds: int | None = None,
-        opponent: discord.User | None = None,
-        vs_bot: bool | None = None
-    ):
-        # 如果使用者什麼都沒填，直接報錯
-        if opponent is None and vs_bot is None:
-            await interaction.response.send_message("⚠️ 你必須指定一個對手或選擇 vs_bot=True！", ephemeral=True)
-            return
 
-        # rounds 預設值
-        rounds = rounds or 3
 
-        # 防止邀請機器人
-        if opponent and opponent.bot:
-            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
-            return
+@app_commands.command(name="rps", description="剪刀石頭布！")
+@app_commands.describe(
+    rounds="搶幾勝（預設3）",
+    opponent="要挑戰的對象（選填）",
+    vs_bot="是否對機器人玩（預設False）"
+)
+async def rps(
+    interaction: discord.Interaction,
+    rounds: int = 3,
+    opponent: discord.User = None,
+    vs_bot: bool = False
+):
+    # 檢查參數
+    if not opponent and not vs_bot:
+        await interaction.response.send_message(
+            "❌ 你必須選擇要挑戰的對象或啟用 vs_bot=True 才能開始！",
+            ephemeral=True
+        )
+        return
 
-        view = RPSView(interaction.user, opponent, rounds, vs_bot or False)
-        embed = view.make_embed()
-        await interaction.response.send_message(embed=embed, view=view)
-        
+    if opponent and opponent.bot:
+        await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
+        return
+
+    # 建立 View & Embed
+    view = RPSView(interaction.user, opponent, rounds, vs_bot)
+    embed = view.make_embed()
+
+    await interaction.response.send_message(embed=embed, view=view)
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
