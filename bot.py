@@ -35,58 +35,112 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
+import discord
+from discord import app_commands
+from discord.ext import commands
+import random
+
+CHOICES = ["✌️", "✊", "🖐️"]  # 剪刀、石頭、布
+
 class RPSView(discord.ui.View):
-    def __init__(self, challenger, opponent):
-        super().__init__(timeout=30)
+    def __init__(self, challenger, opponent=None, rounds=3, vs_bot=False):
+        super().__init__(timeout=60)
         self.challenger = challenger
         self.opponent = opponent
-        self.choices = {}  # {user_id: "剪刀"|"石頭"|"布"}
+        self.rounds = rounds
+        self.vs_bot = vs_bot
+
+        self.scores = {challenger.id: 0}
+        if opponent:
+            self.scores[opponent.id] = 0
+        else:
+            self.scores["bot"] = 0
+
+        self.choices = {}
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # 只能 challenger 和 opponent 點
-        if interaction.user.id not in (self.challenger.id, self.opponent.id):
+        # 限制只能挑戰者和被邀請的人點
+        if self.opponent and interaction.user.id not in (self.challenger.id, self.opponent.id):
             await interaction.response.send_message("⛔ 你不是對戰雙方，不能參與喔！", ephemeral=True)
+            return False
+        elif not self.opponent and interaction.user.id != self.challenger.id:
+            await interaction.response.send_message("⛔ 這場是單人對機器人，你不能參與！", ephemeral=True)
             return False
         return True
 
     async def button_callback(self, interaction: discord.Interaction, choice: str):
         self.choices[interaction.user.id] = choice
-        await interaction.response.send_message(f"✅ 你選擇了 **{choice}**", ephemeral=True)
 
-        # 如果雙方都選了，判斷結果
-        if len(self.choices) == 2:
-            c1 = self.choices.get(self.challenger.id)
-            c2 = self.choices.get(self.opponent.id)
-            result = self.check_winner(c1, c2)
+        # 如果是對機器人，馬上出
+        if self.vs_bot:
+            bot_choice = random.choice(CHOICES)
+            self.choices["bot"] = bot_choice
+            await self.finish_round(interaction)
+        else:
+            # 雙方都選完再判斷
+            if len(self.choices) == 2:
+                await self.finish_round(interaction)
 
-            result_msg = f"🎮 **剪刀石頭布結果** 🎮\n"
-            result_msg += f"{self.challenger.mention} 出了 **{c1}**\n"
-            result_msg += f"{self.opponent.mention} 出了 **{c2}**\n\n"
-            result_msg += result
+    async def finish_round(self, interaction: discord.Interaction):
+        c1 = self.choices.get(self.challenger.id)
+        c2 = self.choices.get(self.opponent.id if self.opponent else "bot")
+        result = self.check_winner(c1, c2)
 
-            await interaction.followup.send(result_msg)
+        if result == "challenger":
+            self.scores[self.challenger.id] += 1
+        elif result == "opponent":
+            key = self.opponent.id if self.opponent else "bot"
+            self.scores[key] += 1
+
+        self.choices.clear()
+
+        # 更新 Embed 顯示
+        embed = self.make_embed(c1, c2)
+        await interaction.message.edit(embed=embed, view=self)
+
+        # 判斷是否結束
+        if max(self.scores.values()) >= self.rounds:
             self.stop()
 
     def check_winner(self, c1, c2):
+        wins = {"✌️": "🖐️", "🖐️": "✊", "✊": "✌️"}
         if c1 == c2:
-            return "🤝 平手！"
-        wins = {"剪刀": "布", "布": "石頭", "石頭": "剪刀"}
-        if wins[c1] == c2:
-            return f"🏆 {self.challenger.mention} 勝利！"
+            return "tie"
+        elif wins[c1] == c2:
+            return "challenger"
         else:
-            return f"🏆 {self.opponent.mention} 勝利！"
+            return "opponent"
 
-    @discord.ui.button(label="✌️ 剪刀", style=discord.ButtonStyle.primary)
+    def make_embed(self, c1=None, c2=None):
+        title = "✊ 猜拳"
+        desc = f"搶 {self.rounds} 勝\n\n玩家：\n"
+        desc += f"{self.challenger.mention}"
+        if self.opponent:
+            desc += f" vs {self.opponent.mention}"
+        else:
+            desc += " vs 🤖 **機器人**"
+
+        score_str = f"\n\n比數： {self.scores[self.challenger.id]} - {self.scores[self.opponent.id if self.opponent else 'bot']}"
+
+        round_result = ""
+        if c1 and c2:
+            round_result = f"\n\n{self.challenger.mention} 出 {c1}，" + \
+                           (f"{self.opponent.mention}" if self.opponent else "🤖 機器人") + f" 出 {c2}"
+
+        embed = discord.Embed(title=title, description=desc + score_str + round_result, color=0x00ff99)
+        return embed
+
+    @discord.ui.button(label="✌️", style=discord.ButtonStyle.primary)
     async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "剪刀")
+        await self.button_callback(interaction, "✌️")
 
-    @discord.ui.button(label="✊ 石頭", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="✊", style=discord.ButtonStyle.primary)
     async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "石頭")
+        await self.button_callback(interaction, "✊")
 
-    @discord.ui.button(label="🖐️ 布", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🖐️", style=discord.ButtonStyle.primary)
     async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.button_callback(interaction, "布")
+        await self.button_callback(interaction, "🖐️")
 # =========================
 # ⚡ COGS
 # =========================
@@ -297,19 +351,35 @@ class FunCog(commands.Cog):
         self.active_games = {}
 
     # 🎮 剪刀石頭布
-    @app_commands.command(name="rps_invite", description="邀請玩家進行剪刀石頭布對戰")
-    @app_commands.describe(opponent="要挑戰的對象")
-    async def rps_invite(self, interaction: discord.Interaction, opponent: discord.User):
-        if opponent.bot:
-            await interaction.response.send_message("🤖 不能邀請機器人玩喔！", ephemeral=True)
+    @app_commands.command(name="rps", description="剪刀石頭布")
+    @app_commands.describe(
+        rounds="搶幾勝 (預設 3)",
+        opponent="要挑戰的對象 (可選)",
+        vs_bot="是否對機器人玩 (可選)"
+    )
+    async def rps(
+        self,
+        interaction: discord.Interaction,
+        rounds: int | None = None,
+        opponent: discord.User | None = None,
+        vs_bot: bool | None = None
+    ):
+        # 如果使用者什麼都沒填，直接報錯
+        if opponent is None and vs_bot is None:
+            await interaction.response.send_message("⚠️ 你必須指定一個對手或選擇 vs_bot=True！", ephemeral=True)
             return
 
-        view = RPSView(interaction.user, opponent)
-        await interaction.response.send_message(
-            f"🎮 {interaction.user.mention} 向 {opponent.mention} 發起剪刀石頭布挑戰！\n"
-            f"雙方請點擊下方按鈕選擇手勢：",
-            view=view
-        )
+        # rounds 預設值
+        rounds = rounds or 3
+
+        # 防止邀請機器人
+        if opponent and opponent.bot:
+            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
+            return
+
+        view = RPSView(interaction.user, opponent, rounds, vs_bot or False)
+        embed = view.make_embed()
+        await interaction.response.send_message(embed=embed, view=view)
 
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
