@@ -35,8 +35,6 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
-CHOICES = ["✌️", "✊", "🖐️"]  # 剪刀、石頭、布
-
 class RPSView(discord.ui.View):
     def __init__(self, player1, player2, rounds, vs_bot=False):
         super().__init__(timeout=None)
@@ -46,8 +44,13 @@ class RPSView(discord.ui.View):
         self.vs_bot = vs_bot
         self.scores = {player1.id: 0, player2.id if player2 else "bot": 0}
         self.choices = {}
-        self.revealed = False  # <-- 新增：控制是否揭示出拳
+        self.revealed = False
         self.timeout_task = None
+
+        # === 加入按鈕 ===
+        self.add_item(self.RPSButton("✌️", self))
+        self.add_item(self.RPSButton("✊", self))
+        self.add_item(self.RPSButton("🖐️", self))
 
     def make_embed(self):
         p1_display = "✅" if self.player1.id in self.choices and not self.revealed else \
@@ -78,20 +81,21 @@ class RPSView(discord.ui.View):
         p2_key = self.player2.id if self.player2 else "bot"
         self.choices[player.id] = player_choice
 
-        # 停止舊的超時計時，重新開始
+        # 重設超時
         if self.timeout_task:
             self.timeout_task.cancel()
         self.timeout_task = asyncio.create_task(self.start_timeout(interaction))
 
-        # 如果是 vs bot，馬上決定 bot 的選擇
+        # 如果是 vs bot 直接決定 bot 出拳
         if self.vs_bot:
             self.choices[p2_key] = random.choice(["✊", "✌️", "🖐️"])
 
-        # 暫時先用 ✅ 更新狀態
+        # 顯示 ✅
         await interaction.response.edit_message(embed=self.make_embed(), view=self)
 
+        # 如果兩邊都出拳 → 揭曉
         if len(self.choices) == 2:
-            # 兩人都出拳了，揭示結果
+            await asyncio.sleep(1)  # 小延遲增加緊張感
             self.revealed = True
             p1_choice = self.choices[self.player1.id]
             p2_choice = self.choices[p2_key]
@@ -106,6 +110,41 @@ class RPSView(discord.ui.View):
             self.choices = {}
             self.revealed = False
             await self.check_winner(interaction)
+
+    async def start_timeout(self, interaction: discord.Interaction):
+        try:
+            await asyncio.sleep(60)
+            # 找出沒出的玩家
+            p2_key = self.player2.id if self.player2 else "bot"
+            missing = [self.player1, self.player2] if self.player2 else [self.player1]
+            missing = [p for p in missing if p and p.id not in self.choices]
+
+            if missing:
+                loser = missing[0]
+                winner_id = self.player2.id if loser.id == self.player1.id else self.player1.id
+                self.scores[winner_id] += self.rounds  # 直接判對方贏
+                await interaction.edit_original_response(
+                    embed=discord.Embed(
+                        title="⌛ 超時結束",
+                        description=f"{loser.mention} 沒有在 60 秒內出拳，直接判負！",
+                        color=discord.Color.red()
+                    ),
+                    view=None
+                )
+        except asyncio.CancelledError:
+            pass
+
+    class RPSButton(discord.ui.Button):
+        def __init__(self, choice, parent_view):
+            super().__init__(style=discord.ButtonStyle.secondary, label=choice)
+            self.choice = choice
+            self.parent_view = parent_view
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user not in [self.parent_view.player1, self.parent_view.player2] and not self.parent_view.vs_bot:
+                await interaction.response.send_message("❌ 你不是參賽者！", ephemeral=True)
+                return
+            await self.parent_view.handle_turn(interaction, self.choice)
 # =========================
 # ⚡ COGS
 # =========================
