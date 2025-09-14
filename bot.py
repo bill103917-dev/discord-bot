@@ -35,11 +35,6 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
-import discord
-from discord import app_commands
-from discord.ext import commands
-import random
-
 CHOICES = ["✌️", "✊", "🖐️"]  # 剪刀、石頭、布
 
 class RPSView(discord.ui.View):
@@ -141,6 +136,7 @@ class RPSView(discord.ui.View):
     @discord.ui.button(label="🖐️", style=discord.ButtonStyle.primary)
     async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.button_callback(interaction, "🖐️")
+        
 # =========================
 # ⚡ COGS
 # =========================
@@ -380,7 +376,7 @@ class FunCog(commands.Cog):
         view = RPSView(interaction.user, opponent, rounds, vs_bot or False)
         embed = view.make_embed()
         await interaction.response.send_message(embed=embed, view=view)
-
+        
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
