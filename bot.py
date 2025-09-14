@@ -35,116 +35,103 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
-class RPSView(discord.ui.View):
-    def __init__(self, player1, player2, rounds, vs_bot=False):
-        super().__init__(timeout=None)
-        self.player1 = player1
-        self.player2 = player2
-        self.rounds = rounds
-        self.vs_bot = vs_bot
-        self.scores = {player1.id: 0, player2.id if player2 else "bot": 0}
-        self.choices = {}
-        self.revealed = False
-        self.timeout_task = None
+import discord
+from discord import app_commands
+from discord.ext import commands
+import random
 
-        # === 加入按鈕 ===
-        self.add_item(self.RPSButton("✌️", self))
-        self.add_item(self.RPSButton("✊", self))
-        self.add_item(self.RPSButton("🖐️", self))
+class RPSButton(discord.ui.Button):
+    def __init__(self, label, emoji, style, choice):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.choice = choice
+
+    async def callback(self, interaction: discord.Interaction):
+        view: RPSView = self.view
+        user = interaction.user
+
+        if user not in [view.player1, view.player2]:
+            return await interaction.response.send_message("❌ 你不是這場比賽的玩家！", ephemeral=True)
+
+        if user.id in view.choices:
+            return await interaction.response.send_message("⚠️ 你已經出過拳了！", ephemeral=True)
+
+        # 玩家選擇
+        view.choices[user.id] = self.choice
+        await interaction.response.edit_message(embed=view.make_embed(), view=view)
+
+        # 如果是跟機器人玩，讓機器人馬上出拳
+        if view.vs_bot and user == view.player1:
+            bot_choice = random.choice(["剪刀", "石頭", "布"])
+            view.choices[view.player2.id] = bot_choice
+            await interaction.followup.edit_message(interaction.message.id, embed=view.make_embed(), view=view)
+
+        # 如果雙方都出了拳，判定勝負
+        if len(view.choices) == 2:
+            await view.resolve_round(interaction)
+
+
+class RPSView(discord.ui.View):
+    def __init__(self, player1, opponent=None, rounds=3, vs_bot=False):
+        super().__init__(timeout=60)
+        self.player1 = player1
+        self.vs_bot = vs_bot
+        self.player2 = opponent or discord.Object(id=player1.bot.id) if vs_bot else opponent
+        self.rounds = rounds
+        self.scores = {player1.id: 0, self.player2.id: 0}
+        self.choices = {}
+
+        for choice, emoji in {"剪刀": "✌️", "石頭": "✊", "布": "✋"}.items():
+            self.add_item(RPSButton(label=choice, emoji=emoji, style=discord.ButtonStyle.primary, choice=choice))
 
     def make_embed(self):
-        p1_display = "✅" if self.player1.id in self.choices and not self.revealed else \
-                     self.choices.get(self.player1.id, "❓")
-        p2_key = self.player2.id if self.player2 else "bot"
-        p2_display = "✅" if p2_key in self.choices and not self.revealed else \
-                     self.choices.get(p2_key, "❓")
+        def display_choice(uid):
+            return "✅" if uid in self.choices else "❓"
 
-        embed = discord.Embed(
-            title="✊ 猜拳",
-            description=f"搶 {self.rounds} 勝",
-            color=discord.Color.blurple()
-        )
-        embed.add_field(
-            name="玩家",
-            value=f"{self.player1.mention} vs {self.player2.mention if self.player2 else '🤖 機器人'}",
-            inline=False
-        )
-        embed.add_field(
-            name="比數",
-            value=f"{p1_display} **{self.scores[self.player1.id]} : {self.scores[p2_key]}** {p2_display}",
-            inline=False
-        )
+        embed = discord.Embed(title="✂️ 剪刀石頭布", color=discord.Color.blurple())
+        embed.add_field(name=f"{self.player1.display_name}", value=display_choice(self.player1.id), inline=True)
+        embed.add_field(name=f"{self.player2.display_name}", value=display_choice(self.player2.id), inline=True)
+        embed.add_field(name="比數", value=f"{self.scores[self.player1.id]} : {self.scores[self.player2.id]}", inline=False)
         return embed
 
-    async def handle_turn(self, interaction: discord.Interaction, player_choice: str):
-        player = interaction.user
-        p2_key = self.player2.id if self.player2 else "bot"
-        self.choices[player.id] = player_choice
+    async def resolve_round(self, interaction):
+        p1 = self.choices[self.player1.id]
+        p2 = self.choices[self.player2.id]
 
-        # 重設超時
-        if self.timeout_task:
-            self.timeout_task.cancel()
-        self.timeout_task = asyncio.create_task(self.start_timeout(interaction))
+        result = self.check_winner(p1, p2)
+        if result == 1:
+            self.scores[self.player1.id] += 1
+        elif result == 2:
+            self.scores[self.player2.id] += 1
 
-        # 如果是 vs bot 直接決定 bot 出拳
-        if self.vs_bot:
-            self.choices[p2_key] = random.choice(["✊", "✌️", "🖐️"])
+        self.choices.clear()
+        await interaction.message.edit(embed=self.make_embed(), view=self)
 
-        # 顯示 ✅
-        await interaction.response.edit_message(embed=self.make_embed(), view=self)
+        # 如果有人達到勝利條件 -> 結束
+        if max(self.scores.values()) >= self.rounds:
+            winner = self.player1 if self.scores[self.player1.id] > self.scores[self.player2.id] else self.player2
+            await interaction.followup.send(f"🏆 {winner.mention} 獲勝！")
+            self.stop()
 
-        # 如果兩邊都出拳 → 揭曉
-        if len(self.choices) == 2:
-            await asyncio.sleep(1)  # 小延遲增加緊張感
-            self.revealed = True
-            p1_choice = self.choices[self.player1.id]
-            p2_choice = self.choices[p2_key]
-            result = self.get_result(p1_choice, p2_choice)
+    def check_winner(self, p1, p2):
+        if p1 == p2:
+            return 0
+        rules = {"剪刀": "布", "石頭": "剪刀", "布": "石頭"}
+        return 1 if rules[p1] == p2 else 2
 
-            if result == 1:
-                self.scores[self.player1.id] += 1
-            elif result == 2:
-                self.scores[p2_key] += 1
+    async def on_timeout(self):
+        # 檢查誰沒出拳，直接判定輸
+        if len(self.choices) == 1:
+            quitter = [p for p in [self.player1, self.player2] if p.id not in self.choices][0]
+            winner = [p for p in [self.player1, self.player2] if p.id in self.choices][0]
+            self.scores[winner.id] += 1
 
-            await interaction.edit_original_response(embed=self.make_embed(), view=self)
-            self.choices = {}
-            self.revealed = False
-            await self.check_winner(interaction)
-
-    async def start_timeout(self, interaction: discord.Interaction):
-        try:
-            await asyncio.sleep(60)
-            # 找出沒出的玩家
-            p2_key = self.player2.id if self.player2 else "bot"
-            missing = [self.player1, self.player2] if self.player2 else [self.player1]
-            missing = [p for p in missing if p and p.id not in self.choices]
-
-            if missing:
-                loser = missing[0]
-                winner_id = self.player2.id if loser.id == self.player1.id else self.player1.id
-                self.scores[winner_id] += self.rounds  # 直接判對方贏
-                await interaction.edit_original_response(
-                    embed=discord.Embed(
-                        title="⌛ 超時結束",
-                        description=f"{loser.mention} 沒有在 60 秒內出拳，直接判負！",
-                        color=discord.Color.red()
-                    ),
-                    view=None
-                )
-        except asyncio.CancelledError:
-            pass
-
-    class RPSButton(discord.ui.Button):
-        def __init__(self, choice, parent_view):
-            super().__init__(style=discord.ButtonStyle.secondary, label=choice)
-            self.choice = choice
-            self.parent_view = parent_view
-
-        async def callback(self, interaction: discord.Interaction):
-            if interaction.user not in [self.parent_view.player1, self.parent_view.player2] and not self.parent_view.vs_bot:
-                await interaction.response.send_message("❌ 你不是參賽者！", ephemeral=True)
-                return
-            await self.parent_view.handle_turn(interaction, self.choice)
+            await self.message.edit(embed=self.make_embed(), view=None)
+            await self.message.channel.send(f"⌛ {quitter.mention} 超時未出拳，自動判輸！")
+            self.stop()
+        else:
+            await self.message.edit(view=None)
+            await self.message.channel.send("⌛ 沒有人出拳，遊戲結束！")
+            self.stop()
 # =========================
 # ⚡ COGS
 # =========================
