@@ -243,7 +243,85 @@ class FunCog(commands.Cog):
         self.bot = bot
         self.active_games = {}
 
-# （剪刀石頭布等遊戲指令可照你之前貼的程式加入此 Cog）
+
+class RPSView(discord.ui.View):
+    def __init__(self, challenger, opponent):
+        super().__init__(timeout=30)
+        self.challenger = challenger
+        self.opponent = opponent
+        self.choices = {}  # {user_id: "剪刀"|"石頭"|"布"}
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # 只能 challenger 和 opponent 點
+        if interaction.user.id not in (self.challenger.id, self.opponent.id):
+            await interaction.response.send_message("⛔ 你不是對戰雙方，不能參與喔！", ephemeral=True)
+            return False
+        return True
+
+    async def button_callback(self, interaction: discord.Interaction, choice: str):
+        self.choices[interaction.user.id] = choice
+        await interaction.response.send_message(f"✅ 你選擇了 **{choice}**", ephemeral=True)
+
+        # 如果雙方都選了，判斷結果
+        if len(self.choices) == 2:
+            c1 = self.choices.get(self.challenger.id)
+            c2 = self.choices.get(self.opponent.id)
+            result = self.check_winner(c1, c2)
+
+            result_msg = f"🎮 **剪刀石頭布結果** 🎮\n"
+            result_msg += f"{self.challenger.mention} 出了 **{c1}**\n"
+            result_msg += f"{self.opponent.mention} 出了 **{c2}**\n\n"
+            result_msg += result
+
+            await interaction.followup.send(result_msg)
+            self.stop()
+
+    def check_winner(self, c1, c2):
+        if c1 == c2:
+            return "🤝 平手！"
+        wins = {"剪刀": "布", "布": "石頭", "石頭": "剪刀"}
+        if wins[c1] == c2:
+            return f"🏆 {self.challenger.mention} 勝利！"
+        else:
+            return f"🏆 {self.opponent.mention} 勝利！"
+
+    @discord.ui.button(label="✌️ 剪刀", style=discord.ButtonStyle.primary)
+    async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.button_callback(interaction, "剪刀")
+
+    @discord.ui.button(label="✊ 石頭", style=discord.ButtonStyle.primary)
+    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.button_callback(interaction, "石頭")
+
+    @discord.ui.button(label="🖐️ 布", style=discord.ButtonStyle.primary)
+    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.button_callback(interaction, "布")
+
+
+
+
+    # 🎮 剪刀石頭布
+    @app_commands.command(name="rps_invite", description="邀請玩家進行剪刀石頭布對戰")
+    @app_commands.describe(opponent="要挑戰的對象")
+    async def rps_invite(self, interaction: discord.Interaction, opponent: discord.User):
+        if opponent.bot:
+            await interaction.response.send_message("🤖 不能邀請機器人玩喔！", ephemeral=True)
+            return
+
+        view = RPSView(interaction.user, opponent)
+        await interaction.response.send_message(
+            f"🎮 {interaction.user.mention} 向 {opponent.mention} 發起剪刀石頭布挑戰！\n"
+            f"雙方請點擊下方按鈕選擇手勢：",
+            view=view
+        )
+
+    # 🎲 擲骰子
+    @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
+    async def dice(self, interaction: discord.Interaction):
+        number = random.randint(1, 6)
+        await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
+
+
 
 
 # -------- DrawCog --------
