@@ -55,6 +55,7 @@ class RPSView(discord.ui.View):
         else:
             self.scores[player2.id] = 0
             self.choices = {player1.id: None, player2.id: None}
+        self.message = None
 
     def make_embed(self):
         embed = discord.Embed(title=f"✂️ 石頭剪刀布（搶 {self.rounds} 勝）", color=discord.Color.blue())
@@ -82,7 +83,6 @@ class RPSView(discord.ui.View):
         self.choices[interaction.user.id] = choice
         await interaction.response.edit_message(embed=self.make_embed(), view=self)
 
-        # 如果雙方都出完
         if all(v is not None for v in self.choices.values()):
             await self.end_round(interaction)
 
@@ -126,6 +126,13 @@ class RPSView(discord.ui.View):
         wins = {"✌️": "🖐️", "👊": "✌️", "🖐️": "👊"}
         return p1 if wins[c1] == c2 else p2
 
+    async def on_timeout(self):
+        # 超時認輸
+        if self.message:
+            embed = discord.Embed(title="⌛ 時間到", description="60 秒內未出拳，自動判定認輸", color=discord.Color.red())
+            await self.message.edit(embed=embed, view=None)
+        self.stop()
+
     @discord.ui.button(label="✌️ 剪刀", style=discord.ButtonStyle.primary)
     async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_choice(interaction, "✌️")
@@ -136,6 +143,7 @@ class RPSView(discord.ui.View):
 
     @discord.ui.button(label="🖐️ 布", style=discord.ButtonStyle.success)
     async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_choice(interaction, "🖐️")
 # =========================
 # ⚡ COGS
 # =========================
@@ -366,7 +374,8 @@ class FunCog(commands.Cog):
                 return
 
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
-        await interaction.followup.send(embed=view.make_embed(), view=view)
+        msg = await interaction.followup.send(embed=view.make_embed(), view=view)
+        view.message = msg
 
 
 class ConfirmView(discord.ui.View):
