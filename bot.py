@@ -36,93 +36,102 @@ def is_main_instance():
 
 #剪刀石頭布參數
 class RPSView(discord.ui.View):
-    def __init__(self, player1, opponent=None, rounds=3, vs_bot=False):
+    def __init__(self, player1, player2, rounds, vs_bot):
         super().__init__(timeout=60)
         self.player1 = player1
-        self.opponent = opponent
+        self.player2 = player2
         self.rounds = rounds
         self.vs_bot = vs_bot
-        self.choices = {player1.id: None}
-        if opponent:
-            self.choices[opponent.id] = None
-        elif vs_bot:
-            self.choices["bot"] = random.choice(["✌️", "👊", "🖐️"])  # 機器人直接出拳
-
         self.scores = {player1.id: 0}
-        if opponent:
-            self.scores[opponent.id] = 0
-        else:
+        if vs_bot:
             self.scores["bot"] = 0
-
-        self.round_done = False
+            self.choices = {player1.id: None, "bot": random.choice(["✌️", "👊", "🖐️"])}
+        else:
+            self.scores[player2.id] = 0
+            self.choices = {player1.id: None, player2.id: None}
 
     def make_embed(self):
         embed = discord.Embed(title="✂️ 石頭剪刀布", color=discord.Color.blue())
-        lines = []
-        for pid, choice in self.choices.items():
+        desc = []
+        for pid in self.choices:
             name = "🤖 機器人" if pid == "bot" else f"<@{pid}>"
+            choice = self.choices[pid]
             if choice is None:
-                lines.append(f"{name}: ❔")  # 還沒出拳
-            else:
-                lines.append(f"{name}: ✅")  # 已出拳
-        embed.description = "\n".join(lines)
-        embed.add_field(name="比分", value="\n".join([f"<@{pid}>: {score}" if pid != "bot" else f"🤖 機器人: {score}" for pid, score in self.scores.items()]))
+                desc.append(f"{name}: ❓")
+            elif choice in ["✌️", "👊", "🖐️"]:
+                desc.append(f"{name}: ✅")  # 出拳顯示打勾
+        embed.description = "\n".join(desc)
+        score_text = " | ".join([f"{'🤖 機器人' if k=='bot' else f'<@{k}>'}: {v}" for k,v in self.scores.items()])
+        embed.add_field(name="比分", value=score_text, inline=False)
         return embed
 
-    async def handle_choice(self, interaction: discord.Interaction, choice: str):
-        user_id = interaction.user.id
-        if user_id not in self.choices:
-            await interaction.response.send_message("❌ 你不是參加者！", ephemeral=True)
+    async def handle_choice(self, interaction, choice):
+        if interaction.user.id not in self.choices:
+            await interaction.response.send_message("⛔ 你不是這場比賽的玩家！", ephemeral=True)
+            return
+        if self.choices[interaction.user.id] is not None:
+            await interaction.response.send_message("⏳ 你已經出過拳了！", ephemeral=True)
             return
 
-        if self.choices[user_id] is not None:
-            await interaction.response.send_message("❌ 你已經出拳了！", ephemeral=True)
-            return
-
-        self.choices[user_id] = choice
+        self.choices[interaction.user.id] = choice
         await interaction.response.edit_message(embed=self.make_embed(), view=self)
 
+        # 如果雙方都出完
         if all(v is not None for v in self.choices.values()):
             await self.end_round(interaction)
 
     async def end_round(self, interaction):
-        result = self.check_winner()
-        if result:
-            self.scores[result] += 1
-        self.choices = {k: None for k in self.choices}  # 重置出拳
-        # 如果機器人參戰，讓他立即出拳
-        if self.vs_bot:
-            self.choices["bot"] = random.choice(["✌️", "👊", "🖐️"])
+        # 顯示雙方真實出拳
+        reveal_embed = discord.Embed(title="✂️ 石頭剪刀布", color=discord.Color.green())
+        desc = []
+        for pid, choice in self.choices.items():
+            name = "🤖 機器人" if pid == "bot" else f"<@{pid}>"
+            desc.append(f"{name}: {choice}")
+        reveal_embed.description = "\n".join(desc)
+        await interaction.message.edit(embed=reveal_embed, view=None)
 
+        await asyncio.sleep(1)
+
+        # 判斷勝負
+        winner = self.check_winner()
+        if winner:
+            self.scores[winner] += 1
+
+        # 檢查是否結束
         if any(score >= self.rounds for score in self.scores.values()):
-            winner = max(self.scores, key=self.scores.get)
-            winner_name = "🤖 機器人" if winner == "bot" else f"<@{winner}>"
+            winner_id = max(self.scores, key=self.scores.get)
+            winner_name = "🤖 機器人" if winner_id == "bot" else f"<@{winner_id}>"
             await interaction.followup.send(f"🎉 {winner_name} 獲勝！")
             self.stop()
             return
 
-        await interaction.followup.send("📢 下一局開始！", ephemeral=True)
+        # 下一局
+        self.choices = {k: None for k in self.choices}
+        if self.vs_bot:
+            self.choices["bot"] = random.choice(["✌️", "👊", "🖐️"])
         await interaction.message.edit(embed=self.make_embed(), view=self)
 
     def check_winner(self):
-        choices = list(self.choices.values())
-        if len(set(choices)) == 1:  # 平手
-            return None
-        beats = {"✌️": "🖐️", "👊": "✌️", "🖐️": "👊"}
-        p1, p2 = list(self.choices.keys())
+        players = list(self.choices.keys())
+        p1, p2 = players[0], players[1]
         c1, c2 = self.choices[p1], self.choices[p2]
-        return p1 if beats[c1] == c2 else p2
 
-    @discord.ui.button(label="✌️", style=discord.ButtonStyle.primary)
-    async def scissors(self, interaction, button):
+        # 平手
+        if c1 == c2:
+            return None
+        wins = {"✌️": "🖐️", "👊": "✌️", "🖐️": "👊"}
+        return p1 if wins[c1] == c2 else p2
+
+    @discord.ui.button(label="✌️ 剪刀", style=discord.ButtonStyle.primary)
+    async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_choice(interaction, "✌️")
 
-    @discord.ui.button(label="👊", style=discord.ButtonStyle.primary)
-    async def rock(self, interaction, button):
+    @discord.ui.button(label="👊 石頭", style=discord.ButtonStyle.danger)
+    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_choice(interaction, "👊")
 
-    @discord.ui.button(label="🖐️", style=discord.ButtonStyle.primary)
-    async def paper(self, interaction, button):
+    @discord.ui.button(label="🖐️ 布", style=discord.ButtonStyle.success)
+    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_choice(interaction, "🖐️")
 # =========================
 # ⚡ COGS
