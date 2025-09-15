@@ -141,9 +141,9 @@ class RPSView(discord.ui.View):
 # =========================
 
 # -------- UtilityCog --------
-    class UtilityCog(commands.Cog):
-        def __init__(self, bot):
-            self.bot = bot
+class UtilityCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
     # ================
     # /say 指令
     # ================  
