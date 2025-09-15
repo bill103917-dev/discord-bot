@@ -375,7 +375,7 @@ class FunCog(commands.Cog):
         self.active_games = {}
 
     # 🎮 剪刀石頭布
-     @app_commands.command(name="rps", description="剪刀石頭布對戰")
+    @app_commands.command(name="rps", description="剪刀石頭布對戰")
     @app_commands.describe(opponent="要挑戰的玩家", vs_bot="是否與機器人對戰")
     async def rps(self, interaction: discord.Interaction, opponent: discord.User = None, vs_bot: bool = False):
         if not opponent and not vs_bot:
