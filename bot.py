@@ -35,6 +35,12 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
+import discord
+from discord import app_commands
+from discord.ext import commands
+import asyncio
+import random
+
 class RPSView(discord.ui.View):
     def __init__(self, player1, player2, rounds, vs_bot):
         super().__init__(timeout=60)
@@ -51,7 +57,7 @@ class RPSView(discord.ui.View):
             self.choices = {player1.id: None, player2.id: None}
 
     def make_embed(self):
-        embed = discord.Embed(title="✂️ 石頭剪刀布", color=discord.Color.blue())
+        embed = discord.Embed(title=f"✂️ 石頭剪刀布（搶 {self.rounds} 勝）", color=discord.Color.blue())
         desc = []
         for pid in self.choices:
             name = "🤖 機器人" if pid == "bot" else f"<@{pid}>"
@@ -59,7 +65,7 @@ class RPSView(discord.ui.View):
             if choice is None:
                 desc.append(f"{name}: ❓")
             elif choice in ["✌️", "👊", "🖐️"]:
-                desc.append(f"{name}: ✅")  # 出拳顯示打勾
+                desc.append(f"{name}: ✅")
         embed.description = "\n".join(desc)
         score_text = " | ".join([f"{'🤖 機器人' if k=='bot' else f'<@{k}>'}: {v}" for k,v in self.scores.items()])
         embed.add_field(name="比分", value=score_text, inline=False)
@@ -82,7 +88,7 @@ class RPSView(discord.ui.View):
 
     async def end_round(self, interaction):
         # 顯示雙方真實出拳
-        reveal_embed = discord.Embed(title="✂️ 石頭剪刀布", color=discord.Color.green())
+        reveal_embed = discord.Embed(title=f"✂️ 石頭剪刀布（搶 {self.rounds} 勝）", color=discord.Color.green())
         desc = []
         for pid, choice in self.choices.items():
             name = "🤖 機器人" if pid == "bot" else f"<@{pid}>"
@@ -115,8 +121,6 @@ class RPSView(discord.ui.View):
         players = list(self.choices.keys())
         p1, p2 = players[0], players[1]
         c1, c2 = self.choices[p1], self.choices[p2]
-
-        # 平手
         if c1 == c2:
             return None
         wins = {"✌️": "🖐️", "👊": "✌️", "🖐️": "👊"}
@@ -132,7 +136,6 @@ class RPSView(discord.ui.View):
 
     @discord.ui.button(label="🖐️ 布", style=discord.ButtonStyle.success)
     async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_choice(interaction, "🖐️")
 # =========================
 # ⚡ COGS
 # =========================
@@ -343,37 +346,45 @@ class FunCog(commands.Cog):
         self.active_games = {}
 
     # 🎮 剪刀石頭布
-    @app_commands.command(
-        name="rps",
-        description="剪刀石頭布！"
-    )
-    @app_commands.describe(
-        rounds="搶幾勝（預設3）",
-        opponent="要挑戰的對象（選填）",
-        vs_bot="是否對機器人玩（預設False）"
-    )
-    async def rps(
-        self,
-        interaction: discord.Interaction,
-        rounds: int = 3,
-        opponent: discord.User = None,
-        vs_bot: bool = False
-    ):
+    @app_commands.command(name="rps", description="剪刀石頭布對戰")
+    @app_commands.describe(rounds="搶幾勝（預設 3）", opponent="挑戰對象", vs_bot="是否跟機器人玩")
+    async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: discord.User = None, vs_bot: bool = False):
         if not opponent and not vs_bot:
-            return await interaction.response.send_message(
-                "❌ 你必須選擇挑戰對象或開啟 vs_bot 才能開始！",
-                ephemeral=True
-            )
-
+            await interaction.response.send_message("❌ 請選擇對手或啟用 vs_bot", ephemeral=True)
+            return
         if opponent and opponent.bot:
-            return await interaction.response.send_message(
-                "🤖 不能邀請機器人，請改用 vs_bot=True",
-                ephemeral=True
-            )
+            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
+            return
+
+        # 如果是對玩家，先詢問是否接受
+        if opponent:
+            view = ConfirmView()
+            await interaction.response.send_message(f"👋 <@{opponent.id}> 你被 <@{interaction.user.id}> 邀請來玩剪刀石頭布，搶 {rounds} 勝！是否接受？", view=view)
+            timeout = await view.wait()
+            if timeout or not view.value:
+                await interaction.followup.send("❌ 對方拒絕或未回應，遊戲取消。")
+                return
 
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
-        embed = view.make_embed()
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=view.make_embed(), view=view)
+
+
+class ConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=30)
+        self.value = None
+
+    @discord.ui.button(label="✅ 接受", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        await interaction.response.edit_message(content="✅ 已接受挑戰！", view=None)
+        self.stop()
+
+    @discord.ui.button(label="❌ 拒絕", style=discord.ButtonStyle.danger)
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        await interaction.response.edit_message(content="❌ 拒絕挑戰，遊戲取消。", view=None)
+        self.stop()
         
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
