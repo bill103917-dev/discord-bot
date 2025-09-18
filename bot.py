@@ -37,143 +37,131 @@ def is_main_instance():
 #剪刀石頭布參數
 class RPSView(discord.ui.View):
     def __init__(self, player1, player2=None, rounds=3, vs_bot=False):
-        super().__init__(timeout=None)
+        super().__init__(timeout=60)
         self.player1 = player1
         self.player2 = player2
-        self.rounds = rounds
         self.vs_bot = vs_bot
+        self.rounds = rounds
         self.current_round = 1
-        self.scores = {player1: 0, player2: 0 if player2 else 0}
+        self.scores = {player1: 0}
+        if player2:
+            self.scores[player2] = 0
+        elif vs_bot:
+            self.scores["bot"] = 0
         self.choices = {}
-        self.accepted = False
-        self.game_started = False
-        self.round_task = None
+        if vs_bot:
+            self.choices["bot"] = random.choice(["✊", "✌️", "✋"])
+        self.message = None
+        active_games[player1.id] = self
 
-    def make_embed(self, game_over=False, winner=None):
-        desc = (
-            f"👤 **玩家 1：** {self.player1.mention}\n"
-            f"👤 **玩家 2：** {self.player2.mention if self.player2 else '🤖 機器人'}\n\n"
-            f"📊 **比數：** {self.scores[self.player1]} - {self.scores[self.player2] if self.player2 else 0}"
-        )
-        embed = discord.Embed(
-            title=f"✂️ 剪刀石頭布對戰（搶 {self.rounds} 勝）",
-            description=desc,
-            color=discord.Color.blurple()
-        )
+    def make_embed(self, game_over=False, winner=None, round_result=None):
+        title = f"🎮 剪刀石頭布 - 第 {self.current_round} 回合 / 搶 {self.rounds} 勝"
+        desc = ""
+
+        p1_score = self.scores.get(self.player1, 0)
+        p2_score = self.scores.get(self.player2, 0) if self.player2 else self.scores.get("bot", 0)
+
+        desc += f"🏆 **比分**：{self.player1.mention} **{p1_score}** - **{p2_score}** {self.player2.mention if self.player2 else '🤖 機器人'}\n\n"
+
         if game_over:
-            embed.set_footer(text=f"🏆 對戰結束！{winner.mention if isinstance(winner, discord.User) else winner} 獲勝！")
+            desc += f"🎉 **{winner}** 獲勝！"
+        elif round_result:
+            desc += round_result + "\n\n請繼續選擇你的出拳：✊ / ✌️ / ✋"
         else:
-            embed.set_footer(text=f"第 {self.current_round} 局 / 搶 {self.rounds} 勝")
-        return embed
+            desc += "請選擇你的出拳：✊ / ✌️ / ✋"
 
-    async def start_game(self, interaction):
-        self.accepted = True
-        self.game_started = True
-        # 禁用接受/拒絕按鈕
-        for item in self.children:
-            if isinstance(item, discord.ui.Button) and item.custom_id in ["accept", "decline"]:
-                item.disabled = True
-        await interaction.message.edit(embed=self.make_embed(), view=self)
-        await self.start_round_timeout(interaction.message.channel)
+        return discord.Embed(title=title, description=desc, color=discord.Color.blurple())
 
-        # 如果是 vs_bot，讓機器人先出拳
-        if self.vs_bot:
-            self.choices["bot"] = random.choice(["✌️", "✊", "✋"])
+    def make_cancel_embed(self):
+        return discord.Embed(
+            title="🛑 遊戲已取消",
+            description=f"{self.player1.mention} 取消了這場剪刀石頭布比賽。",
+            color=discord.Color.red()
+        )
 
-    async def start_round_timeout(self, channel):
-        if self.round_task:
-            self.round_task.cancel()
-        self.round_task = asyncio.create_task(self.round_timer(channel))
+    def make_timeout_embed(self):
+        return discord.Embed(
+            title="⌛ 遊戲超時",
+            description=f"{self.player1.mention} 在 60 秒內沒有出拳，判定認輸。",
+            color=discord.Color.orange()
+        )
 
-    async def round_timer(self, channel):
-        try:
-            await asyncio.sleep(60)
-            # 判斷誰沒出
-            not_played = [p for p in [self.player1, self.player2] if p and p not in self.choices]
-            if not_played:
-                loser = not_played[0]
-                winner = self.player2 if loser == self.player1 else self.player1
-                self.scores[winner] = self.rounds
-                for item in self.children:
-                    item.disabled = True
-                await channel.send(f"⌛ {loser.mention} 超時未出拳，{winner.mention} 自動獲勝！")
-                await channel.send(embed=self.make_embed(game_over=True, winner=winner), view=self)
-        except asyncio.CancelledError:
-            return
-
-    async def process_round(self, interaction: discord.Interaction):
-        expected = 2 if self.player2 else 1
-        if len(self.choices) < expected:
-            return  # 等待另一位玩家
-
-        # 出拳後等 1 秒再顯示結果
-        await asyncio.sleep(1)
-
+    async def handle_round(self):
         p1_choice = self.choices.get(self.player1)
         p2_choice = self.choices.get(self.player2) if self.player2 else self.choices.get("bot")
 
+        # 第一步：先顯示雙方出拳
+        round_header = f"🎮 第 {self.current_round} 回合 / 搶 {self.rounds} 勝\n"
+        result_msg = round_header
+        result_msg += f"{self.player1.mention} 出了 {p1_choice} ✅\n"
+        result_msg += f"{self.player2.mention if self.player2 else '🤖 機器人'} 出了 {p2_choice} ✅"
+        await self.message.edit(embed=self.make_embed(), content=result_msg)
+
+        await asyncio.sleep(1)
+
         # 判斷勝負
         if p1_choice == p2_choice:
-            result = "🤝 平手！"
+            round_result = "🤝 這回合平手！"
         elif (p1_choice, p2_choice) in [("✌️", "✋"), ("✊", "✌️"), ("✋", "✊")]:
-            result = f"✅ {self.player1.mention} 贏了！"
+            round_result = f"✅ {self.player1.mention} 贏了這回合！"
             self.scores[self.player1] += 1
         else:
-            result = f"✅ {self.player2.mention if self.player2 else '🤖 機器人'} 贏了！"
-            self.scores[self.player2] += 1
+            round_result = f"✅ {self.player2.mention if self.player2 else '🤖 機器人'} 贏了這回合！"
+            self.scores[self.player2 if self.player2 else "bot"] += 1
 
-        self.choices.clear()
-
-        if self.scores[self.player1] >= self.rounds or self.scores[self.player2] >= self.rounds:
-            winner = self.player1 if self.scores[self.player1] > self.scores[self.player2] else (self.player2 or "🤖 機器人")
-            for item in self.children:
-                item.disabled = True
-            await interaction.message.edit(embed=self.make_embed(game_over=True, winner=winner), view=self)
+        # 判斷是否結束比賽
+        if self.scores[self.player1] >= self.rounds or self.scores[self.player2 if self.player2 else "bot"] >= self.rounds:
+            winner = self.player1.mention if self.scores[self.player1] > self.scores[self.player2 if self.player2 else "bot"] else (self.player2.mention if self.player2 else "🤖 機器人")
+            await self.message.edit(embed=self.make_embed(game_over=True, winner=winner), content=None, view=None)
+            active_games.pop(self.player1.id, None)
+            self.stop()
         else:
             self.current_round += 1
-            await interaction.message.edit(embed=self.make_embed(), view=self)
-            await interaction.followup.send(result, ephemeral=False)
-            await self.start_round_timeout(interaction.message.channel)
+            self.choices.clear()
+            if self.vs_bot:
+                self.choices["bot"] = random.choice(["✊", "✌️", "✋"])
+            await self.message.edit(embed=self.make_embed(round_result=round_result), content=None, view=self)
 
-    async def handle_choice(self, interaction, choice):
-        if not self.game_started:
-            await interaction.response.send_message("❌ 遊戲尚未開始！", ephemeral=True)
+    async def on_timeout(self):
+        await self.message.edit(embed=self.make_timeout_embed(), view=None, content=None)
+        active_games.pop(self.player1.id, None)
+        self.stop()
+
+    @discord.ui.button(label="✊", style=discord.ButtonStyle.secondary)
+    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.make_choice(interaction, "✊")
+
+    @discord.ui.button(label="✌️", style=discord.ButtonStyle.secondary)
+    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.make_choice(interaction, "✌️")
+
+    @discord.ui.button(label="✋", style=discord.ButtonStyle.secondary)
+    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.make_choice(interaction, "✋")
+
+    @discord.ui.button(label="❌ 取消遊戲", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.player1:
+            await interaction.response.send_message("❌ 只有主辦方可以取消遊戲！", ephemeral=True)
             return
-        if interaction.user not in [self.player1, self.player2]:
-            await interaction.response.send_message("🚫 你不是參加者！", ephemeral=True)
+        await interaction.response.edit_message(embed=self.make_cancel_embed(), view=None, content=None)
+        active_games.pop(self.player1.id, None)
+        self.stop()
+
+    async def make_choice(self, interaction: discord.Interaction, choice: str):
+        if interaction.user not in [self.player1, self.player2] and not self.vs_bot:
+            await interaction.response.send_message("❌ 你不是參加玩家！", ephemeral=True)
             return
+        if interaction.user in self.choices:
+            await interaction.response.send_message("❌ 你已經出過拳了！", ephemeral=True)
+            return
+
         self.choices[interaction.user] = choice
         await interaction.response.defer()
-        await self.process_round(interaction)
 
-    @discord.ui.button(label="剪刀", style=discord.ButtonStyle.primary, emoji="✌️")
-    async def scissor(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_choice(interaction, "✌️")
-
-    @discord.ui.button(label="石頭", style=discord.ButtonStyle.primary, emoji="✊")
-    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_choice(interaction, "✊")
-
-    @discord.ui.button(label="布", style=discord.ButtonStyle.primary, emoji="✋")
-    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_choice(interaction, "✋")
-
-    @discord.ui.button(label="接受邀請", style=discord.ButtonStyle.success, custom_id="accept")
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.player2:
-            await interaction.response.send_message("🚫 這不是給你的邀請！", ephemeral=True)
-            return
-        await self.start_game(interaction)
-
-    @discord.ui.button(label="拒絕 / 取消", style=discord.ButtonStyle.danger, custom_id="decline")
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user not in [self.player1, self.player2]:
-            await interaction.response.send_message("🚫 只有玩家可以取消！", ephemeral=True)
-            return
-        for item in self.children:
-            item.disabled = True
-        embed = discord.Embed(title="❌ 對戰已取消", color=discord.Color.red())
-        await interaction.message.edit(embed=embed, view=self)
+        expected = 2 if not self.vs_bot else 1
+        if len(self.choices) >= expected:
+            await self.handle_round()
 # =========================
 # ⚡ COGS
 # =========================
