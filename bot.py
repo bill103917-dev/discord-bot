@@ -35,6 +35,42 @@ def is_main_instance():
     return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
 
 #剪刀石頭布參數
+active_games = {}
+
+class RPSInviteView(discord.ui.View):
+    def __init__(self, challenger, opponent, rounds):
+        super().__init__(timeout=30)
+        self.challenger = challenger
+        self.opponent = opponent
+        self.rounds = rounds
+        self.value = None
+
+    def make_invite_embed(self):
+        return discord.Embed(
+            title="🎮 剪刀石頭布挑戰",
+            description=f"{self.challenger.mention} 邀請 {self.opponent.mention} 進行剪刀石頭布 (搶 {self.rounds} 勝)\n\n請選擇是否接受！",
+            color=discord.Color.blurple()
+        )
+
+    @discord.ui.button(label="✅ 接受", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.opponent:
+            await interaction.response.send_message("❌ 只有被邀請的人可以按！", ephemeral=True)
+            return
+        self.value = True
+        await interaction.response.edit_message(content=f"{self.opponent.mention} 接受了挑戰！", embed=None, view=None)
+        self.stop()
+
+    @discord.ui.button(label="❌ 拒絕", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.opponent:
+            await interaction.response.send_message("❌ 只有被邀請的人可以按！", ephemeral=True)
+            return
+        self.value = False
+        await interaction.response.edit_message(content=f"{self.opponent.mention} 拒絕了挑戰。", embed=None, view=None)
+        self.stop()
+
+
 class RPSView(discord.ui.View):
     def __init__(self, player1, player2=None, rounds=3, vs_bot=False):
         super().__init__(timeout=60)
@@ -50,56 +86,41 @@ class RPSView(discord.ui.View):
             self.scores["bot"] = 0
         self.choices = {}
         if vs_bot:
-            self.choices["bot"] = random.choice(["✊", "✌️", "✋"])
+            self.choices["bot"] = random.choice(["✊", "✌️", "✋"])  # 機器人先出拳
         self.message = None
         active_games[player1.id] = self
 
     def make_embed(self, game_over=False, winner=None, round_result=None):
         title = f"🎮 剪刀石頭布 - 第 {self.current_round} 回合 / 搶 {self.rounds} 勝"
-        desc = ""
-
         p1_score = self.scores.get(self.player1, 0)
         p2_score = self.scores.get(self.player2, 0) if self.player2 else self.scores.get("bot", 0)
 
-        desc += f"🏆 **比分**：{self.player1.mention} **{p1_score}** - **{p2_score}** {self.player2.mention if self.player2 else '🤖 機器人'}\n\n"
-
+        desc = f"🏆 **比分**：{self.player1.mention} **{p1_score}** - **{p2_score}** {self.player2.mention if self.player2 else '🤖 機器人'}\n\n"
         if game_over:
             desc += f"🎉 **{winner}** 獲勝！"
         elif round_result:
             desc += round_result + "\n\n請繼續選擇你的出拳：✊ / ✌️ / ✋"
         else:
             desc += "請選擇你的出拳：✊ / ✌️ / ✋"
-
         return discord.Embed(title=title, description=desc, color=discord.Color.blurple())
 
     def make_cancel_embed(self):
-        return discord.Embed(
-            title="🛑 遊戲已取消",
-            description=f"{self.player1.mention} 取消了這場剪刀石頭布比賽。",
-            color=discord.Color.red()
-        )
+        return discord.Embed(title="🛑 遊戲已取消", description="這場比賽已被取消。", color=discord.Color.red())
 
     def make_timeout_embed(self):
-        return discord.Embed(
-            title="⌛ 遊戲超時",
-            description=f"{self.player1.mention} 在 60 秒內沒有出拳，判定認輸。",
-            color=discord.Color.orange()
-        )
+        return discord.Embed(title="⌛ 遊戲超時", description="60 秒內沒有出拳，判定認輸。", color=discord.Color.orange())
 
     async def handle_round(self):
         p1_choice = self.choices.get(self.player1)
         p2_choice = self.choices.get(self.player2) if self.player2 else self.choices.get("bot")
 
-        # 第一步：先顯示雙方出拳
-        round_header = f"🎮 第 {self.current_round} 回合 / 搶 {self.rounds} 勝\n"
-        result_msg = round_header
+        result_msg = f"🎮 第 {self.current_round} 回合\n"
         result_msg += f"{self.player1.mention} 出了 {p1_choice} ✅\n"
         result_msg += f"{self.player2.mention if self.player2 else '🤖 機器人'} 出了 {p2_choice} ✅"
         await self.message.edit(embed=self.make_embed(), content=result_msg)
 
         await asyncio.sleep(1)
 
-        # 判斷勝負
         if p1_choice == p2_choice:
             round_result = "🤝 這回合平手！"
         elif (p1_choice, p2_choice) in [("✌️", "✋"), ("✊", "✌️"), ("✋", "✊")]:
@@ -109,7 +130,6 @@ class RPSView(discord.ui.View):
             round_result = f"✅ {self.player2.mention if self.player2 else '🤖 機器人'} 贏了這回合！"
             self.scores[self.player2 if self.player2 else "bot"] += 1
 
-        # 判斷是否結束比賽
         if self.scores[self.player1] >= self.rounds or self.scores[self.player2 if self.player2 else "bot"] >= self.rounds:
             winner = self.player1.mention if self.scores[self.player1] > self.scores[self.player2 if self.player2 else "bot"] else (self.player2.mention if self.player2 else "🤖 機器人")
             await self.message.edit(embed=self.make_embed(game_over=True, winner=winner), content=None, view=None)
@@ -155,7 +175,6 @@ class RPSView(discord.ui.View):
         if interaction.user in self.choices:
             await interaction.response.send_message("❌ 你已經出過拳了！", ephemeral=True)
             return
-
         self.choices[interaction.user] = choice
         await interaction.response.defer()
 
@@ -376,51 +395,31 @@ class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="rps", description="剪刀石頭布對戰")
-    @app_commands.describe(
-        rounds="搶幾勝（預設 3）",
-        opponent="要挑戰的玩家",
-        vs_bot="是否與機器人對戰"
-    )
-    async def rps(
-        self,
-        interaction: discord.Interaction,
-        rounds: int = 3,
-        opponent: discord.User = None,
-        vs_bot: bool = False
-    ):
-        # 驗證參數
-        if rounds <= 0:
-            await interaction.response.send_message("❌ 請輸入大於 0 的回合數！", ephemeral=True)
-            return
 
+    @app_commands.command(name="rps", description="剪刀石頭布")
+    @app_commands.describe(rounds="搶幾勝 (預設 3)", opponent="要挑戰的對象", vs_bot="是否對機器人玩")
+    async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: discord.User = None, vs_bot: bool = False):
         if not opponent and not vs_bot:
-            await interaction.response.send_message("❌ 請選擇對手或啟用 vs_bot！", ephemeral=True)
+            await interaction.response.send_message("❌ 請選擇對手或設定 vs_bot=True", ephemeral=True)
             return
 
         if opponent and opponent.bot:
-            await interaction.response.send_message("🤖 不能邀請機器人，請用 vs_bot=True", ephemeral=True)
+            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
             return
 
-        # 有對手 -> 先邀請
         if opponent:
-            view = RPSInviteView(interaction.user, opponent)
-            await interaction.response.send_message(
-                f"{opponent.mention}，{interaction.user.mention} 邀請你剪刀石頭布（搶 {rounds} 勝）！",
-                view=view
-            )
-            view.message = await interaction.original_response()
-            await view.wait()
-            if view.value is not True:
+            invite_view = RPSInviteView(interaction.user, opponent, rounds)
+            msg = await interaction.response.send_message(embed=invite_view.make_invite_embed(), view=invite_view)
+            await invite_view.wait()
+            if invite_view.value is None:
+                await interaction.edit_original_response(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
                 return
-        else:
-            await interaction.response.defer()
+            if not invite_view.value:
+                return
 
-        # 開始遊戲
-        rps_view = RPSView(interaction.user, opponent if opponent else interaction.user, rounds=rounds, vs_bot=vs_bot)
-        embed = rps_view.make_embed()
-        await interaction.followup.send(embed=embed, view=rps_view)
-        rps_view.message = await interaction.original_response()
+        view = RPSView(interaction.user, opponent, rounds, vs_bot)
+        embed = view.make_embed()
+        view.message = await interaction.followup.send(embed=embed, view=view)
         
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
