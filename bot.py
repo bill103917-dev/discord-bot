@@ -418,13 +418,13 @@ class FunCog(commands.Cog):
 )
 async def rps(
     self,
-    interaction: discord.Interaction,
+    interaction: Interaction,  # ✅ 改成 discord.Interaction
     rounds: int = 3,
-    opponent: discord.User = None,
+    opponent: User = None,
     vs_bot: bool = False
 ):
     if opponent:
-        await interaction.response.defer()  # ✅ 放在 async function 裡
+        await interaction.response.defer()
         invite_view = RPSInviteView(interaction.user, opponent, rounds)
         msg = await interaction.followup.send(embed=invite_view.make_invite_embed(), view=invite_view)
         await invite_view.wait()
