@@ -191,9 +191,12 @@ class UtilityCog(commands.Cog):
     # ================
     # /say 指令
     # ================  
+# ================
+# /say 指令
+# ================  
     @app_commands.command(
-        name="say",
-        description="讓機器人發送訊息（管理員或特殊使用者限定）"
+    name="say",
+    description="讓機器人發送訊息（管理員或特殊使用者限定）"
     )
     @app_commands.describe(
         message="要發送的訊息",
@@ -201,22 +204,20 @@ class UtilityCog(commands.Cog):
         user="選擇要私訊的使用者（可選）"
     )
     async def say(
-        await log_command(interaction.user, "/say")
         self,
         interaction: discord.Interaction,
         message: str,
         channel: Optional[discord.TextChannel] = None,
         user: Optional[discord.User] = None
     ):
-        # ✅ 權限檢查（管理員 或 特殊使用者）
+        await log_command(interaction, "/say")  # ✅ 放在函式內最開頭
+
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
             return
 
-        # 先回應避免超時
         await interaction.response.defer(ephemeral=True)
 
-        # 如果有指定用戶 -> 發私訊
         if user:
             try:
                 await user.send(message)
@@ -225,28 +226,28 @@ class UtilityCog(commands.Cog):
                 await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
             return
 
-        # 如果沒指定用戶 -> 發頻道
         target_channel = channel or interaction.channel
         try:
             await target_channel.send(message)
             await interaction.followup.send(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
+
     # ================
     # /公告 指令
     # ================
     @app_commands.command(
-        name="announce",
-        description="發布公告（管理員限定）"
+    name="announce",
+    description="發布公告（管理員限定）"
+    
     )
     @app_commands.describe(
-        title="公告標題（可選）",
-        content="公告內容",
-        channel="公告頻道（可不選）",
-        ping_everyone="是否要 @everyone"
+    title="公告標題（可選）",
+    content="公告內容",
+    channel="公告頻道（可不選）",
+    ping_everyone="是否要 @everyone"
     )
     async def announce(
-        await log_command(interaction.user, "/announce")
         self,
         interaction: discord.Interaction,
         content: str,
@@ -254,10 +255,10 @@ class UtilityCog(commands.Cog):
         channel: Optional[discord.TextChannel] = None,
         ping_everyone: bool = False
     ):
-        # 先回應，避免超時
+        await log_command(interaction, "/announce")  # ✅ 放在函式最上面
+
         await interaction.response.defer(ephemeral=True)
 
-        # 權限檢查
         if not interaction.user.guild_permissions.administrator:
             await interaction.followup.send("❌ 只有管理員能發布公告", ephemeral=True)
             return
@@ -270,11 +271,11 @@ class UtilityCog(commands.Cog):
         )
         embed.set_footer(text=f"發布者：{interaction.user.display_name}")
 
-        # 發送公告
         mention = "@everyone" if ping_everyone else ""
         await target_channel.send(content=mention, embed=embed)
         await interaction.followup.send(f"✅ 公告已發送到 {target_channel.mention}", ephemeral=True)
-
+    
+    
     @app_commands.command(name="calc", description="簡單計算器")
     @app_commands.describe(expr="例如：1+2*3")
     async def calc(self, interaction: Interaction, expr: str):
@@ -410,6 +411,7 @@ class FunCog(commands.Cog):
         opponent: discord.User = None,
         vs_bot: bool = False
     ):
+        await log_command(interaction, "/rps")
         if not opponent and not vs_bot:
             await interaction.response.send_message(
                 "❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True
