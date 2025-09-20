@@ -14,6 +14,9 @@ from discord import Interaction, User, ui
 from discord import ui, Interaction
 from typing import Optional
 import sys
+import datetime
+
+command_logs = []  # 紀錄所有指令使用
 
 # =========================
 # ⚡ 基本設定
@@ -29,6 +32,17 @@ SPECIAL_USER_IDS = [OWNER_ID]
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
+
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command):
+    command_logs.append({
+        "user": str(interaction.user),
+        "command": f"/{command.qualified_name}",
+        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
 
 MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
 def is_main_instance():
@@ -535,19 +549,33 @@ async def on_ready():
     print(f"✅ Bot 已啟動！登入身分：{bot.user}")
     await bot.tree.sync()
 
+async def handle_logs(request):
+    html = "<html><head><title>指令紀錄</title></head><body>"
+    html += "<h1>📜 指令使用紀錄</h1><table border='1' style='border-collapse: collapse;'>"
+    html += "<tr><th>時間</th><th>使用者</th><th>指令</th></tr>"
+    for log in reversed(command_logs[-50:]):  # 顯示最新 50 筆，最新的在上面
+        html += f"<tr><td>{log['time']}</td><td>{log['user']}</td><td>{log['command']}</td></tr>"
+    html += "</table></body></html>"
+    return web.Response(text=html, content_type="text/html")
+
 async def keep_alive():
-    async def handle(request):
+    async def handle_root(request):
         return web.Response(text="Bot is running!")
+
     app = web.Application()
-    app.add_routes([web.get("/", handle)])
+    app.add_routes([web.get("/", handle_root)])
+    app.add_routes([web.get("/logs", handle_logs)])  # 新增紀錄頁面
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
     await site.start()
     print("✅ HTTP server running on port 8080")
+    
     async def shutdown():
         await runner.cleanup()
+    
     return shutdown
+
 
 async def main():
     shutdown_keep_alive = await keep_alive()
