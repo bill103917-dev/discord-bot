@@ -388,20 +388,13 @@ class ReactionRoleCog(commands.Cog):
                 except: pass
 
 # -------- FunCog --------
+# -------- FunCog --------
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.active_games = {}
 
     # 🎮 剪刀石頭布
-class FunCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-
-import discord
-from discord import app_commands
-
-
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     @app_commands.describe(
         rounds="搶幾勝（預設 3）",
@@ -442,14 +435,12 @@ from discord import app_commands
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
         embed = view.make_embed()
         view.message = await interaction.followup.send(embed=embed, view=view)
-        
+
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
         number = random.randint(1, 6)
         await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
-
-
 
 
 # -------- DrawCog --------
