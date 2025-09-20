@@ -398,18 +398,6 @@ class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-
-    @app_commands.command(name="rps", description="剪刀石頭布")
-    @app_commands.describe(rounds="搶幾勝 (預設 3)", opponent="要挑戰的對象", vs_bot="是否對機器人玩")
-    async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: discord.User = None, vs_bot: bool = False):
-        if not opponent and not vs_bot:
-            await interaction.response.send_message("❌ 請選擇對手或設定 vs_bot=True", ephemeral=True)
-            return
-
-        if opponent and opponent.bot:
-            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
-            return
-
 import discord
 from discord import app_commands
 
@@ -422,7 +410,7 @@ from discord import app_commands
     )
     async def rps(
         self,
-        interaction: discord.Interaction,  # ✅ 改成正確的類別
+        interaction: discord.Interaction,  # 正確的型別
         rounds: int = 3,
         opponent: discord.User = None,
         vs_bot: bool = False
@@ -440,7 +428,7 @@ from discord import app_commands
             return
 
         if opponent:
-            await interaction.response.defer()  # 告訴 Discord 我們在處理中
+            await interaction.response.defer()
             invite_view = RPSInviteView(interaction.user, opponent, rounds)
             msg = await interaction.followup.send(embed=invite_view.make_invite_embed(), view=invite_view)
             await invite_view.wait()
