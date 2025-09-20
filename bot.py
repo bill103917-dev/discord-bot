@@ -612,7 +612,6 @@ def keep_web_alive():
 
 async def main():
     keep_web_alive()
-    shutdown_keep_alive = await keep_alive()
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(DrawCog(bot))
