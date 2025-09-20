@@ -33,10 +33,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
-def is_main_instance():
-    return bot.user.id == MAIN_BOT_ID or MAIN_BOT_ID == 0
-
 #剪刀石頭布參數
 active_games = {}
 
@@ -205,6 +201,7 @@ class UtilityCog(commands.Cog):
         user="選擇要私訊的使用者（可選）"
     )
     async def say(
+        await log_command(interaction.user, "/say")
         self,
         interaction: discord.Interaction,
         message: str,
@@ -249,6 +246,7 @@ class UtilityCog(commands.Cog):
         ping_everyone="是否要 @everyone"
     )
     async def announce(
+        await log_command(interaction.user, "/announce")
         self,
         interaction: discord.Interaction,
         content: str,
@@ -280,6 +278,7 @@ class UtilityCog(commands.Cog):
     @app_commands.command(name="calc", description="簡單計算器")
     @app_commands.describe(expr="例如：1+2*3")
     async def calc(self, interaction: Interaction, expr: str):
+        await log_command(interaction.user, "/calc")
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
@@ -292,6 +291,7 @@ class UtilityCog(commands.Cog):
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
     @app_commands.describe(amount="要刪除的訊息數量（1~100）")
     async def delete(self, interaction: Interaction, amount: int):
+        await log_command(interaction.user, "/delete")
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 只有管理員可以刪除訊息", ephemeral=True)
             return
@@ -321,6 +321,7 @@ class ReactionRoleCog(commands.Cog):
         channel="頻道（可選）"
     )
     async def reactionrole(self, interaction: Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
+        await log_command(interaction.user, "/reactionrole")
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
             return
@@ -402,6 +403,7 @@ class FunCog(commands.Cog):
         vs_bot="是否與機器人對戰（預設 False）"
     )
     async def rps(
+        await log_command(interaction.user, "/rps")
         self,
         interaction: discord.Interaction,  # 正確的型別
         rounds: int = 3,
@@ -439,6 +441,7 @@ class FunCog(commands.Cog):
     # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
+        await log_command(interaction.user, "/dice")
         number = random.randint(1, 6)
         await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
 
@@ -459,6 +462,7 @@ class DrawCog(commands.Cog):
 
     @app_commands.command(name="start_draw", description="開始抽獎")
     async def start_draw(self, interaction: Interaction, name: str, max_winners: int = 1, duration: str = "60s"):
+        await log_command(interaction.user, "/start_draw")
         guild_id = interaction.guild.id
         if guild_id in self.active_draws:
             await interaction.response.send_message("❌ 本伺服器已有抽獎", ephemeral=True)
@@ -503,6 +507,7 @@ class PingCog(commands.Cog):
         self.bot = bot
     @app_commands.command(name="ping", description="檢查機器人延遲")
     async def ping(self, interaction: Interaction):
+        await log_command(interaction.user, "/ping")
         await interaction.response.send_message(f"🏓 Pong! 延遲：{round(self.bot.latency*1000)}ms")
         
 #—————————helpCog——————————     
@@ -513,6 +518,7 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
+        await log_command(interaction.user, "/help")
         embed = discord.Embed(
             title="📖 指令清單",
             description="以下是目前可用的指令：",
@@ -546,42 +552,60 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
     })
 
 # =========================
-# ⚡ Bot 啟動 & HTTP 保活
+# ⚡ Bot 啟動 & HTTP 保活 and 網頁
 # =========================
-@bot.event
-async def on_ready():
-    print(f"✅ Bot 已啟動！登入身分：{bot.user}")
-    await bot.tree.sync()
+# ====== 指令使用紀錄系統 ======
+# ====== 指令使用紀錄系統 ======
+import threading
+from flask import Flask
+import discord
 
-async def handle_logs(request):
-    html = "<html><head><title>指令紀錄</title></head><body>"
-    html += "<h1>📜 指令使用紀錄</h1><table border='1' style='border-collapse: collapse;'>"
-    html += "<tr><th>時間</th><th>使用者</th><th>指令</th></tr>"
-    for log in reversed(command_logs[-50:]):  # 顯示最新 50 筆，最新的在上面
-        html += f"<tr><td>{log['time']}</td><td>{log['user']}</td><td>{log['command']}</td></tr>"
-    html += "</table></body></html>"
-    return web.Response(text=html, content_type="text/html")
+command_logs = []  # [{text, time}]
 
-async def keep_alive():
-    async def handle_root(request):
-        return web.Response(text="Bot is running!")
+async def log_command(interaction: discord.Interaction, command: str):
+    from datetime import datetime
+    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
+    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」使用了 {command}"
+    command_logs.append({
+        "text": log_text,
+        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    })
+    if len(command_logs) > 100:
+        command_logs.pop(0)
 
-    app = web.Application()
-    app.add_routes([web.get("/", handle_root)])
-    app.add_routes([web.get("/logs", handle_logs)])  # 新增紀錄頁面
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port=int(os.getenv("PORT", 8080)))
-    await site.start()
-    print("✅ HTTP server running on port 8080")
-    
-    async def shutdown():
-        await runner.cleanup()
-    
-    return shutdown
+# ====== Flask 網頁 (HTML 格式) ======
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    rows = "".join(
+        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
+        for log in reversed(command_logs)
+    )
+    return f"""
+    <html>
+        <head><title>指令紀錄</title></head>
+        <body style="font-family: sans-serif;">
+            <h1>📜 Discord Bot 指令使用紀錄</h1>
+            <table border="1" cellspacing="0" cellpadding="6">
+                <tr><th>時間</th><th>紀錄</th></tr>
+                {rows if rows else "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
+            </table>
+        </body>
+    </html>
+    """
+
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+def keep_web_alive():
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
 
 
 async def main():
+    keep_web_alive()
     shutdown_keep_alive = await keep_alive()
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(FunCog(bot))
