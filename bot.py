@@ -397,6 +397,7 @@ class FunCog(commands.Cog):
         self.active_games = {}
 
     # 🎮 剪刀石頭布
+    # 🎮 剪刀石頭布
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     @app_commands.describe(
         rounds="搶幾勝（預設 3）",
@@ -404,14 +405,16 @@ class FunCog(commands.Cog):
         vs_bot="是否與機器人對戰（預設 False）"
     )
     async def rps(
-        await log_command(interaction.user, "/rps")
         self,
-        interaction: discord.Interaction,  # 正確的型別
+        interaction: discord.Interaction,
         rounds: int = 3,
         opponent: discord.User = None,
         vs_bot: bool = False
     ):
+        # ✅ 先記錄指令使用
         await log_command(interaction, "/rps")
+
+        # 檢查參數
         if not opponent and not vs_bot:
             await interaction.response.send_message(
                 "❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True
@@ -424,6 +427,7 @@ class FunCog(commands.Cog):
             )
             return
 
+        # 如果有挑戰對象 -> 發送邀請
         if opponent:
             await interaction.response.defer()
             invite_view = RPSInviteView(interaction.user, opponent, rounds)
@@ -435,7 +439,7 @@ class FunCog(commands.Cog):
             if not invite_view.value:
                 return
 
-        # 玩家同意後開始遊戲
+        # ✅ 玩家同意後開始遊戲
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
         embed = view.make_embed()
         view.message = await interaction.followup.send(embed=embed, view=view)
