@@ -1,4 +1,4 @@
-import os
+耳import os
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -417,12 +417,12 @@ class FunCog(commands.Cog):
             return
         if not invite_view.value:
                 return
-            await invite_view.wait()
-            if invite_view.value is None:
-                await interaction.edit_original_response(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
-                return
-            if not invite_view.value:
-                return
+        await invite_view.wait()
+        if invite_view.value is None:
+            await interaction.edit_original_response(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
+            return
+        if not invite_view.value:
+            return
 
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
         embed = view.make_embed()
