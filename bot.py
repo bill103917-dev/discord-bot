@@ -407,9 +407,16 @@ class FunCog(commands.Cog):
             await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
             return
 
-        if opponent:
-            invite_view = RPSInviteView(interaction.user, opponent, rounds)
-            msg = await interaction.response.send_message(embed=invite_view.make_invite_embed(), view=invite_view)
+    if opponent:
+        await interaction.response.defer()  # 先告訴 Discord 我們在處理中
+        invite_view = RPSInviteView(interaction.user, opponent, rounds)
+        msg = await interaction.followup.send(embed=invite_view.make_invite_embed(), view=invite_view)
+        await invite_view.wait()
+        if invite_view.value is None:
+            await msg.edit(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
+            return
+        if not invite_view.value:
+                return
             await invite_view.wait()
             if invite_view.value is None:
                 await interaction.edit_original_response(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
