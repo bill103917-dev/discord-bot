@@ -32,17 +32,6 @@ SPECIAL_USER_IDS = [OWNER_ID]
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error):
-    await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
-
-@bot.event
-async def on_app_command_completion(interaction: discord.Interaction, command):
-    command_logs.append({
-        "user": str(interaction.user),
-        "command": f"/{command.qualified_name}",
-        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
 
 MAIN_BOT_ID = int(os.environ.get("MAIN_BOT_ID", 0))
 def is_main_instance():
@@ -421,8 +410,21 @@ class FunCog(commands.Cog):
             await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
             return
 
+@app_commands.command(name="rps", description="剪刀石頭布對戰")
+@app_commands.describe(
+    rounds="搶幾勝（可選）",
+    opponent="要挑戰的對象（可選）",
+    vs_bot="是否與機器人對戰"
+)
+async def rps(
+    self,
+    interaction: discord.Interaction,
+    rounds: int = 3,
+    opponent: discord.User = None,
+    vs_bot: bool = False
+):
     if opponent:
-        await interaction.response.defer()  # 先告訴 Discord 我們在處理中
+        await interaction.response.defer()  # ✅ 放在 async function 裡
         invite_view = RPSInviteView(interaction.user, opponent, rounds)
         msg = await interaction.followup.send(embed=invite_view.make_invite_embed(), view=invite_view)
         await invite_view.wait()
@@ -430,14 +432,9 @@ class FunCog(commands.Cog):
             await msg.edit(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
             return
         if not invite_view.value:
-                return
-        await invite_view.wait()
-        if invite_view.value is None:
-            await interaction.edit_original_response(content=f"{opponent.mention} 沒有回應，挑戰取消。", embed=None, view=None)
-            return
-        if not invite_view.value:
             return
 
+        # 玩家同意後開始遊戲
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
         embed = view.make_embed()
         view.message = await interaction.followup.send(embed=embed, view=view)
@@ -540,6 +537,18 @@ class HelpCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
+
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command):
+    command_logs.append({
+        "user": str(interaction.user),
+        "command": f"/{command.qualified_name}",
+        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
 
 # =========================
 # ⚡ Bot 啟動 & HTTP 保活
