@@ -409,16 +409,40 @@ def index():
     )
     return f"""
     <html>
-        <head><title>指令紀錄</title></head>
+        <head>
+            <title>指令紀錄</title>
+            <script>
+                async function refreshTable() {{
+                    try {{
+                        let res = await fetch('/logs');
+                        let data = await res.text();
+                        document.getElementById('log-table-body').innerHTML = data;
+                    }} catch (e) {{
+                        console.error("更新失敗", e);
+                    }}
+                }}
+                setInterval(refreshTable, 5000); // 每 5 秒更新一次
+            </script>
+        </head>
         <body style="font-family: sans-serif;">
             <h1>📜 Discord Bot 指令使用紀錄</h1>
             <table border="1" cellspacing="0" cellpadding="6">
                 <tr><th>時間</th><th>紀錄</th></tr>
-                {rows if rows else "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
+                <tbody id="log-table-body">
+                    {rows if rows else "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
+                </tbody>
             </table>
         </body>
     </html>
     """
+
+# 新增一個路由，專門回傳表格內容
+@app.route("/logs")
+def logs():
+    return "".join(
+        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
+        for log in reversed(command_logs)
+    ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
 
 def run_web():
     app.run(host="0.0.0.0", port=8080)
