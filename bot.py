@@ -122,7 +122,7 @@ class RPSView(discord.ui.View):
             round_result = "🤝 這回合平手！"
         elif (p1_choice, p2_choice) in [("✌️", "✋"), ("✊", "✌️"), ("✋", "✊")]:
             round_result = f"✅ {self.player1.mention} 贏了這回合！"
-            self.scores[self.player1] += 1
+            self.scores[self.player2 if self.player2 else "bot"] += 1
         else:
             round_result = f"✅ {self.player2.mention if self.player2 else '🤖 機器人'} 贏了這回合！"
             self.scores[self.player2 if self.player2 else "bot"] += 1
@@ -187,14 +187,15 @@ class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
-    async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
-        await log_command(interaction, "/say")
-        ...
-    )
+
     # =====================
     # /say 指令
     # =====================
+    
+    @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
+    async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
+        await log_command(interaction, "/say")
+
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
             return
@@ -284,12 +285,9 @@ class ReactionRoleCog(commands.Cog):
         if re.match(r"https?://", message):
             try:
                 m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
-                guild_id, channel_id, message_id = map(int, m.groups())
-                channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-                msg_obj = await channel_obj.fetch_message(message_id)
-            except:
-                await interaction.response.send_message("❌ 無法解析訊息連結", ephemeral=True)
-                return
+            if not m:
+                 await interaction.response.send_message("❌ 訊息連結格式錯誤", ephemeral=True)
+                 return
         else:
             if channel is None:
                 channel = interaction.channel
