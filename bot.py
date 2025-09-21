@@ -285,7 +285,7 @@ class ReactionRoleCog(commands.Cog):
         if re.match(r"https?://", message):
             try:
                 m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
-             if not m:
+            if not m:
                  await interaction.response.send_message("❌ 訊息連結格式錯誤", ephemeral=True)
                  return
         else:
