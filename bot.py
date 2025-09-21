@@ -511,10 +511,10 @@ class DrawCog(commands.Cog):
 class PingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    @app_commands.command(name="ping", description="檢查機器人延遲")
-    async def ping(self, interaction: Interaction):
-        await log_command(interaction.user, "/ping")
-        await interaction.response.send_message(f"🏓 Pong! 延遲：{round(self.bot.latency*1000)}ms")
+    @app_commands.command(name="ping", description="測試機器人是否在線")
+    async def ping(interaction: discord.Interaction):
+        await log_command(interaction.user, "/ping")  # ✅ interaction.user 就是 Member 物件
+        await interaction.response.send_message(f"🏓 Pong! {round(bot.latency*1000)}ms")
         
 #—————————helpCog——————————     
         
