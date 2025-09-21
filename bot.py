@@ -8,13 +8,11 @@ import re
 from typing import List, Optional
 from aiohttp import web
 from discord import ui
-from discord import Interaction
-from discord import TextChannel, User, Message
-from discord import Interaction, User, ui
-from discord import ui, Interaction
-from typing import Optional
+from discord import Interaction, TextChannel, User, Message
 import sys
 import datetime
+import threading
+from flask import Flask
 
 command_logs = []  # 紀錄所有指令使用
 
@@ -33,7 +31,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-#剪刀石頭布參數
+# 剪刀石頭布參數
 active_games = {}
 
 class RPSInviteView(discord.ui.View):
@@ -180,38 +178,23 @@ class RPSView(discord.ui.View):
         expected = 2 if not self.vs_bot else 1
         if len(self.choices) >= expected:
             await self.handle_round()
-# =========================
-# ⚡ COGS
-# =========================
 
-# -------- UtilityCog --------
+
+# =========================
+# ⚡ 指令 Cogs
+# =========================
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    # ================
-    # /say 指令
-    # ================  
-# ================
-# /say 指令
-# ================  
-    @app_commands.command(
-    name="say",
-    description="讓機器人發送訊息（管理員或特殊使用者限定）"
-    )
-    @app_commands.describe(
-        message="要發送的訊息",
-        channel="選擇要發送的頻道（可選，不選則預設為當前頻道）",
-        user="選擇要私訊的使用者（可選）"
-    )
-    async def say(
-        self,
-        interaction: discord.Interaction,
-        message: str,
-        channel: Optional[discord.TextChannel] = None,
-        user: Optional[discord.User] = None
-    ):
-        await log_command(interaction, "/say")  # ✅ 放在函式內最開頭
 
+    @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
+    async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
+        await log_command(interaction, "/say")
+        ...
+    )
+    # =====================
+    # /say 指令
+    # =====================
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
             return
@@ -233,30 +216,9 @@ class UtilityCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
 
-    # ================
-    # /公告 指令
-    # ================
-    @app_commands.command(
-    name="announce",
-    description="發布公告（管理員限定）"
-    
-    )
-    @app_commands.describe(
-    title="公告標題（可選）",
-    content="公告內容",
-    channel="公告頻道（可不選）",
-    ping_everyone="是否要 @everyone"
-    )
-    async def announce(
-        self,
-        interaction: discord.Interaction,
-        content: str,
-        title: Optional[str] = "公告📣",
-        channel: Optional[discord.TextChannel] = None,
-        ping_everyone: bool = False
-    ):
-        await log_command(interaction, "/announce")  # ✅ 放在函式最上面
-
+    @app_commands.command(name="announce", description="發布公告（管理員限定）")
+    async def announce(self, interaction: discord.Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
+        await log_command(interaction, "/announce")
         await interaction.response.defer(ephemeral=True)
 
         if not interaction.user.guild_permissions.administrator:
@@ -274,12 +236,10 @@ class UtilityCog(commands.Cog):
         mention = "@everyone" if ping_everyone else ""
         await target_channel.send(content=mention, embed=embed)
         await interaction.followup.send(f"✅ 公告已發送到 {target_channel.mention}", ephemeral=True)
-    
-    
+
     @app_commands.command(name="calc", description="簡單計算器")
-    @app_commands.describe(expr="例如：1+2*3")
-    async def calc(self, interaction: Interaction, expr: str):
-        await log_command(interaction.user, "/calc")
+    async def calc(self, interaction: discord.Interaction, expr: str):
+        await log_command(interaction, "/calc")
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
@@ -290,9 +250,8 @@ class UtilityCog(commands.Cog):
             await interaction.response.send_message(f"計算錯誤：{e}")
 
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
-    @app_commands.describe(amount="要刪除的訊息數量（1~100）")
-    async def delete(self, interaction: Interaction, amount: int):
-        await log_command(interaction.user, "/delete")
+    async def delete(self, interaction: discord.Interaction, amount: int):
+        await log_command(interaction, "/delete")
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.response.send_message("❌ 只有管理員可以刪除訊息", ephemeral=True)
             return
@@ -308,25 +267,19 @@ class UtilityCog(commands.Cog):
             await interaction.followup.send(f"❌ 刪除失敗: {e}", ephemeral=True)
 
 
-# -------- ReactionRoleCog --------
 class ReactionRoleCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.reaction_roles = {}
 
     @app_commands.command(name="reactionrole", description="新增反應身分組（管理員用）")
-    @app_commands.describe(
-        message="訊息文字或連結",
-        emoji="表情符號",
-        role="身分組",
-        channel="頻道（可選）"
-    )
-    async def reactionrole(self, interaction: Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
-        await log_command(interaction.user, "/reactionrole")
+    async def reactionrole(self, interaction: discord.Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
+        await log_command(interaction, "/reactionrole")
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
             return
 
+        # 解析訊息
         msg_obj = None
         if re.match(r"https?://", message):
             try:
@@ -359,75 +312,21 @@ class ReactionRoleCog(commands.Cog):
         msg_roles[emoji] = role.id
         await interaction.response.send_message(f"✅ 已設定 {emoji} -> {role.name}", ephemeral=True)
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload):
-        guild_roles = self.reaction_roles.get(payload.guild_id, {})
-        msg_roles = guild_roles.get(payload.message_id, {})
-        role_id = msg_roles.get(str(payload.emoji))
-        if not role_id:
-            return
-        guild = self.bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
-        if member and not member.bot:
-            role = guild.get_role(role_id)
-            if role:
-                try: await member.add_roles(role)
-                except: pass
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload):
-        guild_roles = self.reaction_roles.get(payload.guild_id, {})
-        msg_roles = guild_roles.get(payload.message_id, {})
-        role_id = msg_roles.get(str(payload.emoji))
-        if not role_id:
-            return
-        guild = self.bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
-        if member and not member.bot:
-            role = guild.get_role(role_id)
-            if role:
-                try: await member.remove_roles(role)
-                except: pass
-
-# -------- FunCog --------
-# -------- FunCog --------
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_games = {}
 
-    # 🎮 剪刀石頭布
-    # 🎮 剪刀石頭布
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
-    @app_commands.describe(
-        rounds="搶幾勝（預設 3）",
-        opponent="要挑戰的對象（可選）",
-        vs_bot="是否與機器人對戰（預設 False）"
-    )
-    async def rps(
-        self,
-        interaction: discord.Interaction,
-        rounds: int = 3,
-        opponent: discord.User = None,
-        vs_bot: bool = False
-    ):
-        # ✅ 先記錄指令使用
+    async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
         await log_command(interaction, "/rps")
-
-        # 檢查參數
         if not opponent and not vs_bot:
-            await interaction.response.send_message(
-                "❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True
-            )
+            await interaction.response.send_message("❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True)
             return
-
         if opponent and opponent.bot:
-            await interaction.response.send_message(
-                "🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True
-            )
+            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
             return
 
-        # 如果有挑戰對象 -> 發送邀請
         if opponent:
             await interaction.response.defer()
             invite_view = RPSInviteView(interaction.user, opponent, rounds)
@@ -439,115 +338,47 @@ class FunCog(commands.Cog):
             if not invite_view.value:
                 return
 
-        # ✅ 玩家同意後開始遊戲
         view = RPSView(interaction.user, opponent, rounds, vs_bot)
         embed = view.make_embed()
         view.message = await interaction.followup.send(embed=embed, view=view)
 
-    # 🎲 擲骰子
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
-        await log_command(interaction.user, "/dice")
+        await log_command(interaction, "/dice")
         number = random.randint(1, 6)
         await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
 
 
-# -------- DrawCog --------
-class DrawCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.active_draws = {}
-
-    def parse_duration(self, timestr: str) -> int:
-        pattern = r"(\d+)([smh])"
-        match = re.fullmatch(pattern, timestr.strip().lower())
-        if not match:
-            raise ValueError("時間格式錯誤")
-        number, unit = match.groups()
-        return int(number) * {"s":1,"m":60,"h":3600}[unit]
-
-    @app_commands.command(name="start_draw", description="開始抽獎")
-    async def start_draw(self, interaction: Interaction, name: str, max_winners: int = 1, duration: str = "60s"):
-        await log_command(interaction.user, "/start_draw")
-        guild_id = interaction.guild.id
-        if guild_id in self.active_draws:
-            await interaction.response.send_message("❌ 本伺服器已有抽獎", ephemeral=True)
-            return
-        try:
-            seconds = self.parse_duration(duration)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-
-        end_time = asyncio.get_event_loop().time() + seconds
-        draw_info = {
-            "name": name,
-            "max_winners": max_winners,
-            "participants": set(),
-            "task": asyncio.create_task(self._auto_end_draw(interaction, guild_id, seconds)),
-            "end_time": end_time
-        }
-        self.active_draws[guild_id] = draw_info
-        await interaction.response.send_message(f"🎉 抽獎 `{name}` 已開始！使用 /join_draw 參加。名額: {max_winners}。")
-
-    async def _auto_end_draw(self, interaction, guild_id, duration_seconds):
-        try:
-            await asyncio.sleep(duration_seconds)
-            if guild_id not in self.active_draws:
-                return
-            draw = self.active_draws.pop(guild_id)
-            participants = list(draw["participants"])
-            if not participants:
-                await interaction.channel.send(f"❌ 抽獎 `{draw['name']}` 沒有人參加。")
-                return
-            winners = random.sample(participants, min(draw["max_winners"], len(participants)))
-            winners_mentions = [f"<@{uid}>" for uid in winners]
-            await interaction.channel.send(f"🏆 抽獎 `{draw['name']}` 結束！得獎者：{', '.join(winners_mentions)}")
-        except asyncio.CancelledError:
-            return
-
-
-# -------- PingCog --------
 class PingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
     @app_commands.command(name="ping", description="測試機器人是否在線")
-    async def ping(interaction: discord.Interaction):
-        await log_command(interaction.user, "/ping")  # ✅ interaction.user 就是 Member 物件
+    async def ping(self, interaction: discord.Interaction):
+        await log_command(interaction, "/ping")
         await interaction.response.send_message(f"🏓 Pong! {round(bot.latency*1000)}ms")
-        
-#—————————helpCog——————————     
-        
+
+
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
-        await log_command(interaction.user, "/help")
-        embed = discord.Embed(
-            title="📖 指令清單",
-            description="以下是目前可用的指令：",
-            color=discord.Color.blue()
-        )
-
-        # 讀取 bot.tree 裡所有指令
-        commands_list = self.bot.tree.get_commands()
-
-        for cmd in commands_list:
-            embed.add_field(
-                name=f"/{cmd.name}",
-                value=cmd.description or "沒有描述",
-                inline=False
-            )
-
+        await log_command(interaction, "/help")
+        embed = discord.Embed(title="📖 指令清單", description="以下是目前可用的指令：", color=discord.Color.blue())
+        for cmd in self.bot.tree.get_commands():
+            embed.add_field(name=f"/{cmd.name}", value=cmd.description or "沒有描述", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-
+# 錯誤處理
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
-    await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
+    try:
+        await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
+    except:
+        pass
 
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command):
@@ -557,24 +388,14 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
         "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
 
-# =========================
-# ⚡ Bot 啟動 & HTTP 保活 and 網頁
-# =========================
-# ====== 指令使用紀錄系統 ======
-# ====== 指令使用紀錄系統 ======
-import threading
-from flask import Flask
-import discord
 
-command_logs = []  # [{text, time}]
-
+# ====== 指令使用紀錄系統 ======
 async def log_command(interaction: discord.Interaction, command: str):
-    from datetime import datetime
     guild_name = interaction.guild.name if interaction.guild else "私人訊息"
     log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」使用了 {command}"
     command_logs.append({
         "text": log_text,
-        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
@@ -609,20 +430,14 @@ def keep_web_alive():
     t.daemon = True
     t.start()
 
-
 async def main():
     keep_web_alive()
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(FunCog(bot))
-    await bot.add_cog(DrawCog(bot))
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(HelpCog(bot))
-
-    try:
-        await bot.start(TOKEN)
-    finally:
-        await shutdown_keep_alive()
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
