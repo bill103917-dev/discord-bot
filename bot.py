@@ -280,20 +280,19 @@ class ReactionRoleCog(commands.Cog):
             await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
             return
 
-        # 解析訊息
         msg_obj = None
         if re.match(r"https?://", message):
             try:
                 m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
-            if not m:
-                await interaction.response.send_message("❌ 訊息連結格式錯誤", ephemeral=True)
+                if not m:
+                    await interaction.response.send_message("❌ 訊息連結格式錯誤", ephemeral=True)
+                    return
+                guild_id, channel_id, message_id = map(int, m.groups())
+                channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+                msg_obj = await channel_obj.fetch_message(message_id)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ 無法解析訊息連結: {e}", ephemeral=True)
                 return
-        guild_id, channel_id, message_id = map(int, m.groups())
-        channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-        msg_obj = await channel_obj.fetch_message(message_id)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ 無法解析訊息連結: {e}", ephemeral=True)
-        return
         else:
             if channel is None:
                 channel = interaction.channel
