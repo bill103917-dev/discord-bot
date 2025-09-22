@@ -407,7 +407,6 @@ async def log_command(interaction: discord.Interaction, command: str):
 
 # ====== Flask 網頁 (HTML 格式) ======
 app = Flask(__name__)
-
 @app.route("/")
 def index():
     rows = "".join(
@@ -416,35 +415,25 @@ def index():
     )
     return f"""
     <html>
-        <head>
-            <title>指令紀錄</title>
-            <script>
-                async function refreshTable() {{
-                    try {{
-                        let res = await fetch('/logs');
-                        let data = await res.text();
-                        document.getElementById('log-table-body').innerHTML = data;
-                    }} catch (e) {{
-                        console.error("更新失敗", e);
-                    }}
-                }}
-                setInterval(refreshTable, 5000); // 每 5 秒更新一次
-            </script>
-        </head>
-        <body style="font-family: sans-serif;">
-            <h1>📜 Discord Bot 指令使用紀錄</h1>
-            <table border="1" cellspacing="0" cellpadding="6">
-                <tr><th>時間</th><th>紀錄</th></tr>
-                <tbody id="log-table-body">
-                    {rows if rows else "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
-                </tbody>
-            </table>
-        </body>
+    <head><meta http-equiv="refresh" content="5"></head>
+    <body>
+    <h1>指令紀錄</h1>
+    <table border="1">
+    <tr><th>時間</th><th>內容</th></tr>
+    {rows or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
+    </table>
+    </body>
     </html>
     """
 
-# 新增一個路由，專門回傳表格內容
 @app.route("/logs")
+def logs():
+    return "".join(
+        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
+        for log in reversed(command_logs)
+    ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
+
+# 新增一個路由，專門回傳表格內容
 # ====== 指令使用紀錄系統 ======
 async def log_command(interaction: discord.Interaction, command: str):
     guild_name = interaction.guild.name if interaction.guild else "私人訊息"
