@@ -466,10 +466,8 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
         "text": log_text,
         "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
-    if len(command_logs) > 100:
-        command_logs.pop(0)
-        def run_web():
-    app.run(host="0.0.0.0", port=8080)
+def run_web():
+    app.run(host="0.0.0.0", port=8080)  # 注意這裡要縮排
 
 def keep_web_alive():
     t = threading.Thread(target=run_web)
