@@ -443,19 +443,29 @@ def index():
 
 # 新增一個路由，專門回傳表格內容
 @app.route("/logs")
-def logs():
-    return "".join(
-        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
-        for log in reversed(command_logs)
-    ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
+# ====== 指令使用紀錄系統 ======
+async def log_command(interaction: discord.Interaction, command: str):
+    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
+    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
+    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
+    command_logs.append({
+        "text": log_text,
+        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
+    })
+    if len(command_logs) > 100:
+        command_logs.pop(0)
 
-def run_web():
-    app.run(host="0.0.0.0", port=8080)
-
-def keep_web_alive():
-    t = threading.Thread(target=run_web)
-    t.daemon = True
-    t.start()
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command):
+    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
+    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
+    log_text = f"✅ {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」完成了 {command.qualified_name}"
+    command_logs.append({
+        "text": log_text,
+        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
+    })
+    if len(command_logs) > 100:
+        command_logs.pop(0)
 
 async def main():
     keep_web_alive()
