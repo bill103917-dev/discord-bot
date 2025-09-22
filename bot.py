@@ -445,16 +445,7 @@ async def log_command(interaction: discord.Interaction, command: str):
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
-
-@bot.event
-async def on_app_command_completion(interaction: discord.Interaction, command):
-    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
-    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
-    log_text = f"✅ {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」完成了 {command.qualified_name}"
-    command_logs.append({
-        "text": log_text,
-        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
-    })
+        
 def run_web():
     app.run(host="0.0.0.0", port=8080)  # 注意這裡要縮排
 
