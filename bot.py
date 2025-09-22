@@ -31,6 +31,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+    
 # 剪刀石頭布參數
 active_games = {}
 
@@ -466,6 +468,13 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
+        def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+def keep_web_alive():
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
 
 async def main():
     keep_web_alive()
