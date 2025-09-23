@@ -13,6 +13,12 @@ import sys
 import datetime
 import threading
 from flask import Flask, request
+from discord import FFmpegPCMAudio
+import yt_dlp
+import asyncio
+import re
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 command_logs = []  # 紀錄所有指令使用
 
@@ -375,6 +381,127 @@ class HelpCog(commands.Cog):
         for cmd in self.bot.tree.get_commands():
             embed.add_field(name=f"/{cmd.name}", value=cmd.description or "沒有描述", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+import discord
+from discord.ext import commands
+from discord import app_commands
+from discord import FFmpegPCMAudio
+import yt_dlp
+import asyncio
+
+class VoiceCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.queue = {}  # 每個 guild 的播放隊列
+        self.now_playing = {}  # 正在播放曲目
+        self.vc_dict = {}  # 儲存語音客戶端
+
+    @app_commands.command(name="play", description="播放 YouTube 音樂")
+    async def play(self, interaction: discord.Interaction, url: str):
+        # 確認使用者在語音頻道
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message("❌ 你必須先加入語音頻道", ephemeral=True)
+            return
+        channel = interaction.user.voice.channel
+
+        # 連接語音頻道
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await channel.connect()
+        elif vc.channel != channel:
+            await vc.move_to(channel)
+        self.vc_dict[interaction.guild.id] = vc
+
+        # 取得 YouTube 音訊
+        try:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'noplaylist': True
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if 'entries' in info:  # playlist
+                    info = info['entries'][0]
+                audio_url = info['url']
+                title = info.get('title', '未知曲目')
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 取得音訊失敗: {e}", ephemeral=True)
+            return
+
+        # 加入播放隊列
+        q = self.queue.setdefault(interaction.guild.id, [])
+        q.append((audio_url, title))
+
+        # 建立嵌入消息
+        embed = discord.Embed(
+            title="🎵 正在播放",
+            description=f"**{title}**",
+            color=discord.Color.green()
+        )
+
+        # 建立控制按鈕
+        view = MusicControlView(self, interaction.guild.id)
+
+        # 發送 Embed
+        await interaction.response.send_message(embed=embed, view=view)
+
+        # 如果沒有正在播放，開始播放
+        if not self.now_playing.get(interaction.guild.id):
+            asyncio.create_task(self.start_playback(interaction.guild.id))
+
+    async def start_playback(self, guild_id):
+        q = self.queue[guild_id]
+        vc = self.vc_dict[guild_id]
+        while q:
+            audio_url, title = q.pop(0)
+            self.now_playing[guild_id] = title
+            vc.play(FFmpegPCMAudio(audio_url, options="-vn"))
+            # 等待播放完成
+            while vc.is_playing():
+                await asyncio.sleep(1)
+            self.now_playing[guild_id] = None
+
+class MusicControlView(discord.ui.View):
+    def __init__(self, cog: VoiceCog, guild_id):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_playing():
+            vc.pause()
+            await interaction.response.send_message("⏸️ 暫停播放", ephemeral=True)
+        elif vc.is_paused():
+            vc.resume()
+            await interaction.response.send_message("▶️ 繼續播放", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ 跳過", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_playing():
+            vc.stop()
+            await interaction.response.send_message("⏩ 已跳過歌曲", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+
+    @discord.ui.button(label="⏹️ 停止", style=discord.ButtonStyle.danger)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_connected():
+            vc.stop()
+            await vc.disconnect()
+            await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
+            self.cog.queue[self.guild_id] = []
+            self.cog.now_playing[self.guild_id] = None
+        else:
+            await interaction.response.send_message("❌ 目前沒有連線的語音頻道", ephemeral=True)
+            
 
 
 # 錯誤處理
