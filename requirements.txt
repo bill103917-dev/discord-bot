@@ -1,3 +1,9 @@
 discord.py
 nest_asyncio
 flask
+discord.py[voice]
+PyNaCl
+yt-dlp
+spotipy
+Flask
+aiohttp
