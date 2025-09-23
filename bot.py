@@ -428,7 +428,7 @@ def index():
         </html>
         """
     rows = "".join(
-        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
+        f"<tr><td>{log['time']}</td><td>{log['log_text']}</td></tr>"
         for log in reversed(command_logs)
     )
     return f"""
