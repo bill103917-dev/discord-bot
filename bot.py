@@ -38,7 +38,46 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-    
+class MusicControlView(discord.ui.View):
+    def __init__(self, cog: VoiceCog, guild_id):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_playing():
+            vc.pause()
+            await interaction.response.send_message("⏸️ 暫停播放", ephemeral=True)
+        elif vc.is_paused():
+            vc.resume()
+            await interaction.response.send_message("▶️ 繼續播放", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ 跳過", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_playing():
+            vc.stop()
+            await interaction.response.send_message("⏩ 已跳過歌曲", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+
+    @discord.ui.button(label="⏹️ 停止", style=discord.ButtonStyle.danger)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = self.cog.vc_dict[self.guild_id]
+        if vc.is_connected():
+            vc.stop()
+            await vc.disconnect()
+            await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
+            self.cog.queue[self.guild_id] = []
+            self.cog.now_playing[self.guild_id] = None
+        else:
+            await interaction.response.send_message("❌ 目前沒有連線的語音頻道", ephemeral=True)
+
+
 # 剪刀石頭布參數
 active_games = {}
 
@@ -463,44 +502,7 @@ class VoiceCog(commands.Cog):
                 await asyncio.sleep(1)
             self.now_playing[guild_id] = None
 
-class MusicControlView(discord.ui.View):
-    def __init__(self, cog: VoiceCog, guild_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
 
-    @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
-    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = self.cog.vc_dict[self.guild_id]
-        if vc.is_playing():
-            vc.pause()
-            await interaction.response.send_message("⏸️ 暫停播放", ephemeral=True)
-        elif vc.is_paused():
-            vc.resume()
-            await interaction.response.send_message("▶️ 繼續播放", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
-
-    @discord.ui.button(label="⏭️ 跳過", style=discord.ButtonStyle.secondary)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = self.cog.vc_dict[self.guild_id]
-        if vc.is_playing():
-            vc.stop()
-            await interaction.response.send_message("⏩ 已跳過歌曲", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
-
-    @discord.ui.button(label="⏹️ 停止", style=discord.ButtonStyle.danger)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = self.cog.vc_dict[self.guild_id]
-        if vc.is_connected():
-            vc.stop()
-            await vc.disconnect()
-            await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
-            self.cog.queue[self.guild_id] = []
-            self.cog.now_playing[self.guild_id] = None
-        else:
-            await interaction.response.send_message("❌ 目前沒有連線的語音頻道", ephemeral=True)
             
 
 
