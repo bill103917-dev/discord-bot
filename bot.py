@@ -599,6 +599,7 @@ async def main():
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
+    await bot.add_cog(VoiceCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.start(TOKEN)
 
