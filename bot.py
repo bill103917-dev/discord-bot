@@ -12,7 +12,7 @@ from discord import Interaction, TextChannel, User, Message
 import sys
 import datetime
 import threading
-from flask import Flask
+from flask import Flask, request
 
 command_logs = []  # 紀錄所有指令使用
 
@@ -378,6 +378,7 @@ class HelpCog(commands.Cog):
 
 
 # 錯誤處理
+# ====== 錯誤處理 ======
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     try:
@@ -390,25 +391,42 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
     command_logs.append({
         "user": str(interaction.user),
         "command": f"/{command.qualified_name}",
-        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
 
 
 # ====== 指令使用紀錄系統 ======
 async def log_command(interaction: discord.Interaction, command: str):
     guild_name = interaction.guild.name if interaction.guild else "私人訊息"
-    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」使用了 {command}"
+    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
+    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
     command_logs.append({
         "text": log_text,
-        "time": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-# ====== Flask 網頁 (HTML 格式) ======
+
+# ====== Flask 網頁 (HTML + 密碼驗證) ======
 app = Flask(__name__)
+PASSWORD = "max103917"  # 這裡換成你自己的密碼
+
 @app.route("/")
 def index():
+    password = request.args.get("password")
+    if password != PASSWORD:
+        return """
+        <html>
+        <body>
+        <h2>請輸入密碼才能查看紀錄</h2>
+        <form>
+            <input type="password" name="password" placeholder="密碼">
+            <input type="submit" value="登入">
+        </form>
+        </body>
+        </html>
+        """
     rows = "".join(
         f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
         for log in reversed(command_logs)
@@ -428,32 +446,26 @@ def index():
 
 @app.route("/logs")
 def logs():
+    password = request.args.get("password")
+    if password != PASSWORD:
+        return "未授權", 403
     return "".join(
         f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
         for log in reversed(command_logs)
     ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
 
-# 新增一個路由，專門回傳表格內容
-# ====== 指令使用紀錄系統 ======
-async def log_command(interaction: discord.Interaction, command: str):
-    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
-    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
-    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
-    command_logs.append({
-        "text": log_text,
-        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
-    })
-    if len(command_logs) > 100:
-        command_logs.pop(0)
-        
+
+# ====== 網頁保持運行 ======
 def run_web():
-    app.run(host="0.0.0.0", port=8080)  # 注意這裡要縮排
+    app.run(host="0.0.0.0", port=8080)
 
 def keep_web_alive():
     t = threading.Thread(target=run_web)
     t.daemon = True
     t.start()
 
+
+# ====== 主程式入口 ======
 async def main():
     keep_web_alive()
     await bot.add_cog(UtilityCog(bot))
