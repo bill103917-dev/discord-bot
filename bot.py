@@ -510,6 +510,7 @@ class MusicControlView(discord.ui.View):
 
 # 錯誤處理
 # ====== 錯誤處理 ======
+# ====== 錯誤處理 ======
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     try:
@@ -519,11 +520,15 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command):
+    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
+    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
+    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 /{command.qualified_name}"
     command_logs.append({
-        "user": str(interaction.user),
-        "command": f"/{command.qualified_name}",
+        "text": log_text,
         "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
+    if len(command_logs) > 100:
+        command_logs.pop(0)
 
 
 # ====== 指令使用紀錄系統 ======
@@ -533,19 +538,21 @@ async def log_command(interaction: discord.Interaction, command: str):
     log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
     command_logs.append({
         "text": log_text,
-        "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
 
 
-# ====== Flask 網頁 (HTML + 密碼驗證) ======
+
+# ====== Flask 網頁 (HTML + 密碼驗證 + 選單) ======
 app = Flask(__name__)
 PASSWORD = "max103917"  # 這裡換成你自己的密碼
 
 @app.route("/")
 def index():
     password = request.args.get("password")
+    limit = int(request.args.get("limit", 25))  # 預設顯示 25 筆
     if password != PASSWORD:
         return """
         <html>
@@ -558,19 +565,32 @@ def index():
         </body>
         </html>
         """
+    logs_to_show = list(reversed(command_logs))[:limit]
     rows = "".join(
         f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
-        for log in reversed(command_logs)
+        for log in logs_to_show
     )
     return f"""
     <html>
-    <head><meta http-equiv="refresh" content="5"></head>
+    <head>
+        <meta http-equiv="refresh" content="5">
+    </head>
     <body>
-    <h1>指令紀錄</h1>
-    <table border="1">
-    <tr><th>時間</th><th>內容</th></tr>
-    {rows or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
-    </table>
+        <h1>指令紀錄</h1>
+        <form method="get">
+            <input type="hidden" name="password" value="{password}">
+            <label>顯示筆數：</label>
+            <select name="limit" onchange="this.form.submit()">
+                <option value="10" {"selected" if limit==10 else ""}>10</option>
+                <option value="25" {"selected" if limit==25 else ""}>25</option>
+                <option value="50" {"selected" if limit==50 else ""}>50</option>
+                <option value="100" {"selected" if limit==100 else ""}>100</option>
+            </select>
+        </form>
+        <table border="1">
+            <tr><th>時間</th><th>內容</th></tr>
+            {rows or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
+        </table>
     </body>
     </html>
     """
@@ -578,11 +598,13 @@ def index():
 @app.route("/logs")
 def logs():
     password = request.args.get("password")
+    limit = int(request.args.get("limit", 25))
     if password != PASSWORD:
         return "未授權", 403
+    logs_to_show = list(reversed(command_logs))[:limit]
     return "".join(
         f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
-        for log in reversed(command_logs)
+        for log in logs_to_show
     ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
 
 
@@ -605,6 +627,7 @@ async def main():
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(VoiceCog(bot))
     await bot.add_cog(HelpCog(bot))
+    await bot.wait_until_ready()
     await bot.start(TOKEN)
     
 
