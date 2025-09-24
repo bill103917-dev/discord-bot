@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ guild_obj.name }} 的伺服器</title>
+    <style>
+        body {
+            background-color: #36393f;
+            color: #dcdfe4;
+            font-family: 'Noto Sans CJK TC', sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .header img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-right: 20px;
+        }
+        .header h2 {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .status-row {
+            display: flex;
+            align-items: center;
+            font-size: 16px;
+            color: #b9bbbe;
+            margin-bottom: 30px;
+        }
+        .status-item {
+            margin-right: 20px;
+        }
+        .module-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .module-card {
+            background-color: #2f3136;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .module-card h3 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #f7f7f7;
+        }
+        .module-card p {
+            font-size: 14px;
+            color: #b9bbbe;
+        }
+        .start-btn {
+            background-color: #5865f2;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 15px;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if guild_obj.icon %}
+        <img src="{{ guild_obj.icon.url }}" alt="Guild Icon">
+        {% endif %}
+        <div>
+            <h2>{{ guild_obj.name }} 的伺服器</h2>
+            <div class="status-row">
+                <span class="status-item">{{ member_count }} 位成員</span>
+                <span class="status-item">
+                    {% if is_owner %}伺服器擁有者{% else %}機器人專家{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="module-grid">
+        <div class="module-card">
+            <h3>音樂系統</h3>
+            <p>支援 SoundCloud、Spotify 等第三方來源。</p>
+            <a href="#" class="start-btn">開始設定</a>
+        </div>
+        
+        <div class="module-card">
+            <h3>領取身分組訊息</h3>
+            <p>讓成員使用選單來選取自己的身分組。</p>
+            <a href="#" class="start-btn">開始設定</a>
+        </div>
+        
+        <div class="module-card"><h3>私人頻道</h3><p>處理成員投訴、活動和管理員通用的私人頻道。</p><a href="#" class="start-btn">開始設定</a></div>
+        <div class="module-card"><h3>歡迎新成員</h3><p>給予新成員身分組、歡迎訊息。</p><a href="#" class="start-btn">開始設定</a></div>
+        <div class="module-card"><h3>動態語音頻道</h3><p>只需要一個語音頻道，就可以無限新增語音頻道</p><a href="#" class="start-btn">開始設定</a></div>
+        <div class="module-card"><h3>成員抽獎管理</h3><p>讓會員使用抽獎指令，讓管理員可以專注在活動上</p><a href="#" class="start-btn">開始設定</a></div>
+    </div>
+</body>
+</html>
