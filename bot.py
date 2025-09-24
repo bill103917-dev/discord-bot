@@ -24,7 +24,12 @@ from flask import Flask, session
 app = Flask(__name__)
 app.secret_key = 'Max103917' # 請換成一個真正、複雜的字串
 command_logs = []  # 紀錄所有指令使用
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.all()) 
+
+# 這裡告訴程式碼你要使用哪些權限
+intents = discord.Intents.default()
+intents.members = True # 這裡對應後台的 SERVER MEMBERS INTENT
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 
 # =========================
 # ⚡ 基本設定
