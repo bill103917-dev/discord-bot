@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Discord 登入</title>
+    <style>
+        body {
+            background-color: #2c2f33; /* Discord 介面背景色 */
+            color: #ffffff;
+            font-family: 'Noto Sans CJK TC', 'Noto Sans', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .container {
+            background-color: #23272a; /* 內部區塊背景色 */
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            width: 90%;
+        }
+        .profile-pic {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background-color: #7289da; /* 圓形背景色 */
+            margin-bottom: 20px;
+        }
+        h2 {
+            font-size: 24px;
+            margin-bottom: 30px;
+            font-weight: 500;
+        }
+        .login-btn {
+            background-color: #5865f2; /* Discord 品牌藍色 */
+            color: #ffffff;
+            font-size: 16px;
+            padding: 12px 24px;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .login-btn:hover {
+            background-color: #4752c4;
+        }
+        .login-btn img {
+            width: 20px;
+            margin-right: 8px;
+        }
+        p {
+            font-size: 12px;
+            color: #b9bbbe;
+            margin-top: 30px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="profile-pic"></div> 
+        
+        <h2>我還不認識你，讓我看看</h2>
+        
+        <a href="{{ auth_url }}" class="login-btn">
+            <img src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/625e5f532f7467d383952f1e_icon_clyde_white_large.png" alt="Discord Logo">
+            使用 Discord 登入
+        </a>
+
+        <p>
+            我沒有權限存取你的個人資訊，個人權杖在傳輸及保存時皆有經過加密
+        </p>
+    </div>
+</body>
+</html>
