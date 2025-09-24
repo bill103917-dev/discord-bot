@@ -20,6 +20,9 @@ import re
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from flask import Flask, session 
+from flask import Flask, render_template
+
+
 
 app = Flask(__name__)
 app.secret_key = 'Max103917' # 請換成一個真正、複雜的字串
