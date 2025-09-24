@@ -533,7 +533,7 @@ async def log_command(interaction: discord.Interaction, command: str):
     log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
     command_logs.append({
         "text": log_text,
-        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
@@ -559,7 +559,7 @@ def index():
         </html>
         """
     rows = "".join(
-        f"<tr><td>{log['time']}</td><td>{log['log_text']}</td></tr>"
+        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
         for log in reversed(command_logs)
     )
     return f"""
@@ -605,7 +605,6 @@ async def main():
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(VoiceCog(bot))
     await bot.add_cog(HelpCog(bot))
-    await bot.wait_until_ready()
     await bot.start(TOKEN)
     
 
