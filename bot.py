@@ -25,20 +25,27 @@ command_logs = []  # 紀錄所有指令使用
 # =========================
 # ⚡ 基本設定
 # =========================
+
+# =========================
+# ⚡ 環境變數和常數設定
+# =========================
+# 從環境變數中讀取密碼和 OAuth2 資訊
 TOKEN = os.getenv("DISCORD_TOKEN")
-if not TOKEN or TOKEN.strip() == "" or TOKEN.startswith(" "):
-    print("❌ TOKEN 沒有正確設定，請到環境變數檢查！")
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
+if not TOKEN:
+    print("❌ DISCORD_TOKEN 沒有正確設定，請到環境變數檢查！")
+    sys.exit(1)
+if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
+    print("❌ 缺少必要的 Discord OAuth2 環境變數，請檢查！")
     sys.exit(1)
 
-OWNER_ID = 1238436456041676853
-SPECIAL_USER_IDS = [OWNER_ID]
+# 特殊使用者列表（替換成你的 Discord ID）
+SPECIAL_USER_IDS = [1238436456041676853]
 
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-
+# 暫存指令紀錄，只保留最近100筆
+command_logs = []
 
 
 # 剪刀石頭布參數
@@ -509,12 +516,13 @@ class MusicControlView(discord.ui.View):
 # =========================
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
+    """處理應用程式指令錯誤"""
     try:
         if interaction.response.is_done():
             await interaction.followup.send(f"❌ 指令錯誤：{error}", ephemeral=True)
         else:
             await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
-    except:
+    except Exception:
         pass
 
 @bot.event
@@ -530,24 +538,11 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-
 # =========================
 # ⚡ Flask 網頁管理後台
 # =========================
-import requests
-from flask import Flask, request, redirect, session, url_for, render_template
-
 app = Flask(__name__)
-# ⚠️ 這裡的 SECRET_KEY 必須保密，用於保護 Session
 app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
-
-# 從環境變數中讀取 OAuth2 資訊
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
-DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
-if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
-    print("❌ 缺少必要的 Discord OAuth2 環境變數，請檢查！")
-    sys.exit(1)
 
 # OAuth2 相關 URL
 DISCORD_API_BASE_URL = "https://discord.com/api/v10"
@@ -593,7 +588,7 @@ def all_guild_logs():
     return render_template('all_logs.html', logs=command_logs)
 
 @app.route("/guild/<int:guild_id>")
-def guild_dashboard(guild_id):
+async def guild_dashboard(guild_id):
     """單一伺服器管理頁面"""
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
@@ -614,11 +609,10 @@ def guild_dashboard(guild_id):
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
 
-    # 嘗試從 bot 快取中獲取，如果沒有再向 API 請求
     try:
         guild_obj = bot.get_guild(guild_id)
         if not guild_obj:
-            guild_obj = bot.loop.run_until_complete(bot.fetch_guild(guild_id))
+            guild_obj = await bot.fetch_guild(guild_id)
         
         member_count = guild_obj.member_count
         is_owner = guild_obj.owner_id == int(user_data['id'])
@@ -686,22 +680,16 @@ def keep_web_alive():
     t.daemon = True
     t.start()
 
-
 # =========================
 # ⚡ 主程式入口
 # =========================
 async def main():
-    # 同時運行 Flask 網頁和 Discord 機器人
     keep_web_alive()
     
-    # 同步 Slash Commands 到 Discord
     try:
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(VoiceCog(bot))
-        await bot.add_cog(HelpCog(bot))
+        # 在這裡載入你的指令 Cog
+        # bot.add_cog(...)
+        await bot.tree.sync()
         print("✅ 指令已同步！")
     except Exception as e:
         print(f"❌ 指令同步失敗: {e}")
