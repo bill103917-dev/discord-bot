@@ -7,3 +7,4 @@ yt-dlp
 spotipy
 Flask
 aiohttp
+install requests-oauthlib
