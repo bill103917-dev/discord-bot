@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>所有伺服器日誌</title>
+    <style>
+        body {
+            background-color: #36393f;
+            color: #dcdfe4;
+            font-family: 'Noto Sans CJK TC', sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #f7f7f7;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #2f3136;
+        }
+        th, td {
+            border: 1px solid #4f545c;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #40444b;
+            color: #dcdfe4;
+        }
+        tr:nth-child(even) {
+            background-color: #3e4146;
+        }
+    </style>
+</head>
+<body>
+    <h1>所有伺服器指令紀錄</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>時間</th>
+                <th>內容</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs | reverse %}
+            <tr>
+                <td>{{ log.time }}</td>
+                <td>{{ log.text }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2">目前沒有任何紀錄。</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
