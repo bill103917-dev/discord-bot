@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>伺服器儀表板</title>
+    <style>
+        body {
+            background-color: #36393f;
+            color: #dcdfe4;
+            font-family: 'Noto Sans CJK TC', sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            color: #f7f7f7;
+        }
+        .header img {
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            margin-right: 15px;
+        }
+        .header h2 {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .header p {
+            font-size: 14px;
+            color: #b9bbbe;
+        }
+        .special-section {
+            background-color: #2f3136;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 40px;
+        }
+        .special-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+            color: #7289da;
+        }
+        .special-btn {
+            background-color: #7289da;
+            color: #ffffff;
+            padding: 10px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 15px;
+            transition: background-color 0.3s ease;
+        }
+        .special-btn:hover {
+            background-color: #5b6eae;
+        }
+        .guild-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .guild-card {
+            background-color: #2f3136;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s ease;
+            position: relative;
+        }
+        .guild-card:hover {
+            transform: translateY(-5px);
+        }
+        .guild-card a {
+            text-decoration: none;
+            color: inherit;
+        }
+        .guild-card .card-content {
+            padding: 15px;
+        }
+        .guild-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .guild-info img {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .guild-name {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .guild-tag {
+            font-size: 14px;
+            color: #b9bbbe;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" alt="User Avatar">
+        <div>
+            <h2>嗨，{{ user.username }}</h2>
+            <p>從下方選擇一個伺服器開始</p>
+        </div>
+    </div>
+
+    {% if is_special_user %}
+    <div class="special-section">
+        <h3>管理員專區</h3>
+        <p>查看所有伺服器的機器人使用紀錄。</p>
+        <a href="{{ url_for('all_guild_logs') }}" class="special-btn">查看所有紀錄</a>
+    </div>
+    {% endif %}
+
+    <div class="guild-grid">
+        {% for guild in guilds %}
+        <div class="guild-card">
+            <a href="{{ url_for('guild_dashboard', guild_id=guild.id) }}">
+                <div class="card-content">
+                    <div class="guild-info">
+                        {% if guild.icon %}
+                        <img src="https://cdn.discordapp.com/icons/{{ guild.id }}/{{ guild.icon }}.png" alt="{{ guild.name }}">
+                        {% endif %}
+                        <span class="guild-name">{{ guild.name }}</span>
+                    </div>
+                    <span class="guild-tag">機器人專家</span>
+                </div>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
