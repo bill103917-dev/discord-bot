@@ -610,7 +610,7 @@ def logs():
 
 # ====== 網頁保持運行 ======
 def run_web():
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
 
 def keep_web_alive():
     t = threading.Thread(target=run_web)
