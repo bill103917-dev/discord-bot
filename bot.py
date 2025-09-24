@@ -21,6 +21,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
 command_logs = []  # 紀錄所有指令使用
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all()) 
 
 # =========================
 # ⚡ 基本設定
