@@ -504,22 +504,22 @@ class MusicControlView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ 目前沒有連線的語音頻道", ephemeral=True)
 
-
-            
-
-
-# 錯誤處理
-# ====== 錯誤處理 ======
-# ====== 錯誤處理 ======
+# =========================
+# ⚡ 錯誤處理
+# =========================
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     try:
-        await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ 指令錯誤：{error}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
     except:
         pass
 
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command):
+    """處理成功執行的應用程式指令，並記錄日誌"""
     guild_name = interaction.guild.name if interaction.guild else "私人訊息"
     channel_name = interaction.channel.name if interaction.channel else "未知頻道"
     log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 /{command.qualified_name}"
@@ -531,86 +531,155 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
         command_logs.pop(0)
 
 
-# ====== 指令使用紀錄系統 ======
-async def log_command(interaction: discord.Interaction, command: str):
-    guild_name = interaction.guild.name if interaction.guild else "私人訊息"
-    channel_name = interaction.channel.name if interaction.channel else "未知頻道"
-    log_text = f"📝 {interaction.user} 在伺服器「{guild_name}」的頻道「#{channel_name}」使用了 {command}"
-    command_logs.append({
-        "text": log_text,
-        "time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S")
-    })
-    if len(command_logs) > 100:
-        command_logs.pop(0)
+# =========================
+# ⚡ Flask 網頁管理後台
+# =========================
+import requests
+from flask import Flask, request, redirect, session, url_for, render_template
 
-
-
-# ====== Flask 網頁 (HTML + 密碼驗證 + 選單) ======
 app = Flask(__name__)
-PASSWORD = "max103917"  # 這裡換成你自己的密碼
+# ⚠️ 這裡的 SECRET_KEY 必須保密，用於保護 Session
+app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
+
+# 從環境變數中讀取 OAuth2 資訊
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
+if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
+    print("❌ 缺少必要的 Discord OAuth2 環境變數，請檢查！")
+    sys.exit(1)
+
+# OAuth2 相關 URL
+DISCORD_API_BASE_URL = "https://discord.com/api/v10"
+AUTH_URL = f"{DISCORD_API_BASE_URL}/oauth2/authorize?response_type=code&client_id={DISCORD_CLIENT_ID}&scope=identify%20guilds&redirect_uri={DISCORD_REDIRECT_URI}"
+TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
+USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
 @app.route("/")
 def index():
-    password = request.args.get("password")
-    limit = int(request.args.get("limit", 25))  # 預設顯示 25 筆
-    if password != PASSWORD:
-        return """
-        <html>
-        <body>
-        <h2>請輸入密碼才能查看紀錄</h2>
-        <form>
-            <input type="password" name="password" placeholder="密碼">
-            <input type="submit" value="登入">
-        </form>
-        </body>
-        </html>
-        """
-    logs_to_show = list(reversed(command_logs))[:limit]
-    rows = "".join(
-        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
-        for log in logs_to_show
+    """主頁面，根據登入狀態和權限顯示不同介面"""
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+
+    if not user_data or not guilds_data:
+        # 未登入，顯示登入頁面
+        return render_template('login.html', auth_url=AUTH_URL)
+    
+    # 判斷使用者是否為特殊使用者
+    is_special_user = int(user_data['id']) in SPECIAL_USER_IDS
+
+    # 篩選出具有管理員權限的伺服器
+    ADMINISTRATOR_PERMISSION = 8 
+    admin_guilds = []
+    for guild in guilds_data:
+        permissions = int(guild.get('permissions', '0'))
+        if (permissions & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION:
+            admin_guilds.append(guild)
+
+    # 渲染伺服器選擇頁面
+    return render_template('dashboard.html', 
+                           user=user_data, 
+                           guilds=admin_guilds,
+                           is_special_user=is_special_user)
+
+@app.route("/logs/all")
+def all_guild_logs():
+    """管理員專區：顯示所有伺服器指令日誌"""
+    user_data = session.get("discord_user")
+    
+    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+        return "❌ 您沒有權限訪問這個頁面。", 403
+
+    return render_template('all_logs.html', logs=command_logs)
+
+@app.route("/guild/<int:guild_id>")
+def guild_dashboard(guild_id):
+    """單一伺服器管理頁面"""
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+
+    if not user_data or not guilds_data:
+        return redirect(url_for('index'))
+
+    # 檢查使用者是否擁有該伺服器的管理員權限
+    guild_found = False
+    for guild in guilds_data:
+        if int(guild['id']) == guild_id:
+            permissions = int(guild.get('permissions', '0'))
+            ADMINISTRATOR_PERMISSION = 8 
+            if (permissions & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION:
+                guild_found = True
+                break
+    
+    if not guild_found:
+        return "❌ 你沒有權限管理這個伺服器", 403
+
+    # 嘗試從 bot 快取中獲取，如果沒有再向 API 請求
+    try:
+        guild_obj = bot.get_guild(guild_id)
+        if not guild_obj:
+            guild_obj = bot.loop.run_until_complete(bot.fetch_guild(guild_id))
+        
+        member_count = guild_obj.member_count
+        is_owner = guild_obj.owner_id == int(user_data['id'])
+        
+    except (discord.NotFound, discord.Forbidden):
+        return "❌ 找不到這個伺服器或沒有足夠權限", 404
+        
+    return render_template(
+        'guild_dashboard.html', 
+        user=user_data,
+        guild_obj=guild_obj,
+        member_count=member_count,
+        is_owner=is_owner
     )
-    return f"""
-    <html>
-    <head>
-        <meta http-equiv="refresh" content="5">
-    </head>
-    <body>
-        <h1>指令紀錄</h1>
-        <form method="get">
-            <input type="hidden" name="password" value="{password}">
-            <label>顯示筆數：</label>
-            <select name="limit" onchange="this.form.submit()">
-                <option value="10" {"selected" if limit==10 else ""}>10</option>
-                <option value="25" {"selected" if limit==25 else ""}>25</option>
-                <option value="50" {"selected" if limit==50 else ""}>50</option>
-                <option value="100" {"selected" if limit==100 else ""}>100</option>
-            </select>
-        </form>
-        <table border="1">
-            <tr><th>時間</th><th>內容</th></tr>
-            {rows or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"}
-        </table>
-    </body>
-    </html>
-    """
 
-@app.route("/logs")
-def logs():
-    password = request.args.get("password")
-    limit = int(request.args.get("limit", 25))
-    if password != PASSWORD:
-        return "未授權", 403
-    logs_to_show = list(reversed(command_logs))[:limit]
-    return "".join(
-        f"<tr><td>{log['time']}</td><td>{log['text']}</td></tr>"
-        for log in logs_to_show
-    ) or "<tr><td colspan='2'>目前沒有紀錄</td></tr>"
+@app.route("/callback")
+def callback():
+    """處理 Discord OAuth2 回調"""
+    code = request.args.get("code")
+    if not code:
+        return "授權失敗", 400
 
+    data = {
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+        "scope": "identify guilds"
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    token_response = requests.post(TOKEN_URL, data=data, headers=headers)
+    token_response.raise_for_status()
+    tokens = token_response.json()
+    access_token = tokens["access_token"]
 
-# ====== 網頁保持運行 ======
+    user_headers = {"Authorization": f"Bearer {access_token}"}
+    user_response = requests.get(USER_URL, headers=user_headers)
+    user_response.raise_for_status()
+    user_data = user_response.json()
+    
+    guilds_response = requests.get(f"{DISCORD_API_BASE_URL}/users/@me/guilds", headers=user_headers)
+    guilds_response.raise_for_status()
+    guilds_data = guilds_response.json()
+
+    session["discord_user"] = user_data
+    session["discord_guilds"] = guilds_data
+
+    return redirect(url_for("index"))
+
+@app.route("/logout")
+def logout():
+    """登出並清除 Session"""
+    session.pop("discord_user", None)
+    session.pop("discord_guilds", None)
+    return redirect(url_for("index"))
+
+# Flask 網頁運行
 def run_web():
-    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
+    port = os.getenv("PORT", 8080)
+    app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
 
 def keep_web_alive():
     t = threading.Thread(target=run_web)
@@ -618,17 +687,26 @@ def keep_web_alive():
     t.start()
 
 
-# ====== 主程式入口 ======
+# =========================
+# ⚡ 主程式入口
+# =========================
 async def main():
+    # 同時運行 Flask 網頁和 Discord 機器人
     keep_web_alive()
-    await bot.add_cog(UtilityCog(bot))
-    await bot.add_cog(FunCog(bot))
-    await bot.add_cog(PingCog(bot))
-    await bot.add_cog(ReactionRoleCog(bot))
-    await bot.add_cog(VoiceCog(bot))
-    await bot.add_cog(HelpCog(bot))
-    await bot.start(TOKEN)
     
+    # 同步 Slash Commands 到 Discord
+    try:
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(ReactionRoleCog(bot))
+        await bot.add_cog(VoiceCog(bot))
+        await bot.add_cog(HelpCog(bot))
+        print("✅ 指令已同步！")
+    except Exception as e:
+        print(f"❌ 指令同步失敗: {e}")
+
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
