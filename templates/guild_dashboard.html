@@ -36,34 +36,18 @@
         .status-item {
             margin-right: 20px;
         }
-        .module-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .module-card {
-            background-color: #2f3136;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-        .module-card h3 {
-            font-size: 18px;
-            margin-bottom: 10px;
-            color: #f7f7f7;
-        }
-        .module-card p {
-            font-size: 14px;
-            color: #b9bbbe;
+        .start-btn-container {
+            text-align: center;
+            margin-top: 50px;
         }
         .start-btn {
             background-color: #5865f2;
             color: #ffffff;
-            padding: 8px 16px;
-            border-radius: 4px;
+            padding: 12px 24px;
+            border-radius: 6px;
             text-decoration: none;
             display: inline-block;
-            margin-top: 15px;
+            font-size: 18px;
             border: none;
             cursor: pointer;
         }
@@ -85,23 +69,8 @@
         </div>
     </div>
     
-    <div class="module-grid">
-        <div class="module-card">
-            <h3>音樂系統</h3>
-            <p>支援 SoundCloud、Spotify 等第三方來源。</p>
-            <a href="#" class="start-btn">開始設定</a>
-        </div>
-        
-        <div class="module-card">
-            <h3>領取身分組訊息</h3>
-            <p>讓成員使用選單來選取自己的身分組。</p>
-            <a href="#" class="start-btn">開始設定</a>
-        </div>
-        
-        <div class="module-card"><h3>私人頻道</h3><p>處理成員投訴、活動和管理員通用的私人頻道。</p><a href="#" class="start-btn">開始設定</a></div>
-        <div class="module-card"><h3>歡迎新成員</h3><p>給予新成員身分組、歡迎訊息。</p><a href="#" class="start-btn">開始設定</a></div>
-        <div class="module-card"><h3>動態語音頻道</h3><p>只需要一個語音頻道，就可以無限新增語音頻道</p><a href="#" class="start-btn">開始設定</a></div>
-        <div class="module-card"><h3>成員抽獎管理</h3><p>讓會員使用抽獎指令，讓管理員可以專注在活動上</p><a href="#" class="start-btn">開始設定</a></div>
+    <div class="start-btn-container">
+        <a href="{{ url_for('settings_page', guild_id=guild_obj.id) }}" class="start-btn">開始設定</a>
     </div>
 </body>
 </html>
