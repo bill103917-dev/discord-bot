@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ guild_obj.name }} - 設定</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .header img {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+        .back-link {
+            display: block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('guild_dashboard', guild_id=guild_obj.id) }}" class="back-link">← 返回伺服器後台</a>
+        
+        <div class="header">
+            {% if guild_obj.icon %}
+                <img src="{{ guild_obj.icon.url }}" alt="伺服器圖示">
+            {% endif %}
+            <h1>{{ guild_obj.name }} 的設定頁面</h1>
+        </div>
+        
+        <p>在這裡你可以調整伺服器的相關設定。</p>
+        
+        </div>
+</body>
+</html>
