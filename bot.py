@@ -55,7 +55,7 @@ app.secret_key = FLASK_SECRET_KEY
 
 # OAuth2 相關 URL
 DISCORD_API_BASE_URL = "https://discord.com/api/v10"
-AUTH_URL = f"{DISCORD_API_BASE_URL}/oauth2/authorize?response_type=code&client_id={DISCORD_CLIENT_ID}&scope=identify%20guilds&redirect_uri={DISCORD_REDIRECT_URI}"
+AUTH_URL = f"{DISCORD_API_BASE_URL}/oauth2/authorize?response_type=code&client_id={DISCORD_CLIENT_ID}&scope=identify%20guilds%20guilds.members.read&redirect_uri={DISCORD_REDIRECT_URI}"
 TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
 TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
 USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
