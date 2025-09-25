@@ -1,59 +1,86 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
-    <title>所有伺服器日誌</title>
+    <title>所有指令紀錄</title>
     <style>
         body {
-            background-color: #36393f;
-            color: #dcdfe4;
-            font-family: 'Noto Sans CJK TC', sans-serif;
+            font-family: 'Noto Sans CJK TC', Arial, sans-serif;
             margin: 0;
+            padding: 0;
+            background-color: #2f3136;
+            color: #dcddde;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 50px auto;
             padding: 20px;
+            background-color: #36393f;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
         }
         h1 {
-            color: #f7f7f7;
+            color: #fff;
+            text-align: center;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            background-color: #2f3136;
+            margin-top: 20px;
         }
         th, td {
-            border: 1px solid #4f545c;
-            padding: 12px;
+            padding: 12px 15px;
             text-align: left;
+            border-bottom: 1px solid #4a4d53;
         }
         th {
-            background-color: #40444b;
-            color: #dcdfe4;
+            background-color: #2e3136;
+            color: #99aab5;
         }
-        tr:nth-child(even) {
-            background-color: #3e4146;
+        tr:hover {
+            background-color: #40444b;
         }
     </style>
 </head>
 <body>
-    <h1>所有伺服器指令紀錄</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>時間</th>
-                <th>內容</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for log in logs | reverse %}
-            <tr>
-                <td>{{ log.time }}</td>
-                <td>{{ log.text }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="2">目前沒有任何紀錄。</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="container">
+        <h1>所有指令紀錄</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>時間</th>
+                    <th>事件</th>
+                </tr>
+            </thead>
+            <tbody id="log-table-body">
+                </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Function to fetch and update logs
+        function fetchLogs() {
+            fetch('/logs/data')
+                .then(response => response.json())
+                .then(logs => {
+                    const tableBody = document.getElementById('log-table-body');
+                    // Clear existing rows
+                    tableBody.innerHTML = '';
+                    
+                    // Add new rows from fetched data
+                    logs.forEach(log => {
+                        const row = `<tr><td>${log.time}</td><td>${log.text}</td></tr>`;
+                        tableBody.innerHTML += row;
+                    });
+                })
+                .catch(error => console.error('Error fetching logs:', error));
+        }
+
+        // Fetch logs every 5 seconds
+        setInterval(fetchLogs, 5000);
+        
+        // Fetch logs immediately on page load
+        fetchLogs();
+    </script>
 </body>
 </html>
