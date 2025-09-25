@@ -674,8 +674,9 @@ def logout():
     return redirect(url_for("index"))
 
 # 新增的路由，用於顯示成員列表
-@app.route("/guild/<int:guild_id>/members")
-async def members_page(guild_id):
+# 確保 bot.py 中有這一段程式碼，且縮排正確
+@app.route("/guild/<int:guild_id>/settings")
+async def settings_page(guild_id):
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
     if not user_data or not guilds_data:
@@ -686,19 +687,10 @@ async def members_page(guild_id):
         return "❌ 你沒有權限管理這個伺服器", 403
     try:
         guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
-        members = await guild_obj.fetch_members(limit=None).flatten()
-        members_list = [
-            {
-                "id": m.id,
-                "name": m.display_name,
-                "avatar": m.avatar.url if m.avatar else m.default_avatar.url,
-                "joined_at": m.joined_at.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            for m in members
-        ]
-        return render_template('members.html', guild_obj=guild_obj, members=members_list)
     except (discord.NotFound, discord.Forbidden):
         return "❌ 找不到這個伺服器或沒有足夠權限", 404
+    return render_template('settings.html', user=user_data, guild_obj=guild_obj)
+
 
 
 # =========================
