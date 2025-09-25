@@ -593,7 +593,7 @@ def index():
     is_special_user = int(user_data['id']) in SPECIAL_USER_IDS
     ADMINISTRATOR_PERMISSION = 8192
     admin_guilds = [g for g in guilds_data if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION]
-    return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user)
+        return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
 @app.route("/logs/all")
 def all_guild_logs():
@@ -617,9 +617,8 @@ async def guild_dashboard(guild_id):
         member_count = guild_obj.member_count
         is_owner = guild_obj.owner_id == int(user_data['id'])
     except (discord.NotFound, discord.Forbidden):
-        return "❌ 找不到這個伺服器或沒有足夠權限", 404
-    return render_template('guild_dashboard.html', user=user_data, guild_obj=guild_obj, member_count=member_count, is_owner=is_owner)
-
+        return render_template('guild_dashboard.html', user=user_data, guild_obj=guild_obj, member_count=member_count, is_owner=is_owner, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
+    
 @app.route("/guild/<int:guild_id>/settings")
 async def settings_page(guild_id):
     user_data = session.get("discord_user")
