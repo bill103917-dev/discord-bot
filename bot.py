@@ -565,19 +565,21 @@ async def on_app_command_completion(interaction: discord.Interaction, command):
 async def on_ready():
     """機器人上線時執行"""
     print(f"✅ 機器人 {bot.user} 已上線！")
-    try:
-        await bot.tree.sync()
-        print("✅ 指令已同步！")
-    except Exception as e:
-        print(f"❌ 指令同步失敗: {e}")
     
-    # 在這裡註冊你的 Cog
+    # 這裡的順序很重要！
+    # 先新增 Cog，再同步指令樹。
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(FunCog(bot))
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.add_cog(VoiceCog(bot))
+
+    try:
+        await bot.tree.sync()
+        print("✅ 指令已同步！")
+    except Exception as e:
+        print(f"❌ 指令同步失敗: {e}")
 
 # =========================
 # ⚡ Flask 路由
