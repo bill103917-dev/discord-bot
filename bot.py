@@ -606,6 +606,15 @@ def all_guild_logs():
         return "❌ 您沒有權限訪問這個頁面。", 403
     return render_template('all_logs.html', logs=command_logs)
 
+
+@app.route("/logs/data")
+def logs_data():
+    user_data = session.get("discord_user")
+    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+        return "❌ 您沒有權限訪問這個頁面。", 403
+    return jsonify(command_logs)
+
+
 @app.route("/guild/<int:guild_id>")
 async def guild_dashboard(guild_id):
     user_data = session.get("discord_user")
