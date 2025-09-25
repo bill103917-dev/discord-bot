@@ -1,137 +1,137 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
-    <title>伺服器儀表板</title>
+    <title>Discord 機器人管理後台</title>
     <style>
+        /* 基礎樣式 */
         body {
-            background-color: #36393f;
-            color: #dcdfe4;
-            font-family: 'Noto Sans CJK TC', sans-serif;
+            font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #333;
         }
-        .header {
+
+        /* 主容器：使用 Flexbox 佈局 */
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 左側導覽列 */
+        .sidebar {
+            width: 250px;
+            background-color: #2f3136;
+            color: #fff;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+            overflow-y: auto;
+        }
+
+        .user-info {
+            padding-bottom: 20px;
+            border-bottom: 1px solid #4f545c;
+            margin-bottom: 20px;
+        }
+
+        .user-info h2 {
+            margin: 0;
+            font-size: 1.2em;
+            color: #fff;
+        }
+
+        .sidebar ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar li a {
             display: flex;
             align-items: center;
-            margin-bottom: 40px;
-            color: #f7f7f7;
-        }
-        .header img {
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            margin-right: 15px;
-        }
-        .header h2 {
-            font-size: 28px;
-            font-weight: bold;
-        }
-        .header p {
-            font-size: 14px;
-            color: #b9bbbe;
-        }
-        .special-section {
-            background-color: #2f3136;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 40px;
-        }
-        .special-section h3 {
-            margin: 0 0 10px 0;
-            font-size: 20px;
-            color: #7289da;
-        }
-        .special-btn {
-            background-color: #7289da;
-            color: #ffffff;
-            padding: 10px 20px;
-            border-radius: 4px;
+            padding: 10px;
             text-decoration: none;
-            display: inline-block;
-            margin-top: 15px;
-            transition: background-color 0.3s ease;
+            color: #dcddde;
+            border-radius: 5px;
+            transition: background-color 0.2s ease;
         }
-        .special-btn:hover {
-            background-color: #5b6eae;
+
+        .sidebar li a:hover {
+            background-color: #40444b;
         }
-        .guild-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 20px;
-        }
-        .guild-card {
-            background-color: #2f3136;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            transition: transform 0.2s ease;
-            position: relative;
-        }
-        .guild-card:hover {
-            transform: translateY(-5px);
-        }
-        .guild-card a {
-            text-decoration: none;
-            color: inherit;
-        }
-        .guild-card .card-content {
-            padding: 15px;
-        }
-        .guild-info {
-            display: flex;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .guild-info img {
-            width: 40px;
-            height: 40px;
+
+        .guild-icon {
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             margin-right: 10px;
         }
-        .guild-name {
-            font-size: 18px;
-            font-weight: bold;
+        
+        /* 右側主內容區 */
+        .main-content {
+            flex-grow: 1;
+            padding: 40px;
+            background-color: #fff;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
         }
-        .guild-tag {
-            font-size: 14px;
-            color: #b9bbbe;
+        
+        .main-content h1 {
+            color: #2f3136;
         }
+
+        /* 登出按鈕 */
+        .logout-btn {
+            display: block;
+            margin-top: 20px;
+            text-decoration: none;
+            color: #fff;
+            background-color: #f04747;
+            padding: 8px 15px;
+            border-radius: 5px;
+            transition: background-color 0.2s ease;
+        }
+        
+        .logout-btn:hover {
+            background-color: #c93b3b;
+        }
+
     </style>
 </head>
 <body>
-    <div class="header">
-        <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" alt="User Avatar">
-        <div>
-            <h2>嗨，{{ user.username }}</h2>
-            <p>從下方選擇一個伺服器開始</p>
+    <div class="container">
+        <div class="sidebar">
+            <div class="user-info">
+                <h2>嗨，{{ user['username'] }}!</h2>
+                <a href="{{ url_for('logout') }}" class="logout-btn">登出</a>
+            </div>
+            
+            <h3>你的伺服器清單</h3>
+            <ul>
+                {% for guild in guilds %}
+                    <li>
+                        <a href="{{ url_for('guild_dashboard', guild_id=guild['id']) }}">
+                            {% if guild['icon'] %}
+                                <img src="https://cdn.discordapp.com/icons/{{ guild['id'] }}/{{ guild['icon'] }}.png" class="guild-icon" alt="伺服器圖示">
+                            {% else %}
+                                <img src="https://cdn.discordapp.com/embed/avatars/0.png" class="guild-icon" alt="預設圖示">
+                            {% endif %}
+                            {{ guild['name'] }}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
         </div>
-    </div>
 
-    {% if is_special_user %}
-    <div class="special-section">
-        <h3>管理員專區</h3>
-        <p>查看所有伺服器的機器人使用紀錄。</p>
-        <a href="{{ url_for('all_guild_logs') }}" class="special-btn">查看所有紀錄</a>
-    </div>
-    {% endif %}
-
-    <div class="guild-grid">
-        {% for guild in guilds %}
-        <div class="guild-card">
-            <a href="{{ url_for('guild_dashboard', guild_id=guild.id) }}">
-                <div class="card-content">
-                    <div class="guild-info">
-                        {% if guild.icon %}
-                        <img src="https://cdn.discordapp.com/icons/{{ guild.id }}/{{ guild.icon }}.png" alt="{{ guild.name }}">
-                        {% endif %}
-                        <span class="guild-name">{{ guild.name }}</span>
-                    </div>
-                    <span class="guild-tag">機器人專家</span>
-                </div>
-            </a>
+        <div class="main-content">
+            <h1>歡迎使用管理後台</h1>
+            <p>請從左側的伺服器清單中，點擊一個伺服器來進行管理。</p>
         </div>
-        {% endfor %}
     </div>
 </body>
 </html>
