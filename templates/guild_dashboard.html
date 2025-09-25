@@ -36,8 +36,11 @@
         .status-item {
             margin-right: 20px;
         }
-        .start-btn-container {
-            text-align: center;
+        /* 增加一個 Flexbox 容器來排列按鈕 */
+        .button-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
             margin-top: 50px;
         }
         .start-btn {
@@ -69,8 +72,9 @@
         </div>
     </div>
     
-    <div class="start-btn-container">
+    <div class="button-container">
         <a href="{{ url_for('settings_page', guild_id=guild_obj.id) }}" class="start-btn">開始設定</a>
+        <a href="{{ url_for('members_page', guild_id=guild_obj.id) }}" class="start-btn">顯示成員</a>
     </div>
 </body>
 </html>
