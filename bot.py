@@ -13,7 +13,7 @@ from typing import List, Optional
 import discord
 from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
-from flask import Flask, session, request, render_template, redirect, url_for
+from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 
 
 # =========================
@@ -154,38 +154,6 @@ class RPSView(discord.ui.View):
     def make_timeout_embed(self):
         return discord.Embed(title="⌛ 遊戲超時", description="60 秒內沒有出拳，判定認輸。", color=discord.Color.orange())
 
-    async def handle_round(self):
-        p1_choice = self.choices.get(self.player1)
-        p2_choice = self.choices.get(self.player2) if self.player2 else self.choices.get("bot")
-
-        result_msg = f"🎮 第 {self.current_round} 回合\n"
-        result_msg += f"{self.player1.mention} 出了 {p1_choice} ✅\n"
-        result_msg += f"{self.player2.mention if self.player2 else '🤖 機器人'} 出了 {p2_choice} ✅"
-        await self.message.edit(embed=self.make_embed(), content=result_msg)
-
-        await asyncio.sleep(1)
-
-        if p1_choice == p2_choice:
-            round_result = "🤝 這回合平手！"
-        elif (p1_choice, p2_choice) in [("✌️", "✋"), ("✊", "✌️"), ("✋", "✊")]:
-            round_result = f"✅ {self.player1.mention} 贏了這回合！"
-            self.scores[self.player2 if self.player2 else "bot"] += 1
-        else:
-            round_result = f"✅ {self.player2.mention if self.player2 else '🤖 機器人'} 贏了這回合！"
-            self.scores[self.player2 if self.player2 else "bot"] += 1
-
-        if self.scores[self.player1] >= self.rounds or self.scores[self.player2 if self.player2 else "bot"] >= self.rounds:
-            winner = self.player1.mention if self.scores[self.player1] > self.scores[self.player2 if self.player2 else "bot"] else (self.player2.mention if self.player2 else "🤖 機器人")
-            await self.message.edit(embed=self.make_embed(game_over=True, winner=winner), content=None, view=None)
-            active_games.pop(self.player1.id, None)
-            self.stop()
-        else:
-            self.current_round += 1
-            self.choices.clear()
-            if self.vs_bot:
-                self.choices["bot"] = random.choice(["✊", "✌️", "✋"])
-            await self.message.edit(embed=self.make_embed(round_result=round_result), content=None, view=self)
-
     async def on_timeout(self):
         await self.message.edit(embed=self.make_timeout_embed(), view=None, content=None)
         active_games.pop(self.player1.id, None)
@@ -242,12 +210,11 @@ class UtilityCog(commands.Cog):
     @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
     async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
         await log_command(interaction, "/say")
+        await interaction.response.defer(ephemeral=True)
 
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+            await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
             return
-
-        await interaction.response.defer(ephemeral=True)
 
         if user:
             try:
@@ -288,29 +255,31 @@ class UtilityCog(commands.Cog):
     @app_commands.command(name="calc", description="簡單計算器")
     async def calc(self, interaction: discord.Interaction, expr: str):
         await log_command(interaction, "/calc")
+        await interaction.response.defer(ephemeral=False)
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
                 raise ValueError("包含非法字符")
             result = eval(expr)
-            await interaction.response.send_message(f"結果：{result}")
+            await interaction.followup.send(f"結果：{result}")
         except Exception as e:
-            await interaction.response.send_message(f"計算錯誤：{e}")
+            await interaction.followup.send(f"計算錯誤：{e}")
 
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
     async def delete(self, interaction: discord.Interaction, amount: int):
         await log_command(interaction, "/delete")
+        await interaction.response.defer(ephemeral=True)
+        
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.response.send_message("❌ 只有管理員可以刪除訊息", ephemeral=True)
+            await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
             return
         if amount < 1 or amount > 100:
-            await interaction.response.send_message("❌ 請輸入 1 ~ 100 的數字", ephemeral=True)
+            await interaction.followup.send("❌ 請輸入 1 ~ 100 的數字", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
         try:
-            deleted = await interaction.channel.purge(limit=amount+1)
-            await interaction.followup.send(f"✅ 已刪除 {len(deleted)-1} 則訊息", ephemeral=True)
+            deleted = await interaction.channel.purge(limit=amount + 1)
+            await interaction.followup.send(f"✅ 已刪除 {len(deleted) - 1} 則訊息", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ 刪除失敗: {e}", ephemeral=True)
 
@@ -323,8 +292,10 @@ class ReactionRoleCog(commands.Cog):
     @app_commands.command(name="reactionrole", description="新增反應身分組（管理員用）")
     async def reactionrole(self, interaction: discord.Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
         await log_command(interaction, "/reactionrole")
+        await interaction.response.defer(ephemeral=True)
+
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ 只有管理員可以使用此指令", ephemeral=True)
+            await interaction.followup.send("❌ 只有管理員可以使用此指令", ephemeral=True)
             return
 
         msg_obj = None
@@ -332,13 +303,13 @@ class ReactionRoleCog(commands.Cog):
             try:
                 m = re.match(r"https?://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)", message)
                 if not m:
-                    await interaction.response.send_message("❌ 訊息連結格式錯誤", ephemeral=True)
+                    await interaction.followup.send("❌ 訊息連結格式錯誤", ephemeral=True)
                     return
                 guild_id, channel_id, message_id = map(int, m.groups())
                 channel_obj = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
                 msg_obj = await channel_obj.fetch_message(message_id)
             except Exception as e:
-                await interaction.response.send_message(f"❌ 無法解析訊息連結: {e}", ephemeral=True)
+                await interaction.followup.send(f"❌ 無法解析訊息連結: {e}", ephemeral=True)
                 return
         else:
             if channel is None:
@@ -348,19 +319,19 @@ class ReactionRoleCog(commands.Cog):
                     msg_obj = msg
                     break
             if msg_obj is None:
-                await interaction.response.send_message("❌ 找不到符合的訊息", ephemeral=True)
+                await interaction.followup.send("❌ 找不到符合的訊息", ephemeral=True)
                 return
 
         try:
             await msg_obj.add_reaction(emoji)
         except Exception as e:
-            await interaction.response.send_message(f"❌ 無法加反應: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ 無法加反應: {e}", ephemeral=True)
             return
 
         guild_roles = self.reaction_roles.setdefault(interaction.guild_id, {})
         msg_roles = guild_roles.setdefault(msg_obj.id, {})
         msg_roles[emoji] = role.id
-        await interaction.response.send_message(f"✅ 已設定 {emoji} -> {role.name}", ephemeral=True)
+        await interaction.followup.send(f"✅ 已設定 {emoji} -> {role.name}", ephemeral=True)
 
 
 class FunCog(commands.Cog):
@@ -370,15 +341,16 @@ class FunCog(commands.Cog):
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
         await log_command(interaction, "/rps")
+        await interaction.response.defer()
+        
         if not opponent and not vs_bot:
-            await interaction.response.send_message("❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True)
+            await interaction.followup.send("❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True)
             return
         if opponent and opponent.bot:
-            await interaction.response.send_message("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
+            await interaction.followup.send("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
             return
 
         if opponent:
-            await interaction.response.defer()
             invite_view = RPSInviteView(interaction.user, opponent, rounds)
             msg = await interaction.followup.send(embed=invite_view.make_invite_embed(), view=invite_view)
             await invite_view.wait()
@@ -395,8 +367,30 @@ class FunCog(commands.Cog):
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
         await log_command(interaction, "/dice")
+        await interaction.response.defer()
+        
         number = random.randint(1, 6)
-        await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
+        await interaction.followup.send(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
+
+class LogsCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
+    async def logs(self, interaction: discord.Interaction):
+        await log_command(interaction, "/logs")
+        
+        if int(interaction.user.id) not in SPECIAL_USER_IDS:
+            await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+            return
+            
+        logs_text = "📜 **最近的指令紀錄**\n\n"
+        if not command_logs:
+            logs_text += "目前沒有任何紀錄。"
+        else:
+            logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs])
+            
+        await interaction.response.send_message(logs_text, ephemeral=True)
 
 
 class PingCog(commands.Cog):
@@ -406,7 +400,9 @@ class PingCog(commands.Cog):
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: discord.Interaction):
         await log_command(interaction, "/ping")
-        await interaction.response.send_message(f"🏓 Pong! {round(bot.latency*1000)}ms")
+        await interaction.response.defer()
+
+        await interaction.followup.send(f"🏓 Pong! {round(bot.latency*1000)}ms")
 
 
 class HelpCog(commands.Cog):
@@ -416,18 +412,13 @@ class HelpCog(commands.Cog):
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
         await log_command(interaction, "/help")
+        await interaction.response.defer(ephemeral=True)
+        
         embed = discord.Embed(title="📖 指令清單", description="以下是目前可用的指令：", color=discord.Color.blue())
         for cmd in self.bot.tree.get_commands():
             embed.add_field(name=f"/{cmd.name}", value=cmd.description or "沒有描述", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
-
-import discord
-from discord.ext import commands
-from discord import app_commands
-from discord import FFmpegPCMAudio
-import yt_dlp
-import asyncio
 
 class VoiceCog(commands.Cog):
     def __init__(self, bot):
@@ -438,9 +429,12 @@ class VoiceCog(commands.Cog):
 
     @app_commands.command(name="play", description="播放 YouTube 音樂")
     async def play(self, interaction: discord.Interaction, url: str):
+        await log_command(interaction, "/play")
+        await interaction.response.defer()
+        
         # 確認使用者在語音頻道
         if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.response.send_message("❌ 你必須先加入語音頻道", ephemeral=True)
+            await interaction.followup.send("❌ 你必須先加入語音頻道", ephemeral=True)
             return
         channel = interaction.user.voice.channel
 
@@ -466,7 +460,7 @@ class VoiceCog(commands.Cog):
                 audio_url = info['url']
                 title = info.get('title', '未知曲目')
         except Exception as e:
-            await interaction.response.send_message(f"❌ 取得音訊失敗: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ 取得音訊失敗: {e}", ephemeral=True)
             return
 
         # 加入播放隊列
@@ -484,7 +478,7 @@ class VoiceCog(commands.Cog):
         view = MusicControlView(self, interaction.guild.id)
 
         # 發送 Embed
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
         # 如果沒有正在播放，開始播放
         if not self.now_playing.get(interaction.guild.id):
@@ -510,36 +504,39 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         vc = self.cog.vc_dict[self.guild_id]
         if vc.is_playing():
             vc.pause()
-            await interaction.response.send_message("⏸️ 暫停播放", ephemeral=True)
+            await interaction.followup.send("⏸️ 暫停播放", ephemeral=True)
         elif vc.is_paused():
             vc.resume()
-            await interaction.response.send_message("▶️ 繼續播放", ephemeral=True)
+            await interaction.followup.send("▶️ 繼續播放", ephemeral=True)
         else:
-            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+            await interaction.followup.send("❌ 目前沒有播放中的音樂", ephemeral=True)
 
     @discord.ui.button(label="⏭️ 跳過", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         vc = self.cog.vc_dict[self.guild_id]
         if vc.is_playing():
             vc.stop()
-            await interaction.response.send_message("⏩ 已跳過歌曲", ephemeral=True)
+            await interaction.followup.send("⏩ 已跳過歌曲", ephemeral=True)
         else:
-            await interaction.response.send_message("❌ 目前沒有播放中的音樂", ephemeral=True)
+            await interaction.followup.send("❌ 目前沒有播放中的音樂", ephemeral=True)
 
     @discord.ui.button(label="⏹️ 停止", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         vc = self.cog.vc_dict[self.guild_id]
         if vc.is_connected():
             vc.stop()
             await vc.disconnect()
-            await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
+            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
             self.cog.queue[self.guild_id] = []
             self.cog.now_playing[self.guild_id] = None
         else:
-            await interaction.response.send_message("❌ 目前沒有連線的語音頻道", ephemeral=True)
+            await interaction.followup.send("❌ 目前沒有連線的語音頻道", ephemeral=True)
 
 
 # =========================
@@ -548,18 +545,11 @@ class MusicControlView(discord.ui.View):
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     """處理應用程式指令錯誤"""
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"❌ 指令錯誤：{error}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
-    except Exception:
-        pass
-
-@bot.event
-async def on_app_command_completion(interaction: discord.Interaction, command):
-    """處理成功執行的應用程式指令，並記錄日誌"""
-    await log_command(interaction, f"/{command.qualified_name}")
+    # 這裡的邏輯已經很健壯，通常不會造成雙重通知
+    if interaction.response.is_done():
+        await interaction.followup.send(f"❌ 指令錯誤：{error}", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ 指令錯誤：{error}", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -571,6 +561,7 @@ async def on_ready():
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(FunCog(bot))
+    await bot.add_cog(LogsCog(bot)) # 新增 LogsCog
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.add_cog(VoiceCog(bot))
@@ -606,14 +597,12 @@ def all_guild_logs():
         return "❌ 您沒有權限訪問這個頁面。", 403
     return render_template('all_logs.html', logs=command_logs)
 
-
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
     if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
-        return "❌ 您沒有權限訪問這個頁面。", 403
+        return jsonify({"error": "您沒有權限訪問此資料"}), 403
     return jsonify(command_logs)
-
 
 @app.route("/guild/<int:guild_id>")
 async def guild_dashboard(guild_id):
