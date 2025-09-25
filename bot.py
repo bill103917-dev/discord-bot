@@ -646,6 +646,7 @@ def callback():
     user_data = user_response.json()
     guilds_response = requests.get(f"{DISCORD_API_BASE_URL}/users/@me/guilds", headers=user_headers)
     guilds_response.raise_for_status()
+        print("API回傳的原始伺服器列表:", all_guilds)
     all_guilds = guilds_response.json()
     # 過濾並只儲存擁有管理員權限的伺服器
     ADMINISTRATOR_PERMISSION = 8 
