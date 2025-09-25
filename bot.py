@@ -646,9 +646,22 @@ def callback():
     user_data = user_response.json()
     guilds_response = requests.get(f"{DISCORD_API_BASE_URL}/users/@me/guilds", headers=user_headers)
     guilds_response.raise_for_status()
-    guilds_data = guilds_response.json()
+    all_guilds = guilds_response.json()
+    # 過濾並只儲存擁有管理員權限的伺服器
+    ADMINISTRATOR_PERMISSION = 8 
+    admin_guilds = [
+        g for g in all_guilds 
+        if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
+    ]
+
     session["discord_user"] = user_data
-    session["discord_guilds"] = guilds_data
+    # 只儲存包含ID、名稱和圖示的簡化伺服器資訊
+    session["discord_guilds"] = [
+        {"id": g["id"], "name": g["name"], "icon": g["icon"]} 
+        for g in admin_guilds
+    ]
+
+    
     return redirect(url_for("index"))
 
 @app.route("/logout")
