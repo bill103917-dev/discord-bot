@@ -580,7 +580,6 @@ async def on_ready():
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.add_cog(VoiceCog(bot))
-    
 
 # =========================
 # ⚡ Flask 路由
@@ -603,7 +602,24 @@ def all_guild_logs():
         return "❌ 您沒有權限訪問這個頁面。", 403
     return render_template('all_logs.html', logs=command_logs)
 
-# 確保 bot.py 中有這一段程式碼，且縮排正確
+@app.route("/guild/<int:guild_id>")
+async def guild_dashboard(guild_id):
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    if not user_data or not guilds_data:
+        return redirect(url_for('index'))
+    ADMINISTRATOR_PERMISSION = 8192
+    guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
+    if not guild_found:
+        return "❌ 你沒有權限管理這個伺服器", 403
+    try:
+        guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
+        member_count = guild_obj.member_count
+        is_owner = guild_obj.owner_id == int(user_data['id'])
+    except (discord.NotFound, discord.Forbidden):
+        return "❌ 找不到這個伺服器或沒有足夠權限", 404
+    return render_template('guild_dashboard.html', user=user_data, guild_obj=guild_obj, member_count=member_count, is_owner=is_owner)
+
 @app.route("/guild/<int:guild_id>/settings")
 async def settings_page(guild_id):
     user_data = session.get("discord_user")
@@ -620,6 +636,31 @@ async def settings_page(guild_id):
         return "❌ 找不到這個伺服器或沒有足夠權限", 404
     return render_template('settings.html', user=user_data, guild_obj=guild_obj)
 
+@app.route("/guild/<int:guild_id>/members")
+async def members_page(guild_id):
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    if not user_data or not guilds_data:
+        return redirect(url_for('index'))
+    ADMINISTRATOR_PERMISSION = 8192
+    guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
+    if not guild_found:
+        return "❌ 你沒有權限管理這個伺服器", 403
+    try:
+        guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
+        members = await guild_obj.fetch_members(limit=None).flatten()
+        members_list = [
+            {
+                "id": m.id,
+                "name": m.display_name,
+                "avatar": m.avatar.url if m.avatar else m.default_avatar.url,
+                "joined_at": m.joined_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            for m in members
+        ]
+        return render_template('members.html', guild_obj=guild_obj, members=members_list)
+    except (discord.NotFound, discord.Forbidden):
+        return "❌ 找不到這個伺服器或沒有足夠權限", 404
 
 @app.route("/callback")
 def callback():
@@ -647,10 +688,6 @@ def callback():
     guilds_response.raise_for_status()
     all_guilds = guilds_response.json()
 
-    print("--- 從 Discord API 接收到的原始伺服器資料 ---")
-    print(all_guilds)
-    print("--- 結束 ---")
-
     # 過濾並只儲存擁有管理員權限的伺服器
     ADMINISTRATOR_PERMISSION = 8192
     admin_guilds = [
@@ -672,9 +709,6 @@ def logout():
     session.pop("discord_user", None)
     session.pop("discord_guilds", None)
     return redirect(url_for("index"))
-
-
-
 
 # =========================
 # ⚡ 執行區塊
