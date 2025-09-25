@@ -78,8 +78,6 @@ async def log_command(interaction, command_name):
 # =========================
 # ⚡ 指令相關類別和 Cog
 # =========================
-
-
 # 剪刀石頭布參數
 active_games = {}
 
@@ -590,10 +588,14 @@ def index():
     guilds_data = session.get("discord_guilds")
     if not user_data or not guilds_data:
         return render_template('login.html', auth_url=AUTH_URL)
+
     is_special_user = int(user_data['id']) in SPECIAL_USER_IDS
     ADMINISTRATOR_PERMISSION = 8192
-    admin_guilds = [g for g in guilds_data if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION]
-        return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
+    admin_guilds = [
+        g for g in guilds_data 
+        if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
+    ]
+    return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
 @app.route("/logs/all")
 def all_guild_logs():
@@ -608,17 +610,20 @@ async def guild_dashboard(guild_id):
     guilds_data = session.get("discord_guilds")
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
+    
     ADMINISTRATOR_PERMISSION = 8192
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
+    
     try:
         guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
         member_count = guild_obj.member_count
         is_owner = guild_obj.owner_id == int(user_data['id'])
-    except (discord.NotFound, discord.Forbidden):
         return render_template('guild_dashboard.html', user=user_data, guild_obj=guild_obj, member_count=member_count, is_owner=is_owner, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
-    
+    except (discord.NotFound, discord.Forbidden):
+        return "❌ 找不到這個伺服器或沒有足夠權限", 404
+
 @app.route("/guild/<int:guild_id>/settings")
 async def settings_page(guild_id):
     user_data = session.get("discord_user")
