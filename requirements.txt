@@ -5,6 +5,6 @@ discord.py[voice]
 PyNaCl
 yt-dlp
 spotipy
-Flask
+Flask[async]
 aiohttp
 requests-oauthlib
