@@ -57,7 +57,6 @@ app.secret_key = FLASK_SECRET_KEY
 DISCORD_API_BASE_URL = "https://discord.com/api/v10"
 AUTH_URL = f"{DISCORD_API_BASE_URL}/oauth2/authorize?response_type=code&client_id={DISCORD_CLIENT_ID}&scope=identify%20guilds%20guilds.members.read&redirect_uri={DISCORD_REDIRECT_URI}"
 TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
-TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
 USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
 
@@ -593,7 +592,7 @@ def index():
     if not user_data or not guilds_data:
         return render_template('login.html', auth_url=AUTH_URL)
     is_special_user = int(user_data['id']) in SPECIAL_USER_IDS
-    ADMINISTRATOR_PERMISSION = 8 
+    ADMINISTRATOR_PERMISSION = 8192
     admin_guilds = [g for g in guilds_data if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION]
     return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user)
 
@@ -610,7 +609,7 @@ async def guild_dashboard(guild_id):
     guilds_data = session.get("discord_guilds")
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
-    ADMINISTRATOR_PERMISSION = 8
+    ADMINISTRATOR_PERMISSION = 8192
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
@@ -633,7 +632,7 @@ def callback():
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": DISCORD_REDIRECT_URI,
-        "scope": "identify guilds"
+        "scope": "identify guilds guilds.members.read"
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     token_response = requests.post(TOKEN_URL, data=data, headers=headers)
@@ -646,23 +645,26 @@ def callback():
     user_data = user_response.json()
     guilds_response = requests.get(f"{DISCORD_API_BASE_URL}/users/@me/guilds", headers=user_headers)
     guilds_response.raise_for_status()
-    print("API回傳的原始伺服器列表:", all_guilds)
-all_guilds = guilds_response.json()
+    all_guilds = guilds_response.json()
+
+    print("--- 從 Discord API 接收到的原始伺服器資料 ---")
+    print(all_guilds)
+    print("--- 結束 ---")
+
     # 過濾並只儲存擁有管理員權限的伺服器
-    ADMINISTRATOR_PERMISSION = 8 
+    ADMINISTRATOR_PERMISSION = 8192
     admin_guilds = [
-        g for g in all_guilds 
+        g for g in all_guilds
         if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
     ]
 
     session["discord_user"] = user_data
     # 只儲存包含ID、名稱和圖示的簡化伺服器資訊
     session["discord_guilds"] = [
-        {"id": g["id"], "name": g["name"], "icon": g["icon"]} 
+        {"id": g["id"], "name": g["name"], "icon": g["icon"], "permissions": g.get('permissions', '0')}
         for g in admin_guilds
     ]
 
-    
     return redirect(url_for("index"))
 
 @app.route("/logout")
