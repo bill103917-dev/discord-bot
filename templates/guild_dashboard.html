@@ -216,7 +216,9 @@
         </div>
         <div class="sidebar-nav">
             <ul>
-                <li><a href="{{ url_for('index') }}" class="active"><span class="icon">🏠</span> 選擇伺服器</a></li>
+                <ul>
+                     <li><a href="{{ url_for('index') }}"><span class="icon">🏠</span> 選擇伺服器</a></li>
+                    <li><a href="https://discord.com/oauth2/authorize?client_id={{ DISCORD_CLIENT_ID }}&permissions=8&scope=bot" target="_blank"><span class="icon">➕</span> 邀請機器人</a></li>
                 </ul>
         </div>
         <div class="user-panel">
