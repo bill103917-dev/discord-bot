@@ -4,45 +4,190 @@
     <meta charset="UTF-8">
     <title>{{ guild_obj.name }} 的伺服器</title>
     <style>
+        /* 基礎設置，使用 Flexbox 佈局來達到全屏效果 */
         body {
-            background-color: #36393f;
-            color: #dcdfe4;
-            font-family: 'Noto Sans CJK TC', sans-serif;
+            font-family: 'Noto Sans CJK TC', Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            background-color: #2f3136; /* Discord 深色背景 */
+            color: #dcddde;
+            display: flex;
+            height: 100vh;
+            overflow: hidden; /* 防止滾動條 */
         }
+
+        /* 左側邊欄 */
+        .sidebar {
+            width: 280px;
+            background-color: #202225; /* 比主背景更深 */
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            flex-shrink: 0;
+            overflow-y: auto; /* 允許垂直滾動 */
+        }
+        
+        /* 頂部 Logo 和文字 */
+        .logo-section {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            overflow: hidden;
+            margin-right: 10px;
+        }
+
+        .logo-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .logo-text {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        /* 導覽列 */
+        .sidebar-nav ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar-nav li {
+            margin-bottom: 10px;
+        }
+
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            text-decoration: none;
+            color: #b9bbbe;
+            border-radius: 6px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+            font-size: 16px;
+        }
+
+        .sidebar-nav a:hover, .sidebar-nav a.active {
+            background-color: #36393f;
+            color: #fff;
+        }
+
+        .sidebar-nav .icon {
+            margin-right: 15px;
+            font-size: 20px;
+            width: 24px;
+            text-align: center;
+        }
+
+        /* 底部用戶面板 */
+        .user-panel {
+            background-color: #23272a;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+
+        .user-details {
+            flex-grow: 1;
+        }
+
+        .user-details h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #fff;
+        }
+
+        .user-details p {
+            margin: 0;
+            font-size: 13px;
+            color: #b9bbbe;
+        }
+
+        .logout-btn {
+            background: none;
+            border: none;
+            color: #dcddde;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 5px;
+            margin-left: 10px;
+            transition: color 0.2s ease;
+        }
+
+        .logout-btn:hover {
+            color: #f04747;
+        }
+
+        /* 主內容區 */
+        .main-content {
+            flex-grow: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+        
+        /* 頁首樣式 */
         .header {
             display: flex;
             align-items: center;
             margin-bottom: 20px;
+            padding: 20px;
+            border-bottom: 1px solid #4f545c;
         }
+        
         .header img {
             width: 80px;
             height: 80px;
             border-radius: 50%;
             margin-right: 20px;
         }
+        
         .header h2 {
             font-size: 28px;
             font-weight: bold;
+            color: #fff;
         }
+        
         .status-row {
             display: flex;
             align-items: center;
             font-size: 16px;
             color: #b9bbbe;
-            margin-bottom: 30px;
+            margin-top: 5px;
         }
+        
         .status-item {
             margin-right: 20px;
         }
-        /* 增加一個 Flexbox 容器來排列按鈕 */
+        
+        /* 導航按鈕容器 */
         .button-container {
             display: flex;
             gap: 20px;
             justify-content: center;
             margin-top: 50px;
         }
+        
+        /* 按鈕樣式 */
         .start-btn {
             background-color: #5865f2;
             color: #ffffff;
@@ -53,28 +198,61 @@
             font-size: 18px;
             border: none;
             cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .start-btn:hover {
+            background-color: #4752c4;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        {% if guild_obj.icon %}
-        <img src="{{ guild_obj.icon.url }}" alt="Guild Icon">
-        {% endif %}
-        <div>
-            <h2>{{ guild_obj.name }} 的伺服器</h2>
-            <div class="status-row">
-                <span class="status-item">{{ member_count }} 位成員</span>
-                <span class="status-item">
-                    {% if is_owner %}伺服器擁有者{% else %}機器人專家{% endif %}
-                </span>
+    <div class="sidebar">
+        <div class="logo-section">
+            <div class="logo-icon">
+                <img src="{{ url_for('static', filename='flork_logo.png') }}" alt="我是機器人 Logo">
             </div>
+            <div class="logo-text">我是機器人</div>
+        </div>
+        <div class="sidebar-nav">
+            <ul>
+                <li><a href="{{ url_for('index') }}" class="active"><span class="icon">🏠</span> 選擇伺服器</a></li>
+                </ul>
+        </div>
+        <div class="user-panel">
+            {% if user['avatar'] %}
+                <img src="https://cdn.discordapp.com/avatars/{{ user['id'] }}/{{ user['avatar'] }}.png" alt="User Avatar" class="user-avatar">
+            {% else %}
+                <img src="https://cdn.discordapp.com/embed/avatars/{{ user['discriminator'] | int % 5 }}.png" alt="Default Avatar" class="user-avatar">
+            {% endif %}
+            <div class="user-details">
+                <h3>{{ user['username'] }}</h3>
+                <p>#{{ user['discriminator'] }}</p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="logout-btn">✕</a>
         </div>
     </div>
-    
-    <div class="button-container">
-        <a href="{{ url_for('settings_page', guild_id=guild_obj.id) }}" class="start-btn">開始設定</a>
-        <a href="{{ url_for('members_page', guild_id=guild_obj.id) }}" class="start-btn">顯示成員</a>
+
+    <div class="main-content">
+        <div class="header">
+            {% if guild_obj.icon %}
+            <img src="{{ guild_obj.icon.url }}" alt="Guild Icon">
+            {% endif %}
+            <div>
+                <h2>{{ guild_obj.name }} 的伺服器</h2>
+                <div class="status-row">
+                    <span class="status-item">{{ member_count }} 位成員</span>
+                    <span class="status-item">
+                        {% if is_owner %}伺服器擁有者{% else %}機器人專家{% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="button-container">
+            <a href="{{ url_for('settings_page', guild_id=guild_obj.id) }}" class="start-btn">開始設定</a>
+            <a href="{{ url_for('members_page', guild_id=guild_obj.id) }}" class="start-btn">顯示成員</a>
+        </div>
     </div>
 </body>
 </html>
