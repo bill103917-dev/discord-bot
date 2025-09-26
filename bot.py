@@ -38,6 +38,11 @@ SPECIAL_USER_IDS = [1238436456041676853]
 # 暫存指令紀錄，只保留最近100筆
 command_logs = []
 
+LOG_VIEWER_IDS = [
+    1238436456041676853,  # <-- 範例 ID，請替換成你想開放的使用者 ID
+    1238436456041676853,
+]
+
 
 # =========================
 # ⚡ Discord 機器人設定
@@ -590,19 +595,54 @@ def index():
     ]
     return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
+# ... (在 bot.py 中找到並替換這段程式碼)
+
 @app.route("/logs/all")
 def all_guild_logs():
     user_data = session.get("discord_user")
-    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data:
+        return redirect(url_for('index'))
+
+    user_id = int(user_data['id'])
+    ADMINISTRATOR_PERMISSION = 8192
+    
+    # 判斷是否擁有查看日誌的權限
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or                     # 1. 是特殊使用者
+        user_id in LOG_VIEWER_IDS or                       # 2. 在日誌查看者列表中 (新增的)
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data) # 3. 擁有任何伺服器的管理員權限
+    )
+    
+    if not can_view_logs:
         return "❌ 您沒有權限訪問這個頁面。", 403
+
     return render_template('all_logs.html', logs=command_logs)
 
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
-    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data:
+        return jsonify({"error": "請先登入"}), 401
+
+    user_id = int(user_data['id'])
+    ADMINISTRATOR_PERMISSION = 8192
+    
+    # 判斷是否擁有查看日誌的權限
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or                     # 1. 是特殊使用者
+        user_id in LOG_VIEWER_IDS or                       # 2. 在日誌查看者列表中 (新增的)
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data) # 3. 擁有任何伺服器的管理員權限
+    )
+    
+    if not can_view_logs:
         return jsonify({"error": "您沒有權限訪問此資料"}), 403
+        
     return jsonify(command_logs)
+
 
 @app.route("/guild/<int:guild_id>")
 async def guild_dashboard(guild_id):
