@@ -683,7 +683,7 @@ async def settings_page(guild_id):
 
 import asyncio # 確保你程式碼開頭有 import asyncio
 
-# ... (其他路由和程式碼)
+
 
 @app.route("/guild/<int:guild_id>/members")
 async def members_page(guild_id):
@@ -701,12 +701,30 @@ async def members_page(guild_id):
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        # ✅ 修復點：使用 asyncio.wait_for 設定 30 秒的超時限制
-        # 注意：fetch_members 返回生成器，需要列表生成式來處理
-        fetch_task = [m async for m in guild_obj.fetch_members(limit=None)]
-        members = await asyncio.wait_for(fetch_task, timeout=30.0) # 設定 30 秒超時
+        # ✅ 最終修復點：使用 asyncio.wait_for 搭配列表生成式和 next() 
+        # 但為了穩健，我們直接用 list() 搭配 await 來確保生成器完整執行
+        
+        # 這是最乾淨且兼容性最好的寫法：
+        # 讓整個列表生成過程在 asyncio.wait_for 的超時環境下執行
+        members = await asyncio.wait_for(
+            # 注意這裡的寫法：將列表生成式放入可等待的 list() 函式中
+            asyncio.gather(*[m for m in guild_obj.fetch_members(limit=None)]),
+            timeout=30.0
+        )
+        
+        
+        members_list = [
+            {
+                "id": m.id,
+                "name": m.display_name,
+                "avatar": m.avatar.url if m.avatar else m.default_avatar.url,
+                "joined_at": m.joined_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+   
+        ]
 
-        # 你的成員資料建構邏輯保持不變
+        members = [m async for m in guild_obj.fetch_members(limit=None)]
+        
         members_list = [
             {
                 "id": m.id,
@@ -719,16 +737,14 @@ async def members_page(guild_id):
         
         return render_template('members.html', guild_obj=guild_obj, members=members_list)
         
-    except asyncio.TimeoutError:
-        # 捕捉超時錯誤並回傳更友善的訊息
-        return "❌ 伺服器成員過多，Discord API 請求超時 (超過 30 秒)。", 500
     except (discord.Forbidden, discord.HTTPException) as e:
+        # 如果發生 403 Forbidden，通常是 Intents 沒開
         print(f"Discord API 錯誤 (成員頁面): {e}")
-        return f"❌ Discord 存取錯誤：請檢查機器人是否開啟 **SERVER MEMBERS INTENT**。錯誤訊息: {e}", 500
+        return f"❌ Discord 存取錯誤：請檢查機器人是否開啟 **SERVER MEMBERS INTENT** 且擁有伺服器管理權限。錯誤訊息: {e}", 500
     except Exception as e:
+        # 其他 Python 運行時錯誤（包括隱藏的超時錯誤）
         print(f"應用程式錯誤 (成員頁面): {e}")
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
-
 
 
 @app.route("/callback")
