@@ -640,6 +640,7 @@ async def settings_page(guild_id):
         return "❌ 找不到這個伺服器或沒有足夠權限", 404
     return render_template('settings.html', user=user_data, guild_obj=guild_obj)
 
+
 @app.route("/guild/<int:guild_id>/members")
 async def members_page(guild_id):
     user_data = session.get("discord_user")
@@ -652,15 +653,15 @@ async def members_page(guild_id):
         return "❌ 你沒有權限管理這個伺服器", 403
         
     try:
-        # 1. 獲取 Guild 物件
         guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        # 2. 獲取所有成員 (這是最可能出錯的地方)
-        # 使用 list() 強制迭代 fetch_members() 生成器並捕獲錯誤
-        members = await guild_obj.fetch_members(limit=None).flatten() 
+        # ✅ 修復點：直接使用 async for 或 await list() 來迭代異步生成器
+        # 因為 fetch_members 返回一個生成器，我們用 list() 來強制執行它
+        members = [m async for m in guild_obj.fetch_members(limit=None)]
         
+        # 你的成員資料建構邏輯保持不變
         members_list = [
             {
                 "id": m.id,
@@ -671,15 +672,12 @@ async def members_page(guild_id):
             for m in members
         ]
         
-        # 3. 成功渲染頁面
         return render_template('members.html', guild_obj=guild_obj, members=members_list)
         
     except (discord.Forbidden, discord.HTTPException) as e:
-        # 403 Forbidden 或其他 API 錯誤，通常是權限問題
         print(f"Discord API 錯誤 (成員頁面): {e}")
-        return f"❌ Discord 存取錯誤：請再次檢查機器人是否開啟 **SERVER MEMBERS INTENT** 且擁有伺服器管理權限。錯誤訊息: {e}", 500
+        return f"❌ Discord 存取錯誤：請檢查機器人是否開啟 **SERVER MEMBERS INTENT** 且擁有伺服器管理權限。錯誤訊息: {e}", 500
     except Exception as e:
-        # 其他 Python 運行時錯誤 (例如超時)
         print(f"應用程式錯誤 (成員頁面): {e}")
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
 
