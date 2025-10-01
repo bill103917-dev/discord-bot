@@ -1,10 +1,23 @@
+# requirements.txt
+# 解決 'authlib' 錯誤
+authlib
+
+# 讓 Flask 能處理異步函式 (async def)
+nest-asyncio
+Flask
+Flask[async]
+gunicorn # 部署 web 應用程式到 Render/Heroku 等環境時推薦使用
+
+#Discord 機器人核心與功能
 discord.py
-nest_asyncio
-flask
 discord.py[voice]
 PyNaCl
+aiohttp
+
+#影片/音樂功能
 yt-dlp
 spotipy
-Flask[async]
-aiohttp
+
+
+#其他
 requests-oauthlib
