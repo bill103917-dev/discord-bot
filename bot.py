@@ -607,20 +607,6 @@ import asyncio
 # ⚡ 環境變數和常數設定 (請替換為你的實際值)
 # =========================
 
-# 特殊使用者列表（擁有全權限，請替換成你的 Discord ID）
-SPECIAL_USER_IDS = [1238436456041676853] 
-
-# 可以查看日誌的使用者 ID 列表
-LOG_VIEWER_IDS = [
-    123456789012345678,  # <-- 範例 ID，請替換成你想開放的使用者 ID
-]
-
-# 暫存指令紀錄
-command_logs = [] 
-
-# 權限常數 (管理員權限)
-ADMINISTRATOR_PERMISSION = 8192
-
 # =========================
 # 💾 設定載入與儲存函式 (你需要自己實現)
 # =========================
@@ -695,8 +681,10 @@ def logs_data():
 
 # ... (bot.py 頂部的常數，例如 ADMINISTRATOR_PERMISSION = 8192)
 
+# 請替換檔案中 @app.route("/guild/<int:guild_id>") 區塊
+
 @app.route("/guild/<int:guild_id>")
-def guild_dashboard(guild_id):
+async def guild_dashboard(guild_id):
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
     
@@ -710,21 +698,28 @@ def guild_dashboard(guild_id):
     if not guild_found:
         return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
 
-    # 2. 檢查機器人是否在該伺服器中
-    # 注意：這裡使用同步的 bot.get_guild
-    guild_obj = bot.get_guild(guild_id) 
+    # 2. 檢查機器人是否在該伺服器中，並嘗試獲取 Guild Object
+    # 這裡使用 await bot.fetch_guild(guild_id) 來確保即使 bot.get_guild() 找不到也能重試一次
+    guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
-        # 如果機器人已經離開，但使用者登入資料中還有這個伺服器，就會發生
-        return f"❌ 找不到伺服器：機器人目前不在 ID 為 {guild_id} 的伺服器中。", 404
-        
+        try:
+            guild_obj = await bot.fetch_guild(guild_id)
+        except (discord.NotFound, discord.Forbidden):
+            return f"❌ 找不到伺服器：機器人目前不在 ID 為 {guild_id} 的伺服器中。", 404
+        except Exception as e:
+            print(f"Fetch Guild 錯誤: {e}")
+            return "❌ 內部錯誤：嘗試獲取伺服器資料失敗。", 500
+
     # 3. 如果一切正常，渲染儀表板
-    # 你可以傳遞一些基本資料給模板
     context = {
         'guild_obj': guild_obj,
         'guild_id': guild_id,
         'user_data': user_data
+        # 💡 你可以在這裡加入 load_config(guild_id) 的結果
+        # 'config': load_config(guild_id) 
     }
     return render_template('guild_dashboard.html', **context)
+
 
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
 async def settings(guild_id):
