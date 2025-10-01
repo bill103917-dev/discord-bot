@@ -595,40 +595,6 @@ def index():
     ]
     return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
-# ... (在 bot.py 中找到並替換這段程式碼)
-
-import discord
-from discord.ext import commands
-from flask import Flask, redirect, url_for, session, request, render_template, jsonify
-from authlib.integrations.flask_client import OAuth
-import asyncio
-
-# =========================
-# ⚡ 環境變數和常數設定 (請替換為你的實際值)
-# =========================
-
-# =========================
-# 💾 設定載入與儲存函式 (你需要自己實現)
-# =========================
-
-# 💡 提示：你需要實現這兩個函式來處理伺服器設定的持久化
-def load_config(guild_id):
-    """從檔案或資料庫載入伺服器設定"""
-    # 這裡應該有載入 config.json 或資料庫設定的邏輯
-    # 為了範例，提供預設值
-    return {
-        'welcome_channel_id': '',
-        'video_notification_channel_id': '',
-        'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
-        'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
-    }
-
-def save_config(guild_id, config):
-    """將伺服器設定儲存到檔案或資料庫"""
-    # 這裡應該有儲存 config.json 或資料庫設定的邏輯
-    print(f"--- 設定已儲存：{guild_id} ---")
-    print(config)
-
 
 # =========================
 # ⚡ Flask 路由
