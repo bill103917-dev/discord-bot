@@ -693,11 +693,38 @@ def logs_data():
         
     return jsonify(command_logs)
 
+# ... (bot.py 頂部的常數，例如 ADMINISTRATOR_PERMISSION = 8192)
+
 @app.route("/guild/<int:guild_id>")
 def guild_dashboard(guild_id):
-    # 這裡應該有權限檢查，確保使用者有權管理這個 guild_id
-    # 由於邏輯與 index 相似，這裡簡化，直接渲染
-    return render_template('guild_dashboard.html', guild_id=guild_id)
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data or not guilds_data:
+        return redirect(url_for('index'))
+
+    # 1. 檢查使用者是否有權限管理這個伺服器
+    ADMINISTRATOR_PERMISSION = 8192
+    guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
+    
+    if not guild_found:
+        return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
+
+    # 2. 檢查機器人是否在該伺服器中
+    # 注意：這裡使用同步的 bot.get_guild
+    guild_obj = bot.get_guild(guild_id) 
+    if not guild_obj:
+        # 如果機器人已經離開，但使用者登入資料中還有這個伺服器，就會發生
+        return f"❌ 找不到伺服器：機器人目前不在 ID 為 {guild_id} 的伺服器中。", 404
+        
+    # 3. 如果一切正常，渲染儀表板
+    # 你可以傳遞一些基本資料給模板
+    context = {
+        'guild_obj': guild_obj,
+        'guild_id': guild_id,
+        'user_data': user_data
+    }
+    return render_template('guild_dashboard.html', **context)
 
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
 async def settings(guild_id):
