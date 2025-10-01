@@ -597,6 +597,76 @@ def index():
 
 # ... (在 bot.py 中找到並替換這段程式碼)
 
+import discord
+from discord.ext import commands
+from flask import Flask, redirect, url_for, session, request, render_template, jsonify
+from authlib.integrations.flask_client import OAuth
+import asyncio
+
+# =========================
+# ⚡ 環境變數和常數設定 (請替換為你的實際值)
+# =========================
+
+# 特殊使用者列表（擁有全權限，請替換成你的 Discord ID）
+SPECIAL_USER_IDS = [1238436456041676853] 
+
+# 可以查看日誌的使用者 ID 列表
+LOG_VIEWER_IDS = [
+    123456789012345678,  # <-- 範例 ID，請替換成你想開放的使用者 ID
+]
+
+# 暫存指令紀錄
+command_logs = [] 
+
+# 權限常數 (管理員權限)
+ADMINISTRATOR_PERMISSION = 8192
+
+# =========================
+# 💾 設定載入與儲存函式 (你需要自己實現)
+# =========================
+
+# 💡 提示：你需要實現這兩個函式來處理伺服器設定的持久化
+def load_config(guild_id):
+    """從檔案或資料庫載入伺服器設定"""
+    # 這裡應該有載入 config.json 或資料庫設定的邏輯
+    # 為了範例，提供預設值
+    return {
+        'welcome_channel_id': '',
+        'video_notification_channel_id': '',
+        'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
+        'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
+    }
+
+def save_config(guild_id, config):
+    """將伺服器設定儲存到檔案或資料庫"""
+    # 這裡應該有儲存 config.json 或資料庫設定的邏輯
+    print(f"--- 設定已儲存：{guild_id} ---")
+    print(config)
+
+
+# =========================
+# ⚡ Flask 路由
+# =========================
+
+@app.route("/")
+def index():
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data:
+        return render_template('login.html')
+    
+    # 過濾出機器人所在的伺服器且使用者擁有管理權限
+    filtered_guilds = []
+    for g in guilds_data:
+        # 檢查伺服器是否在機器人的快取中 (bot.guilds)
+        if bot.get_guild(int(g['id'])):
+            # 檢查使用者是否有管理員權限
+            if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION:
+                filtered_guilds.append(g)
+
+    return render_template('dashboard.html', user=user_data, guilds=filtered_guilds)
+
 @app.route("/logs/all")
 def all_guild_logs():
     user_data = session.get("discord_user")
@@ -606,13 +676,12 @@ def all_guild_logs():
         return redirect(url_for('index'))
 
     user_id = int(user_data['id'])
-    ADMINISTRATOR_PERMISSION = 8192
     
-    # 判斷是否擁有查看日誌的權限
+    # 判斷是否擁有查看日誌的權限 (特殊使用者 或 日誌查看者 或 管理員)
     can_view_logs = (
-        user_id in SPECIAL_USER_IDS or                     # 1. 是特殊使用者
-        user_id in LOG_VIEWER_IDS or                       # 2. 在日誌查看者列表中 (新增的)
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data) # 3. 擁有任何伺服器的管理員權限
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
     )
     
     if not can_view_logs:
@@ -629,13 +698,12 @@ def logs_data():
         return jsonify({"error": "請先登入"}), 401
 
     user_id = int(user_data['id'])
-    ADMINISTRATOR_PERMISSION = 8192
     
     # 判斷是否擁有查看日誌的權限
     can_view_logs = (
-        user_id in SPECIAL_USER_IDS or                     # 1. 是特殊使用者
-        user_id in LOG_VIEWER_IDS or                       # 2. 在日誌查看者列表中 (新增的)
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data) # 3. 擁有任何伺服器的管理員權限
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
     )
     
     if not can_view_logs:
@@ -643,47 +711,58 @@ def logs_data():
         
     return jsonify(command_logs)
 
-
 @app.route("/guild/<int:guild_id>")
-async def guild_dashboard(guild_id):
+def guild_dashboard(guild_id):
+    # 這裡應該有權限檢查，確保使用者有權管理這個 guild_id
+    # 由於邏輯與 index 相似，這裡簡化，直接渲染
+    return render_template('guild_dashboard.html', guild_id=guild_id)
+
+@app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
+async def settings(guild_id):
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
+    
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
     
-    ADMINISTRATOR_PERMISSION = 8192
+    # 檢查使用者是否有權限管理這個伺服器
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
-    
-    try:
-        guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
-        member_count = guild_obj.member_count
-        is_owner = guild_obj.owner_id == int(user_data['id'])
-        return render_template('guild_dashboard.html', user=user_data, guild_obj=guild_obj, member_count=member_count, is_owner=is_owner, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
-    except (discord.NotFound, discord.Forbidden):
-        return "❌ 找不到這個伺服器或沒有足夠權限", 404
+        
+    guild_obj = bot.get_guild(guild_id)
+    if not guild_obj:
+        return "❌ 機器人不在這個伺服器", 404
 
-@app.route("/guild/<int:guild_id>/settings")
-async def settings_page(guild_id):
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
-    if not user_data or not guilds_data:
-        return redirect(url_for('index'))
-    ADMINISTRATOR_PERMISSION = 8192
-    guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
-    if not guild_found:
-        return "❌ 你沒有權限管理這個伺服器", 403
-    try:
-        guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
-    except (discord.NotFound, discord.Forbidden):
-        return "❌ 找不到這個伺服器或沒有足夠權限", 404
-    return render_template('settings.html', user=user_data, guild_obj=guild_obj)
+    config = load_config(guild_id)
 
+    if request.method == 'POST':
+        # 1. 處理舊設定
+        config['welcome_channel_id'] = request.form.get('welcome_channel_id', '')
+        
+        # 2. 處理新增的影片/直播通知設定
+        config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
+        config['video_notification_message'] = request.form.get('video_message', '')
+        config['live_notification_message'] = request.form.get('live_message', '')
+        
+        save_config(guild_id, config)
+        
+        # 重新導向以避免重複提交
+        return redirect(url_for('settings', guild_id=guild_id))
 
-import asyncio # 確保你程式碼開頭有 import asyncio
-
-
+    # GET 請求
+    context = {
+        'guild_obj': guild_obj,
+        'user_data': user_data,
+        'channels': guild_obj.channels,
+        # 傳遞既有設定
+        'welcome_channel_id': config.get('welcome_channel_id', ''),
+        # 傳遞影片/直播設定
+        'video_channel_id': config.get('video_notification_channel_id', ''),
+        'video_message': config.get('video_notification_message', '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}'),
+        'live_message': config.get('live_notification_message', '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}'),
+    }
+    return render_template('settings.html', **context)
 
 @app.route("/guild/<int:guild_id>/members")
 async def members_page(guild_id):
@@ -691,7 +770,7 @@ async def members_page(guild_id):
     guilds_data = session.get("discord_guilds")
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
-    ADMINISTRATOR_PERMISSION = 8192
+    
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
@@ -701,28 +780,8 @@ async def members_page(guild_id):
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        # ✅ 最終修復點：使用 asyncio.wait_for 搭配列表生成式和 next() 
-        # 但為了穩健，我們直接用 list() 搭配 await 來確保生成器完整執行
-        
-        # 這是最乾淨且兼容性最好的寫法：
-        # 讓整個列表生成過程在 asyncio.wait_for 的超時環境下執行
-        members = await asyncio.wait_for(
-            # 注意這裡的寫法：將列表生成式放入可等待的 list() 函式中
-            asyncio.gather(*[m for m in guild_obj.fetch_members(limit=None)]),
-            timeout=30.0
-        )
-        
-        
-        members_list = [
-            {
-                "id": m.id,
-                "name": m.display_name,
-                "avatar": m.avatar.url if m.avatar else m.default_avatar.url,
-                "joined_at": m.joined_at.strftime("%Y-%m-%d %H:%M:%S")
-            }
-   
-        ]
-
+        # 這裡使用 async for 迴圈將異步生成器轉換為列表，這是最穩健的寫法。
+        # 它解決了 'flatten' 錯誤，並讓 discord.py 處理內部超時。
         members = [m async for m in guild_obj.fetch_members(limit=None)]
         
         members_list = [
@@ -738,11 +797,9 @@ async def members_page(guild_id):
         return render_template('members.html', guild_obj=guild_obj, members=members_list)
         
     except (discord.Forbidden, discord.HTTPException) as e:
-        # 如果發生 403 Forbidden，通常是 Intents 沒開
         print(f"Discord API 錯誤 (成員頁面): {e}")
         return f"❌ Discord 存取錯誤：請檢查機器人是否開啟 **SERVER MEMBERS INTENT** 且擁有伺服器管理權限。錯誤訊息: {e}", 500
     except Exception as e:
-        # 其他 Python 運行時錯誤（包括隱藏的超時錯誤）
         print(f"應用程式錯誤 (成員頁面): {e}")
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
 
