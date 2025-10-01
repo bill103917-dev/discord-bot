@@ -15,7 +15,6 @@ from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 
-
 # =========================
 # ⚡ 環境變數和常數設定
 # =========================
@@ -40,9 +39,10 @@ command_logs = []
 
 LOG_VIEWER_IDS = [
     1238436456041676853,  # <-- 範例 ID，請替換成你想開放的使用者 ID
-    1238436456041676853,
 ]
 
+# 權限常數 (管理員權限)
+ADMINISTRATOR_PERMISSION = 8192
 
 # =========================
 # ⚡ Discord 機器人設定
@@ -66,7 +66,7 @@ USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
 
 # =========================
-# ⚡ 通用函式
+# ⚡ 通用函式與設定儲存
 # =========================
 async def log_command(interaction, command_name):
     """紀錄指令使用，以供網頁後台顯示"""
@@ -79,6 +79,23 @@ async def log_command(interaction, command_name):
     })
     if len(command_logs) > 100:
         command_logs.pop(0)
+
+def load_config(guild_id):
+    """從檔案或資料庫載入伺服器設定 (目前為範例預設值)"""
+    # 💡 實際應用中，請在這裡加入從檔案或資料庫載入設定的邏輯
+    return {
+        'welcome_channel_id': '',
+        'video_notification_channel_id': '',
+        'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
+        'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
+    }
+
+def save_config(guild_id, config):
+    """將伺服器設定儲存到檔案或資料庫 (目前為範例輸出)"""
+    # 💡 實際應用中，請在這裡加入儲存設定到檔案或資料庫的邏輯
+    print(f"--- 設定已儲存：{guild_id} ---")
+    print(config)
+
 
 # =========================
 # ⚡ 指令相關類別和 Cog
@@ -207,11 +224,7 @@ class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-
-    # =====================
     # /say 指令
-    # =====================
-    
     @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
     async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
         await log_command(interaction, "/say")
@@ -550,7 +563,6 @@ class MusicControlView(discord.ui.View):
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     """處理應用程式指令錯誤"""
-    # 這裡的邏輯已經很健壯，通常不會造成雙重通知
     if interaction.response.is_done():
         await interaction.followup.send(f"❌ 指令錯誤：{error}", ephemeral=True)
     else:
@@ -562,11 +574,10 @@ async def on_ready():
     print(f"✅ 機器人 {bot.user} 已上線！")
     
     # 這裡的順序很重要！
-    # 先新增 Cog，再同步指令樹。
     await bot.add_cog(UtilityCog(bot))
     await bot.add_cog(ReactionRoleCog(bot))
     await bot.add_cog(FunCog(bot))
-    await bot.add_cog(LogsCog(bot)) # 新增 LogsCog
+    await bot.add_cog(LogsCog(bot))
     await bot.add_cog(PingCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.add_cog(VoiceCog(bot))
@@ -580,6 +591,7 @@ async def on_ready():
 # =========================
 # ⚡ Flask 路由
 # =========================
+
 @app.route("/")
 def index():
     user_data = session.get("discord_user")
@@ -588,66 +600,15 @@ def index():
         return render_template('login.html', auth_url=AUTH_URL)
 
     is_special_user = int(user_data['id']) in SPECIAL_USER_IDS
-    ADMINISTRATOR_PERMISSION = 8192
+    
     admin_guilds = [
         g for g in guilds_data 
         if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
     ]
-    return render_template('dashboard.html', user=user_data, guilds=admin_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
-
-
-# =========================
-# ⚡ Flask 路由
-# =========================
-
-
-@app.route("/logs/all")
-def all_guild_logs():
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
+    # 確保只篩選機器人存在的伺服器
+    filtered_guilds = [g for g in admin_guilds if bot.get_guild(int(g['id']))]
     
-    if not user_data:
-        return redirect(url_for('index'))
-
-    user_id = int(user_data['id'])
-    
-    # 判斷是否擁有查看日誌的權限 (特殊使用者 或 日誌查看者 或 管理員)
-    can_view_logs = (
-        user_id in SPECIAL_USER_IDS or
-        user_id in LOG_VIEWER_IDS or
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
-    )
-    
-    if not can_view_logs:
-        return "❌ 您沒有權限訪問這個頁面。", 403
-
-    return render_template('all_logs.html', logs=command_logs)
-
-@app.route("/logs/data")
-def logs_data():
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
-    
-    if not user_data:
-        return jsonify({"error": "請先登入"}), 401
-
-    user_id = int(user_data['id'])
-    
-    # 判斷是否擁有查看日誌的權限
-    can_view_logs = (
-        user_id in SPECIAL_USER_IDS or
-        user_id in LOG_VIEWER_IDS or
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
-    )
-    
-    if not can_view_logs:
-        return jsonify({"error": "您沒有權限訪問此資料"}), 403
-        
-    return jsonify(command_logs)
-
-# ... (bot.py 頂部的常數，例如 ADMINISTRATOR_PERMISSION = 8192)
-
-# 請替換檔案中 @app.route("/guild/<int:guild_id>") 區塊
+    return render_template('dashboard.html', user=user_data, guilds=filtered_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
 @app.route("/guild/<int:guild_id>")
 async def guild_dashboard(guild_id):
@@ -658,14 +619,12 @@ async def guild_dashboard(guild_id):
         return redirect(url_for('index'))
 
     # 1. 檢查使用者是否有權限管理這個伺服器
-    ADMINISTRATOR_PERMISSION = 8192
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     
     if not guild_found:
         return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
 
     # 2. 檢查機器人是否在該伺服器中，並嘗試獲取 Guild Object
-    # 這裡使用 await bot.fetch_guild(guild_id) 來確保即使 bot.get_guild() 找不到也能重試一次
     guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
         try:
@@ -681,8 +640,6 @@ async def guild_dashboard(guild_id):
         'guild_obj': guild_obj,
         'guild_id': guild_id,
         'user_data': user_data
-        # 💡 你可以在這裡加入 load_config(guild_id) 的結果
-        # 'config': load_config(guild_id) 
     }
     return render_template('guild_dashboard.html', **context)
 
@@ -702,37 +659,34 @@ async def settings(guild_id):
         
     guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
-        return "❌ 機器人不在這個伺服器", 404
-
+        try:
+            guild_obj = await bot.fetch_guild(guild_id)
+        except (discord.NotFound, discord.Forbidden):
+            return "❌ 機器人不在這個伺服器", 404
+        
     config = load_config(guild_id)
 
     if request.method == 'POST':
-        # 1. 處理舊設定
         config['welcome_channel_id'] = request.form.get('welcome_channel_id', '')
-        
-        # 2. 處理新增的影片/直播通知設定
         config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
         config['video_notification_message'] = request.form.get('video_message', '')
         config['live_notification_message'] = request.form.get('live_message', '')
         
         save_config(guild_id, config)
         
-        # 重新導向以避免重複提交
         return redirect(url_for('settings', guild_id=guild_id))
 
-    # GET 請求
     context = {
         'guild_obj': guild_obj,
         'user_data': user_data,
-        'channels': guild_obj.channels,
-        # 傳遞既有設定
+        'channels': guild_obj.text_channels, # 只傳遞文字頻道，更安全
         'welcome_channel_id': config.get('welcome_channel_id', ''),
-        # 傳遞影片/直播設定
         'video_channel_id': config.get('video_notification_channel_id', ''),
         'video_message': config.get('video_notification_message', '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}'),
         'live_message': config.get('live_notification_message', '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}'),
     }
     return render_template('settings.html', **context)
+
 
 @app.route("/guild/<int:guild_id>/members")
 async def members_page(guild_id):
@@ -750,8 +704,7 @@ async def members_page(guild_id):
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        # 這裡使用 async for 迴圈將異步生成器轉換為列表，這是最穩健的寫法。
-        # 它解決了 'flatten' 錯誤，並讓 discord.py 處理內部超時。
+        # 獲取成員列表 (需要開啟 SERVER MEMBERS INTENT)
         members = [m async for m in guild_obj.fetch_members(limit=None)]
         
         members_list = [
@@ -773,6 +726,48 @@ async def members_page(guild_id):
         print(f"應用程式錯誤 (成員頁面): {e}")
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
 
+
+@app.route("/logs/all")
+def all_guild_logs():
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data:
+        return redirect(url_for('index'))
+
+    user_id = int(user_data['id'])
+    
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
+    )
+    
+    if not can_view_logs:
+        return "❌ 您沒有權限訪問這個頁面。", 403
+
+    return render_template('all_logs.html', logs=command_logs)
+
+@app.route("/logs/data")
+def logs_data():
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds")
+    
+    if not user_data:
+        return jsonify({"error": "請先登入"}), 401
+
+    user_id = int(user_data['id'])
+    
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
+    )
+    
+    if not can_view_logs:
+        return jsonify({"error": "您沒有權限訪問此資料"}), 403
+        
+    return jsonify(command_logs)
 
 @app.route("/callback")
 def callback():
@@ -801,7 +796,6 @@ def callback():
     all_guilds = guilds_response.json()
 
     # 過濾並只儲存擁有管理員權限的伺服器
-    ADMINISTRATOR_PERMISSION = 8192
     admin_guilds = [
         g for g in all_guilds
         if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
@@ -826,6 +820,8 @@ def logout():
 # ⚡ 執行區塊
 # =========================
 def run_web():
+    # ⚠️ 注意：在 Render/Heroku 等平台部署時，建議使用 Gunicorn 等 WSGI 伺服器來執行 Flask
+    # (例如：gunicorn bot:app)
     port = os.getenv("PORT", 8080)
     app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
 
@@ -839,4 +835,14 @@ async def main():
     await bot.start(TOKEN)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 確保主執行緒運行異步程式
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("機器人已手動關閉。")
+    except RuntimeError as e:
+        if "cannot run from a thread" in str(e):
+            # 這通常發生在某些環境中，Flask 的 run_web 啟動時可能導致
+            print("Web 伺服器啟動錯誤，可能需要使用 gunicorn 或其他方式啟動。")
+        else:
+            raise
