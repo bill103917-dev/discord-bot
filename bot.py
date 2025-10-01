@@ -648,24 +648,6 @@ def save_config(guild_id, config):
 # ⚡ Flask 路由
 # =========================
 
-@app.route("/")
-def index():
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
-    
-    if not user_data:
-        return render_template('login.html')
-    
-    # 過濾出機器人所在的伺服器且使用者擁有管理權限
-    filtered_guilds = []
-    for g in guilds_data:
-        # 檢查伺服器是否在機器人的快取中 (bot.guilds)
-        if bot.get_guild(int(g['id'])):
-            # 檢查使用者是否有管理員權限
-            if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION:
-                filtered_guilds.append(g)
-
-    return render_template('dashboard.html', user=user_data, guilds=filtered_guilds)
 
 @app.route("/logs/all")
 def all_guild_logs():
