@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>{{ guild_obj.name }} 的伺服器</title>
+    <title>{{ guild_obj.name }} 的伺服器儀表板</title>
     <style>
         /* 基礎設置，使用 Flexbox 佈局來達到全屏效果 */
         body {
@@ -222,14 +222,14 @@
                 </ul>
         </div>
         <div class="user-panel">
-            {% if user['avatar'] %}
-                <img src="https://cdn.discordapp.com/avatars/{{ user['id'] }}/{{ user['avatar'] }}.png" alt="User Avatar" class="user-avatar">
+            {% if user_data.avatar %}
+                <img src="https://cdn.discordapp.com/avatars/{{ user_data.id }}/{{ user_data.avatar }}.png" alt="User Avatar" class="user-avatar">
             {% else %}
-                <img src="https://cdn.discordapp.com/embed/avatars/{{ user['discriminator'] | int % 5 }}.png" alt="Default Avatar" class="user-avatar">
+                <img src="https://cdn.discordapp.com/embed/avatars/{{ user_data.discriminator | int % 5 }}.png" alt="Default Avatar" class="user-avatar">
             {% endif %}
             <div class="user-details">
-                <h3>{{ user['username'] }}</h3>
-                <p>#{{ user['discriminator'] }}</p>
+                <h3>{{ user_data.username }}</h3>
+                <p>#{{ user_data.discriminator }}</p>
             </div>
             <a href="{{ url_for('logout') }}" class="logout-btn">✕</a>
         </div>
@@ -243,17 +243,21 @@
             <div>
                 <h2>{{ guild_obj.name }} 的伺服器</h2>
                 <div class="status-row">
-                    <span class="status-item">{{ member_count }} 位成員</span>
+                    <span class="status-item">{{ guild_obj.member_count }} 位成員</span>
                     <span class="status-item">
-                        {% if is_owner %}伺服器擁有者{% else %}機器人專家{% endif %}
+                        {% if user_data.id|int == guild_obj.owner_id|int %}
+                            伺服器擁有者
+                        {% else %}
+                            機器人專家
+                        {% endif %}
                     </span>
                 </div>
             </div>
         </div>
         
         <div class="button-container">
-            <a href="{{ url_for('settings_page', guild_id=guild_obj.id) }}" class="start-btn">開始設定</a>
-            <a href="{{ url_for('members_page', guild_id=guild_obj.id) }}" class="start-btn">顯示成員</a>
+            <a href="{{ url_for('settings', guild_id=guild_obj.id) }}" class="start-btn">⚙️ 開始設定</a>
+            <a href="{{ url_for('members_page', guild_id=guild_obj.id) }}" class="start-btn">🧑‍💻 顯示成員</a>
         </div>
     </div>
 </body>
