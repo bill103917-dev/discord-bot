@@ -13,42 +13,65 @@
             color: #dcddde; /* Discord 文字色 */
         }
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 50px auto;
-            padding: 30px;
+        }
+        .header-section {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+            padding: 0 15px;
+        }
+        .header-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-right: 20px;
+        }
+        .header-title h1 {
+            margin: 0;
+            font-size: 32px;
+            color: #fff;
+        }
+        .header-title p {
+            margin: 0;
+            color: #b9bbbe;
+        }
+        .feature-card {
             background-color: #36393f; /* Discord 卡片色 */
             border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+            padding: 20px;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        h1, h2 {
-            color: #fff;
-            border-bottom: 2px solid #4f545c;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
         }
-        label {
-            color: #b9bbbe;
+        .card-icon {
+            font-size: 28px;
+            color: #7289da; /* 藍色強調 */
+            margin-bottom: 10px;
+        }
+        .card-title {
+            font-size: 20px;
             font-weight: bold;
+            color: #fff;
+            margin-bottom: 5px;
         }
-        .form-control {
-            background-color: #40444b;
-            border: 1px solid #2f3136;
-            color: #dcddde;
+        .card-description {
+            color: #b9bbbe;
+            font-size: 14px;
         }
-        .form-control:focus {
-            background-color: #40444b;
-            color: #dcddde;
-            border-color: #7289da; /* Discord 藍色 */
-            box-shadow: 0 0 0 0.2rem rgba(114, 137, 218, 0.25);
-        }
-        .text-muted {
-            color: #72767d !important;
-        }
-        .btn-primary {
+        .btn-start {
             background-color: #7289da;
             border-color: #7289da;
+            width: 100%;
         }
-        .btn-primary:hover {
+        .btn-start:hover {
             background-color: #677bc4;
             border-color: #677bc4;
         }
@@ -56,60 +79,52 @@
 </head>
 <body>
     <div class="container">
-        <h1>⚙️ {{ guild_obj.name }} 的伺服器設定</h1>
+        <div class="header-section">
+            {% if guild_obj.icon %}
+                <img src="{{ guild_obj.icon.url }}" alt="Guild Icon" class="header-icon">
+            {% endif %}
+            <div class="header-title">
+                <h1>{{ guild_obj.name }} 的功能設定</h1>
+                <p>選擇您想要設定或調整的功能模組</p>
+            </div>
+        </div>
         
-        <form method="POST">
-            
-            <h2>基本設定</h2>
-            
-            <div class="form-group">
-                <label for="welcome_channel_id">歡迎訊息頻道：</label>
-                <select id="welcome_channel_id" name="welcome_channel_id" class="form-control">
-                    <option value="">(不發送歡迎訊息)</option>
-                    {% for channel in channels %}
-                        {% if channel.type.name == 'text' %}
-                            <option value="{{ channel.id }}" {% if channel.id|string == welcome_channel_id %}selected{% endif %}>
-                                #{{ channel.name }}
-                            </option>
-                        {% endif %}
-                    {% endfor %}
-                </select>
-                <small class="form-text text-muted">選擇新成員加入時，機器人發送歡迎訊息的文字頻道。</small>
-            </div>
-
-            
-            <hr class="my-4">
-            <h2>影片/直播通知設定</h2>
-
-            <div class="form-group">
-                <label for="video_channel_id">通知發送頻道 ID：</label>
-                <input type="text" id="video_channel_id" name="video_channel_id" class="form-control" value="{{ video_channel_id }}" placeholder="請輸入 Discord 頻道 ID (例如: 1234567890...)">
-                <small class="form-text text-muted">當有新影片或直播開始時，訊息將會發送到這個頻道。如果 ID 留空則不發送通知。</small>
-            </div>
-
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label for="video_message">✅ 新影片通知訊息範本：</label>
-                        <textarea id="video_message" name="video_message" class="form-control" rows="6">{{ video_message }}</textarea>
-                        <small class="form-text text-muted">
-                            可用變數：<code>{title}</code> (影片標題), <code>{channel}</code> (頻道名稱), <code>{link}</code> (影片連結)。
-                        </small>
+        <div class="row">
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="feature-card">
+                    <div>
+                        <div class="card-icon">📺</div> 
+                        <div class="card-title">影片與直播通知</div>
+                        <div class="card-description">設定 YouTube 或其他平台的影片和直播自動發送通知。</div>
                     </div>
+                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}" class="btn btn-start mt-3">開始設定</a>
                 </div>
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label for="live_message">✅ 直播通知訊息範本：</label>
-                        <textarea id="live_message" name="live_message" class="form-control" rows="6">{{ live_message }}</textarea>
-                        <small class="form-text text-muted">
-                            可用變數：<code>{title}</code> (直播標題), <code>{channel}</code> (頻道名稱), <code>{link}</code> (直播連結)。
-                        </small>
+            </div>
+
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="feature-card">
+                    <div>
+                        <div class="card-icon">👋</div> 
+                        <div class="card-title">歡迎新成員</div>
+                        <div class="card-description">設定新成員加入時的自動訊息、身分組與驗證流程。</div>
                     </div>
+                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='welcome') }}" class="btn btn-start mt-3">開始設定</a>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="feature-card">
+                    <div>
+                        <div class="card-icon">✨</div> 
+                        <div class="card-title">反應身分組</div>
+                        <div class="card-description">讓成員點擊表情符號自動領取對應的身分組。</div>
+                    </div>
+                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='reaction_roles') }}" class="btn btn-start mt-3">開始設定</a>
                 </div>
             </div>
             
-            <button type="submit" class="btn btn-primary btn-lg btn-block mt-4">💾 儲存設定</button>
-        </form>
+            </div>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary mt-4">← 返回我的伺服器列表</a>
     </div>
 </body>
 </html>
