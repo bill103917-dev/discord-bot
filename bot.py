@@ -640,15 +640,18 @@ async def guild_dashboard(guild_id):
     return redirect(url_for('settings', guild_id=guild_id))
 
 
+# bot.py 檔案中
+
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
-async def settings(guild_id):
+@app.route("/guild/<int:guild_id>/settings/<string:module>", methods=['GET', 'POST']) # 新增帶有 module 參數的路由
+async def settings(guild_id, module=None): # 接受 module 參數
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
     
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
     
-    # 檢查使用者是否有權限管理這個伺服器
+    # 檢查使用者權限 (保留)
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
@@ -661,27 +664,53 @@ async def settings(guild_id):
             return "❌ 機器人不在這個伺服器", 404
         
     config = load_config(guild_id)
-
+    
+    # =======================================================
+    # POST 處理：只有在提交表單時才儲存
+    # =======================================================
     if request.method == 'POST':
-        config['welcome_channel_id'] = request.form.get('welcome_channel_id', '')
-        config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
-        config['video_notification_message'] = request.form.get('video_message', '')
-        config['live_notification_message'] = request.form.get('live_message', '')
+        # 根據不同的模組處理提交的資料
+        if module == 'notifications': # 假設影片/直播通知是 notifications 模組
+            config['welcome_channel_id'] = request.form.get('welcome_channel_id', '')
+            config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
+            config['video_notification_message'] = request.form.get('video_message', '')
+            config['live_notification_message'] = request.form.get('live_message', '')
+            
+            save_config(guild_id, config)
+            # 儲存後重定向回該模組的 GET 頁面
+            return redirect(url_for('settings', guild_id=guild_id, module=module))
         
-        save_config(guild_id, config)
+        # 💡 在這裡添加其他模組的 POST 處理邏輯
         
-        return redirect(url_for('settings', guild_id=guild_id))
+        return redirect(url_for('settings', guild_id=guild_id)) # 如果沒有模組，回到卡片主頁
 
+    # =======================================================
+    # GET 處理：渲染頁面
+    # =======================================================
     context = {
         'guild_obj': guild_obj,
         'user_data': user_data,
-        'channels': guild_obj.text_channels, # 只傳遞文字頻道，更安全
+        'config': config,
+        'channels': guild_obj.text_channels,
+        # 傳遞給模板的設定值，以符合您舊有的 HTML 變數名稱
         'welcome_channel_id': config.get('welcome_channel_id', ''),
         'video_channel_id': config.get('video_notification_channel_id', ''),
         'video_message': config.get('video_notification_message', '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}'),
         'live_message': config.get('live_notification_message', '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}'),
     }
-    return render_template('settings.html', **context)
+    
+    if module:
+        # 如果有指定模組，則渲染對應的設定頁
+        if module == 'notifications':
+            return render_template('settings_notifications.html', **context)
+        # 💡 在這裡添加其他模組的模板渲染
+        else:
+            return redirect(url_for('settings', guild_id=guild_id)) # 找不到模組，回到卡片主頁
+    else:
+        # 如果沒有指定模組，則渲染卡片主頁
+        return render_template('settings_main.html', **context)
+
+
 
 
 @app.route("/guild/<int:guild_id>/members")
