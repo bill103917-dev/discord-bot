@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ guild_obj.name }} - 影片與通知設定</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans CJK TC', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2f3136; /* Discord 背景色 */
+            color: #dcddde; /* Discord 文字色 */
+        }
+        .container {
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 30px;
+            background-color: #36393f; /* Discord 卡片色 */
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+        h1, h2 {
+            color: #fff;
+            border-bottom: 2px solid #4f545c;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        label {
+            color: #b9bbbe;
+            font-weight: bold;
+        }
+        .form-control {
+            background-color: #40444b;
+            border: 1px solid #2f3136;
+            color: #dcddde;
+        }
+        .form-control:focus {
+            background-color: #40444b;
+            color: #dcddde;
+            border-color: #7289da; /* Discord 藍色 */
+            box-shadow: 0 0 0 0.2rem rgba(114, 137, 218, 0.25);
+        }
+        .text-muted {
+            color: #72767d !important;
+        }
+        .btn-primary {
+            background-color: #7289da;
+            border-color: #7289da;
+        }
+        .btn-primary:hover {
+            background-color: #677bc4;
+            border-color: #677bc4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <form method="POST" action="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}">
+            
+            <h1>⚙️ 影片與通知設定</h1>
+            
+            <h2>基本設定</h2>
+            
+            <div class="form-group">
+                <label for="welcome_channel_id">歡迎訊息頻道：</label>
+                <select id="welcome_channel_id" name="welcome_channel_id" class="form-control">
+                    <option value="">(不發送歡迎訊息)</option>
+                    {% for channel in channels %}
+                        {% if channel.type.name == 'text' %}
+                            <option value="{{ channel.id }}" {% if channel.id|string == welcome_channel_id %}selected{% endif %}>
+                                #{{ channel.name }}
+                            </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+                <small class="form-text text-muted">選擇新成員加入時，機器人發送歡迎訊息的文字頻道。</small>
+            </div>
+
+            
+            <hr class="my-4">
+            <h2>影片/直播通知設定</h2>
+
+            <div class="form-group">
+                <label for="video_channel_id">通知發送頻道 ID：</label>
+                <input type="text" id="video_channel_id" name="video_channel_id" class="form-control" value="{{ video_channel_id }}" placeholder="請輸入 Discord 頻道 ID (例如: 1234567890...)">
+                <small class="form-text text-muted">當有新影片或直播開始時，訊息將會發送到這個頻道。如果 ID 留空則不發送通知。</small>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label for="video_message">✅ 新影片通知訊息範本：</label>
+                        <textarea id="video_message" name="video_message" class="form-control" rows="6">{{ video_message }}</textarea>
+                        <small class="form-text text-muted">
+                            可用變數：<code>{title}</code> (影片標題), <code>{channel}</code> (頻道名稱), <code>{link}</code> (影片連結)。
+                        </small>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label for="live_message">✅ 直播通知訊息範本：</label>
+                        <textarea id="live_message" name="live_message" class="form-control" rows="6">{{ live_message }}</textarea>
+                        <small class="form-text text-muted">
+                            可用變數：<code>{title}</code> (直播標題), <code>{channel}</code> (頻道名稱), <code>{link}</code> (直播連結)。
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-lg btn-block mt-4">💾 儲存設定</button>
+            <a href="{{ url_for('settings', guild_id=guild_obj.id) }}" class="btn btn-secondary btn-block mt-2">← 返回功能列表</a>
+        </form>
+    </div>
+</body>
+</html>
