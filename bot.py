@@ -610,8 +610,11 @@ def index():
     
     return render_template('dashboard.html', user=user_data, guilds=filtered_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
+
 @app.route("/guild/<int:guild_id>")
 async def guild_dashboard(guild_id):
+    # **【修改點：移除儀表板邏輯，直接重定向到設定頁面】**
+    
     user_data = session.get("discord_user")
     guilds_data = session.get("discord_guilds")
     
@@ -624,24 +627,17 @@ async def guild_dashboard(guild_id):
     if not guild_found:
         return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
 
-    # 2. 檢查機器人是否在該伺服器中，並嘗試獲取 Guild Object
-    guild_obj = bot.get_guild(guild_id)
-    if not guild_obj:
+    # 2. 確認機器人在該伺服器中 (可選，但為了安全保留)
+    if not bot.get_guild(guild_id):
         try:
-            guild_obj = await bot.fetch_guild(guild_id)
+            await bot.fetch_guild(guild_id)
         except (discord.NotFound, discord.Forbidden):
             return f"❌ 找不到伺服器：機器人目前不在 ID 為 {guild_id} 的伺服器中。", 404
         except Exception as e:
             print(f"Fetch Guild 錯誤: {e}")
             return "❌ 內部錯誤：嘗試獲取伺服器資料失敗。", 500
 
-    # 3. 如果一切正常，渲染儀表板
-    context = {
-        'guild_obj': guild_obj,
-        'guild_id': guild_id,
-        'user_data': user_data
-    }
-    return render_template('guild_dashboard.html', **context)
+    return redirect(url_for('settings', guild_id=guild_id))
 
 
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
