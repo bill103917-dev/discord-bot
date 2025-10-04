@@ -69,7 +69,10 @@
 
         .login-button .icon {
             margin-right: 10px;
-            font-size: 20px;
+            /* 調整 Discord Logo 圖片的大小和位置 */
+            width: 20px; /* 寬度 */
+            height: 20px; /* 高度 */
+            vertical-align: middle; /* 垂直置中對齊文字 */
         }
 
         .privacy-notice {
@@ -87,7 +90,8 @@
         </div>
         <h1>我還不認識你，請先登入</h1>
         <a href="{{ auth_url }}" class="login-button">
-            <span class="icon">?</span> 使用 Discord 登入
+            <img src="{{ url_for('static', filename='discord_logo.png') }}" alt="Discord Logo" class="icon">
+            使用 Discord 登入
         </a>
         <p class="privacy-notice">我沒有權限存取你的個人資訊，個人權權在傳輸及保存時皆有經過加密</p>
     </div>
