@@ -773,6 +773,54 @@ def all_guild_logs():
 
     return render_template('all_logs.html', logs=command_logs)
 
+# bot.py 檔案中
+
+# 假設您有 load_config 和 save_config 函式來處理配置
+# from your_config_module import load_config, save_config
+
+@app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
+async def notifications_modal(guild_id):
+    """
+    用於 AJAX 載入影片通知設定彈出視窗 (modal_notifications.html) 的內容。
+    """
+    user_data = session.get("discord_user")
+    if not user_data:
+        # 如果使用者未登入，雖然不應該發生 (因為是從主儀表板點擊)，但仍做基本檢查
+        return "未登入", 401
+
+    try:
+        # 1. 獲取 Guild 物件和配置
+        guild_obj = bot.get_guild(guild_id) or await bot.fetch_guild(guild_id)
+        if not guild_obj:
+            return "找不到伺服器，機器人不在該處。", 404
+
+        config = load_config(guild_id)
+        
+        # 2. 準備傳遞給模板的上下文 (Context)
+        context = {
+            'guild_obj': guild_obj,
+            # 獲取伺服器中的所有文字頻道，用於下拉選單
+            'channels': [c for c in guild_obj.channels if isinstance(c, discord.TextChannel)],
+            
+            # 從配置中讀取並設定預設值，確保變數能被模板正確使用
+            'video_channel_id': config.get('video_notification_channel_id', ''),
+            'video_message': config.get('video_notification_message', '{channel} 上新影片啦！\n{title}'),
+            'live_message': config.get('live_notification_message', '{channel} 開播啦\n{title}'),
+            # 💡 確保您也載入了其他配置，例如 ping_role, content_filter 等
+            'ping_role': config.get('ping_role', '@everyone'),
+            'content_filter': config.get('content_filter', 'Videos,Livestreams'), # 假設儲存為逗號分隔字串
+        }
+        
+        # 3. 渲染模板並返回 HTML 片段
+        return render_template('modal_notifications.html', **context)
+        
+    except discord.Forbidden:
+        return "❌ 權限錯誤：機器人無法讀取伺服器資料。", 403
+    except Exception as e:
+        print(f"載入通知 Modal 時發生錯誤: {e}")
+        return f"❌ 內部錯誤：無法載入設定視窗。{e}", 500
+
+
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
