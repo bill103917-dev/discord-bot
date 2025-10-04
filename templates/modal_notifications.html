@@ -1,0 +1,143 @@
+<div class="modal-header" style="background-color: #2f3136; border-bottom: 1px solid #4f545c;">
+    <h5 class="modal-title" style="color: #fff;">編輯頻道設定</h5>
+    <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color: #b9bbbe;">
+        <span aria-hidden="true">&times;</span>
+    </button>
+</div>
+<div class="modal-body" style="background-color: #36393f; padding-bottom: 0;">
+    <form id="notificationForm" method="POST" action="{{ url_for('update_notifications', guild_id=guild_obj.id) }}">
+        
+        <div class="row">
+            <div class="col-md-6 form-group">
+                <label for="channel_url" class="required-label">頻道網址 (Channel URL)</label>
+                <input type="text" id="channel_url" name="channel_url" class="form-control" value="https://youtube.com/@hugop" readonly>
+            </div>
+            <div class="col-md-6 form-group">
+                <label for="channel_status">頻道狀態 (Channel Status)</label>
+                <select id="channel_status" name="channel_status" class="form-control" disabled>
+                    <option selected>運行中 (Running)</option>
+                    <option>已暫停 (Paused)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 form-group">
+                <label for="video_channel_id" class="required-label">Discord 頻道 (Discord Channel)</label>
+                <select id="video_channel_id" name="video_channel_id" class="form-control">
+                    <option value="">(請選擇頻道)</option>
+                    {% for channel in channels %}
+                        {% if channel.type.name == 'text' %}
+                            <option value="{{ channel.id }}" {% if channel.id|string == video_channel_id %}selected{% endif %}>
+                                #{{ channel.name }} 📢
+                            </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 form-group">
+                <label for="ping_role">標記身分組 (Ping Role)</label>
+                <input type="text" id="ping_role" name="ping_role" class="form-control" value="@everyone" placeholder="例如 @everyone 或 身分組 ID/名稱">
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6 form-group">
+                <label for="embed_style">嵌入樣式 (Embed) ⭐ BASIC</label>
+                <select id="embed_style" name="embed_style" class="form-control">
+                    <option selected>預設 (Default)</option>
+                    <option>簡潔 (Simple)</option>
+                </select>
+            </div>
+            <div class="col-md-6 form-group">
+                <label for="bot_style">機器人風格 (Bot Style) ⭐ BASIC</label>
+                <select id="bot_style" name="bot_style" class="form-control">
+                    <option selected>預設 (Default)</option>
+                    <option>簡潔 (Minimal)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group mt-3">
+            <label>內容類型篩選 (Content Type Filter)</label>
+            <div class="btn-group w-100" role="group" aria-label="Content Filter">
+                <input type="checkbox" id="filter_videos" name="content_filter" value="Videos" class="btn-check" checked>
+                <label class="btn btn-dark content-filter-btn" for="filter_videos">影片 (Videos)</label>
+                
+                <input type="checkbox" id="filter_streams" name="content_filter" value="Livestreams" class="btn-check" checked>
+                <label class="btn btn-dark content-filter-btn" for="filter_streams">直播 (Livestreams)</label>
+
+                <input type="checkbox" id="filter_shorts" name="content_filter" value="Shorts" class="btn-check">
+                <label class="btn btn-dark content-filter-btn" for="filter_shorts">短片 (Shorts)</label>
+            </div>
+        </div>
+
+        <hr style="border-top: 1px solid #4f545c;">
+
+        <div class="row">
+            <div class="col-md-6 form-group">
+                <label for="video_message" class="required-label">影片訊息 (Video Message) ⓘ</label>
+                <textarea id="video_message" name="video_message" class="form-control" rows="4">{{ video_message or "{channel} 上新影片啦！\n{title}" }}</textarea>
+                <small class="form-text text-muted">變數: {channel}, {title}, {link}</small>
+            </div>
+            <div class="col-md-6 form-group">
+                <label for="live_message" class="required-label">直播訊息 (Live Message) ⓘ</label>
+                <textarea id="live_message" name="live_message" class="form-control" rows="4">{{ live_message or "{channel} 開播啦\n{title}" }}</textarea>
+                <small class="form-text text-muted">變數: {channel}, {title}, {link}</small>
+            </div>
+        </div>
+
+        <input type="hidden" name="guild_id" value="{{ guild_obj.id }}">
+
+    </form>
+</div>
+<div class="modal-footer" style="background-color: #36393f; border-top: none;">
+    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消 (Cancel)</button>
+    <button type="submit" form="notificationForm" class="btn btn-primary" id="updateChannelBtn">更新頻道 (Update Channel)</button>
+</div>
+
+<style>
+    .modal-content { background-color: #36393f; }
+    .form-control {
+        background-color: #40444b;
+        border: 1px solid #202225;
+        color: #dcddde;
+    }
+    .form-control:focus {
+        background-color: #40444b;
+        border-color: #5865f2;
+        box-shadow: 0 0 0 0.2rem rgba(88, 101, 242, 0.25);
+    }
+    .btn-dark {
+        background-color: #2f3136;
+        border: 1px solid #4f545c;
+        color: #dcddde;
+    }
+    .btn-dark:hover { background-color: #40444b; }
+    
+    /* 篩選按鈕樣式 */
+    .btn-group .btn-check + .content-filter-btn {
+        flex-grow: 1;
+        text-align: center;
+        padding: 8px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        background-color: #40444b;
+        border: 1px solid #4f545c;
+        color: #dcddde;
+        margin: 0 2px;
+    }
+    .btn-group .btn-check:checked + .content-filter-btn {
+        background-color: #5865f2; /* 藍色選中 */
+        border-color: #5865f2;
+        color: #fff;
+    }
+    .required-label:after {
+        content: " *";
+        color: #f04747; /* 必填標記 */
+    }
+    #updateChannelBtn {
+        background-color: #5865f2;
+        border-color: #5865f2;
+    }
+</style>
