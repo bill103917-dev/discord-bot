@@ -1037,23 +1037,27 @@ def all_guild_logs():
 def notifications_modal(guild_id): 
     """
     用於 AJAX 載入影片通知設定彈出視窗 (modal_notifications.html) 的內容。
+    已修復：移除異步調用以避免在同步環境下崩潰。
     """
     user_data = session.get("discord_user")
     if not user_data:
         return "未登入", 401
 
     try:
+        # 1. 嘗試從 Discord Bot 緩存中獲取伺服器物件
         guild_obj = bot.get_guild(guild_id)
+        
+        # 2. 如果緩存中找不到，不執行危險的異步操作，直接返回 404。
+        #    這表示機器人可能不在該伺服器。
         if not guild_obj:
-            future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop)
-            guild_obj = future.result(timeout=5) 
-            if not guild_obj:
-                return "找不到伺服器，機器人不在該處。", 404
+            return "找不到伺服器，機器人不在該處（緩存未載入）。", 404
 
+        # 3. 成功獲取資料後，繼續加載配置
         config = load_config(guild_id)
         
         context = {
             'guild_obj': guild_obj,
+            # 確保 'channels' 列表是純同步的
             'channels': [c for c in guild_obj.channels if isinstance(c, discord.TextChannel)],
             
             'video_channel_id': config.get('video_notification_channel_id', ''),
@@ -1066,8 +1070,10 @@ def notifications_modal(guild_id):
         return render_template('modal_notifications.html', **context)
         
     except discord.Forbidden:
+        # 保持此錯誤處理
         return "❌ 權限錯誤：機器人無法讀取伺服器資料。", 403
     except Exception as e:
+        # 如果不是異步問題，而是其他錯誤 (如 load_config 失敗)，則會捕獲
         print(f"載入通知 Modal 時發生錯誤: {e}")
         return f"❌ 內部錯誤：無法載入設定視窗。{e}", 500
 
