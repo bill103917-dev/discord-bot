@@ -21,20 +21,7 @@
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-md-6 form-group">
-                <label for="video_channel_id" class="required-label">Discord 頻道 (Discord Channel)</label>
-                <select id="video_channel_id" name="video_channel_id" class="form-control">
-                    <option value="">(請選擇頻道)</option>
-                    {% for channel in channels %}
-                        {% if channel.type.name == 'text' %}
-                            <option value="{{ channel.id }}" {% if channel.id|string == video_channel_id %}selected{% endif %}>
-                                #{{ channel.name }} 📢
-                            </option>
-                        {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
+
             <div class="col-md-6 form-group">
                 <label for="ping_role">標記身分組 (Ping Role)</label>
                 <input type="text" id="ping_role" name="ping_role" class="form-control" value="@everyone" placeholder="例如 @everyone 或 身分組 ID/名稱">
