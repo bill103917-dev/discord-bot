@@ -107,6 +107,12 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
+import os
+# 如果您確定使用 PostgreSQL，請確保 bot.py 的開頭有這行引入
+# import psycopg2 
+# 如果您是使用其他資料庫，請替換成該資料庫的函式庫 (例如 import sqlite3)
+# ----------------------------------------------------------------------
+
 def load_config(guild_id):
     """
     從檔案或資料庫載入伺服器設定。
@@ -134,6 +140,7 @@ def load_config(guild_id):
         print(f"🚨 配置警告 (Guild {guild_id}): DATABASE_URL 環境變數未設置。使用硬編碼預設配置。")
         return default_config 
 
+    # 2. 使用 try/except 捕捉所有連線和查詢錯誤
     try:
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
@@ -148,6 +155,7 @@ def load_config(guild_id):
             actual_config = parse_config_from_db_row(row) 
             default_config.update(actual_config)
             return default_config
+        
         # 假設查詢成功，返回合併後的配置（或者如果沒有查詢，就是預設值）
         return default_config 
 
@@ -156,6 +164,8 @@ def load_config(guild_id):
         print(f"❌ 資料庫錯誤: 載入 Guild {guild_id} 配置時發生例外: {e}")
         # 返回格式正確的預設字典，讓網頁介面可以繼續運作
         return default_config
+
+
 
 
 # =========================
