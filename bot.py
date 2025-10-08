@@ -107,29 +107,37 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
+# 範例：使用 PostgreSQL 和 psycopg2 的安全邏輯
+import os
+import psycopg2 # 假設您使用這個庫連線
+
 def load_config(guild_id):
-    """
-    從檔案或資料庫載入伺服器設定 (目前為範例預設值)。
-    【已修改：確保返回所有必要的鍵值，避免潛在的 KeyError 或其他格式問題】
-    """
-    # 💡 實際應用中，請在這裡加入從檔案或資料庫載入設定的邏輯
-    
-    # 這是包含所有必要鍵值的預設配置字典
-    return {
-        'welcome_channel_id': '',
-        'video_notification_channel_id': '',
-        
-        # 路由中需要讀取的訊息內容鍵
-        'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
-        'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
-        
-        # 路由中需要讀取的額外配置鍵 (這些是您先前程式碼中缺少的)
+    # 這是您必須返回的完整預設配置
+    default_config = {
         'ping_role': '@everyone',              
         'content_filter': 'Videos,Livestreams',
-        
-        # 您可以將其他未在路由中直接讀取的預設配置也放在這裡
+        # ... (其他所有鍵值)
     }
+    
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        print("🚨 警告：DATABASE_URL 未設置，返回預設配置。")
+        return default_config # <--- 關鍵修復：直接返回預設值，避免連線失敗
 
+    try:
+        conn = psycopg2.connect(db_url) # <--- 最可能崩潰的地方
+        cursor = conn.cursor()
+        
+        # 執行您的查詢和配置載入邏輯...
+        
+        conn.close()
+        # 返回載入的配置 (合併 default_config)
+        return merged_config
+        
+    except Exception as e:
+        # **🔥 連線失敗或查詢失敗時，不讓整個 Web 服務崩潰！**
+        print(f"❌ 資料庫錯誤: 載入配置失敗: {e}")
+        return default_config
 
 # =========================
 # ⚡ 指令相關類別和 Cog
