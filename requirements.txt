@@ -13,6 +13,7 @@ discord.py
 discord.py[voice]
 PyNaCl
 aiohttp
+psycopg2-binary
 
 #影片/音樂功能
 yt-dlp
