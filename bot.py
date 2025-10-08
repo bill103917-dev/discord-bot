@@ -79,7 +79,7 @@ intents = discord.Intents.default()
 intents.members = True # 這裡對應後台的 SERVER MEMBERS INTENT
 intents.message_content = True # 如果需要讀取訊息內容則開啟
 bot = commands.Bot(command_prefix="!", intents=intents)
-
+intents.guilds = True
 # =========================
 # ⚡ Flask 網頁管理後台設定
 # =========================
@@ -1124,49 +1124,59 @@ def all_guild_logs():
     return render_template('all_logs.html', logs=command_logs)
 
 
+# --- 假設的 bot.py 程式碼片段 ---
+
+
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
-def notifications_modal(guild_id): 
-    """
-    用於 AJAX 載入影片通知設定彈出視窗 (modal_notifications.html) 的內容。
-    【已修正 load_config 崩潰問題。】
-    """
-    user_data = session.get("discord_user")
-    if not user_data:
-        return "未登入", 401
-
+def notifications_modal(guild_id):
+    # 🚨 關鍵修正：使用 asyncio 運行非同步獲取
     try:
-        # 1. 嘗試從 Discord Bot 緩存中獲取伺服器物件
-        guild_obj = bot.get_guild(guild_id)
-        
-        # 2. 如果緩存中找不到，不執行危險的異步操作，直接返回 404。
-        if not guild_obj:
-            return "找不到伺服器，機器人不在該處（緩存未載入）。", 404
-
-        # 3. 成功獲取資料後，調用**安全版本**的 load_config
-        config = load_config(guild_id)
-        
-        context = {
-            'guild_obj': guild_obj,
-            # 確保 'channels' 列表是純同步的
-            'channels': [c for c in guild_obj.channels if isinstance(c, discord.TextChannel)],
+        # 使用 bot.fetch_guild 替代 bot.get_guild
+        async def fetch_and_prepare_data():
+            guild_obj = await bot.fetch_guild(guild_id)
+            if guild_obj is None:
+                # 故意拋出錯誤，讓外層的 try/except 捕捉
+                raise ValueError("Guild Not Found") 
             
-            'video_channel_id': config.get('video_notification_channel_id', ''),
-            'video_message': config.get('video_notification_message', '{channel} 上新影片啦！\n{title}'),
-            'live_message': config.get('live_notification_message', '{channel} 開播啦\n{title}'),
-            'ping_role': config.get('ping_role', '@everyone'),
-            'content_filter': config.get('content_filter', 'Videos,Livestreams'), 
-        }
+            # 獲取頻道列表 (這裡也必須確保是獲取最新的，而不是緩存)
+            # 因為 fetch_guild 不會緩存頻道，我們需要額外獲取或使用已有的
+            # 這裡我們假設 bot.get_guild(guild_id).channels 是可行的，
+            # 但最安全的是使用 fetch_channels
+            channels = await guild_obj.fetch_channels() 
+            
+            # 載入配置 (這是您自訂的函式，應該是同步的或已經處理了非同步)
+            config = load_config(guild_id) 
+            
+            # 確保所有變數都有預設值，防止 Jinja2 崩潰
+            video_channel_id = str(config.get('video_channel_id', ''))
+            video_message = config.get('video_message', 'New Video from {channel}: {title}\n{link}')
+            live_message = config.get('live_message', '@everyone {channel} is Live! {title}\n{link}')
+            ping_role = config.get('ping_role', '')
+            content_filter = config.get('content_filter', 'Videos,Livestreams')
+            
+            return {
+                'guild_obj': guild_obj, 
+                'channels': channels,
+                'video_channel_id': video_channel_id,
+                'video_message': video_message,
+                'live_message': live_message,
+                'ping_role': ping_role,
+                'content_filter': content_filter
+            }
+
+        # 在同步的 Flask 函式中執行非同步操作
+        data = asyncio.run(fetch_and_prepare_data())
         
-        # 最終返回渲染後的 HTML，此處應是安全且成功的路徑
-        return render_template('modal_notifications.html', **context)
-        
-    except discord.Forbidden:
-        # 保持此錯誤處理
-        return "❌ 權限錯誤：機器人無法讀取伺服器資料。", 403
+        return render_template('modal_notifications.html', **data)
+
+    except ValueError:
+        # 捕捉我們自己拋出的「Guild Not Found」錯誤
+        return "❌ 錯誤：找不到伺服器，機器人不在該處。", 404
     except Exception as e:
-        # 如果不是 load_config 崩潰，而是其他路由錯誤，也會被捕獲
-        print(f"載入通知 Modal 時發生意外錯誤: {e}")
-        return f"❌ 內部錯誤：無法載入設定視窗。{e}", 500
+        # 捕捉其他所有錯誤
+        print(f"Error loading modal: {e}")
+        # 如果是其他錯誤，請確保您能看到完整的 Traceback
+        return f"❌ 載入設定失敗！錯誤：{str(e)}", 500
 
 
 @app.route("/logs/data")
