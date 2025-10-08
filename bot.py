@@ -108,20 +108,27 @@ async def log_command(interaction, command_name):
         command_logs.pop(0)
 
 def load_config(guild_id):
-    """從檔案或資料庫載入伺服器設定 (目前為範例預設值)"""
+    """
+    從檔案或資料庫載入伺服器設定 (目前為範例預設值)。
+    【已修改：確保返回所有必要的鍵值，避免潛在的 KeyError 或其他格式問題】
+    """
     # 💡 實際應用中，請在這裡加入從檔案或資料庫載入設定的邏輯
+    
+    # 這是包含所有必要鍵值的預設配置字典
     return {
         'welcome_channel_id': '',
         'video_notification_channel_id': '',
+        
+        # 路由中需要讀取的訊息內容鍵
         'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
         'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
+        
+        # 路由中需要讀取的額外配置鍵 (這些是您先前程式碼中缺少的)
+        'ping_role': '@everyone',              
+        'content_filter': 'Videos,Livestreams',
+        
+        # 您可以將其他未在路由中直接讀取的預設配置也放在這裡
     }
-
-def save_config(guild_id, config):
-    """將伺服器設定儲存到檔案或資料庫 (目前為範例輸出)"""
-    # 💡 實際應用中，請在這裡加入儲存設定到檔案或資料庫的邏輯
-    print(f"--- 設定已儲存：{guild_id} ---")
-    print(config)
 
 
 # =========================
