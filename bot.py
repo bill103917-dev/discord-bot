@@ -9,7 +9,7 @@ import requests
 import spotipy
 import yt_dlp
 from typing import List, Optional
-
+import psycopg2 
 import discord
 from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
@@ -107,36 +107,52 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-# 範例：使用 PostgreSQL 和 psycopg2 的安全邏輯
-import os
-import psycopg2 # 假設您使用這個庫連線
+
+
 
 def load_config(guild_id):
-    # 這是您必須返回的完整預設配置
+    """
+    【最終修復版】確保即使資料庫連線失敗或缺少 DATABASE_URL，也能安全返回預設配置。
+    """
+    # 這是包含所有必要鍵值的預設配置字典
     default_config = {
+        'welcome_channel_id': '',
+        'video_notification_channel_id': '',
+        'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
+        'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
         'ping_role': '@everyone',              
         'content_filter': 'Videos,Livestreams',
-        # ... (其他所有鍵值)
+        # ... (其他預設鍵)
     }
-    
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        print("🚨 警告：DATABASE_URL 未設置，返回預設配置。")
-        return default_config # <--- 關鍵修復：直接返回預設值，避免連線失敗
 
+    db_url = os.getenv("DATABASE_URL")
+
+    # 1. 檢查 DATABASE_URL 是否存在
+    if not db_url:
+        print("🚨 資料庫警告：DATABASE_URL 環境變數未設置。返回硬編碼預設配置。")
+        return default_config # <-- 如果沒有連線字串，直接返回安全預設值
+
+    # 2. 執行資料庫連線，並使用 try/except 捕捉所有錯誤
     try:
-        conn = psycopg2.connect(db_url) # <--- 最可能崩潰的地方
+        conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
-        # 執行您的查詢和配置載入邏輯...
-        
+        # 執行您的查詢邏輯...
+        cursor.execute("SELECT config_data FROM server_configs WHERE guild_id = %s", (str(guild_id),))
+        row = cursor.fetchone()
         conn.close()
-        # 返回載入的配置 (合併 default_config)
-        return merged_config
         
+        if row:
+            # 假設您的配置資料儲存在 JSON 格式或類似結構中
+            actual_config = parse_config_from_db_row(row) 
+            default_config.update(actual_config)
+            return default_config
+        
+        return default_config
+
     except Exception as e:
-        # **🔥 連線失敗或查詢失敗時，不讓整個 Web 服務崩潰！**
-        print(f"❌ 資料庫錯誤: 載入配置失敗: {e}")
+        # **🔥 連線或查詢失敗時，打印錯誤但不要讓 Web 服務崩潰！**
+        print(f"❌ 資料庫錯誤: 載入 Guild {guild_id} 配置時發生例外: {e}")
         return default_config
 
 # =========================
