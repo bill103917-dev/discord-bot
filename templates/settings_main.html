@@ -27,6 +27,7 @@
             height: 80px;
             border-radius: 50%;
             margin-right: 20px;
+            background-color: #4f545c; /* 預設背景色，如果沒有圖示 */
         }
         .header-title h1 {
             margin: 0;
@@ -47,7 +48,7 @@
             flex-direction: column;
             justify-content: space-between;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-            cursor: pointer; /* 讓整個卡片看起來可點擊 */
+            cursor: pointer;
         }
         .feature-card:hover {
             transform: translateY(-5px);
@@ -77,11 +78,11 @@
             background-color: #677bc4;
             border-color: #677bc4;
         }
-
-        /* Modal 彈出視窗相關樣式 (確保與 modal_notifications.html 一致) */
+        /* Modal 彈出視窗相關樣式 */
         .modal-content {
             background-color: #36393f;
             border: none;
+            color: #dcddde;
         }
         .modal-header, .modal-footer {
             border: none;
@@ -93,6 +94,8 @@
         <div class="header-section">
             {% if guild_obj.icon %}
                 <img src="{{ guild_obj.icon.url }}" alt="Guild Icon" class="header-icon">
+            {% else %}
+                <div class="header-icon d-flex justify-content-center align-items-center">🤖</div>
             {% endif %}
             <div class="header-title">
                 <h1>{{ guild_obj.name }} 的功能設定</h1>
@@ -117,7 +120,7 @@
                     <div>
                         <div class="card-icon">👋</div> 
                         <div class="card-title">歡迎新成員</div>
-                        <div class="card-description">設定新成員加入時的自動訊息、身分組與驗證流程。</div>
+                        <div class="card-description">設定新成員加入時的自動訊息、身分組與驗證流程。（請確保 `bot.py` 中有 `module='welcome'` 路由）</div>
                     </div>
                     <a href="{{ url_for('settings', guild_id=guild_obj.id, module='welcome') }}" class="btn btn-start mt-3">開始設定</a>
                 </div>
@@ -128,7 +131,7 @@
                     <div>
                         <div class="card-icon">✨</div> 
                         <div class="card-title">反應身分組</div>
-                        <div class="card-description">讓成員點擊表情符號自動領取對應的身分組。</div>
+                        <div class="card-description">讓成員點擊表情符號自動領取對應的身分組。（請確保 `bot.py` 中有 `module='reaction_roles'` 路由）</div>
                     </div>
                     <a href="{{ url_for('settings', guild_id=guild_obj.id, module='reaction_roles') }}" class="btn btn-start mt-3">開始設定</a>
                 </div>
@@ -140,8 +143,14 @@
 
     <div class="modal fade" id="notificationModal" tabindex="-1" role="dialog" aria-labelledby="notificationModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg" role="document">
-            <div class="modal-content" id="modalContent">
+            <div class="modal-content">
+                <div id="modalContent" class="p-5 text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                    <p class="mt-3 text-muted">正在載入設定，請稍候...</p>
                 </div>
+            </div>
         </div>
     </div>
     
@@ -153,16 +162,29 @@
          * 使用 AJAX 載入影片通知設定 (modal_notifications.html) 並彈出
          */
         function loadNotificationModal(guildId) {
+            // 清空內容並顯示載入提示
+            $('#modalContent').html(`
+                <div class="p-5 text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                    <p class="mt-3 text-muted">正在載入設定，請稍候...</p>
+                </div>
+            `);
+            $('#notificationModal').modal('show'); 
+
             // 呼叫 bot.py 中的 /settings/notifications_modal 路由
             $.ajax({
                 url: `/guild/${guildId}/settings/notifications_modal`, 
                 method: 'GET',
                 success: function(data) {
                     $('#modalContent').html(data); // 將獲取的 HTML 內容放入 Modal 容器
-                    $('#notificationModal').modal('show'); // 顯示 Modal
                 },
-                error: function() {
-                    alert('載入設定失敗，請檢查網路或機器人狀態。');
+                error: function(xhr, status, error) {
+                    // 如果後端 load_config 崩潰，或路由出錯，錯誤訊息會在這裡顯示
+                    const errorMsg = xhr.responseText ? xhr.responseText : '伺服器錯誤，請檢查後台日誌。';
+                    $('#modalContent').html('<div class="alert alert-danger" role="alert">❌ **載入設定失敗**！錯誤：' + errorMsg + '</div>');
+                    console.error('Modal 載入失敗:', error, errorMsg);
                 }
             });
         }
