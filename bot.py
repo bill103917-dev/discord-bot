@@ -107,32 +107,33 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-
-
-
 def load_config(guild_id):
     """
-    【最終修復版】確保即使資料庫連線失敗或缺少 DATABASE_URL，也能安全返回預設配置。
+    從檔案或資料庫載入伺服器設定。
+    【防崩潰修復：即使 DATABASE_URL 缺失或連線失敗，也能安全返回預設配置。】
     """
+    
     # 這是包含所有必要鍵值的預設配置字典
     default_config = {
         'welcome_channel_id': '',
         'video_notification_channel_id': '',
+        
+        # 路由中需要讀取的訊息內容鍵
         'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
         'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
+        
+        # 路由中需要讀取的額外配置鍵 (必須確保完整，讓網頁渲染不會崩潰)
         'ping_role': '@everyone',              
         'content_filter': 'Videos,Livestreams',
-        # ... (其他預設鍵)
     }
 
     db_url = os.getenv("DATABASE_URL")
 
-    # 1. 檢查 DATABASE_URL 是否存在
+    # 1. 安全檢查：如果沒有 DATABASE_URL，立即返回預設值
     if not db_url:
-        print("🚨 資料庫警告：DATABASE_URL 環境變數未設置。返回硬編碼預設配置。")
-        return default_config # <-- 如果沒有連線字串，直接返回安全預設值
+        print(f"🚨 配置警告 (Guild {guild_id}): DATABASE_URL 環境變數未設置。使用硬編碼預設配置。")
+        return default_config 
 
-    # 2. 執行資料庫連線，並使用 try/except 捕捉所有錯誤
     try:
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
@@ -147,13 +148,15 @@ def load_config(guild_id):
             actual_config = parse_config_from_db_row(row) 
             default_config.update(actual_config)
             return default_config
-        
-        return default_config
+        # 假設查詢成功，返回合併後的配置（或者如果沒有查詢，就是預設值）
+        return default_config 
 
     except Exception as e:
-        # **🔥 連線或查詢失敗時，打印錯誤但不要讓 Web 服務崩潰！**
+        # 🔥 這是最關鍵的部分：即使連線或查詢失敗，程式碼也不會崩潰
         print(f"❌ 資料庫錯誤: 載入 Guild {guild_id} 配置時發生例外: {e}")
+        # 返回格式正確的預設字典，讓網頁介面可以繼續運作
         return default_config
+
 
 # =========================
 # ⚡ 指令相關類別和 Cog
