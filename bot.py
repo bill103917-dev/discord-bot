@@ -9,13 +9,16 @@ import requests
 import spotipy
 import yt_dlp
 from typing import List, Optional
-import psycopg2 
+# import psycopg2 # 👈 已移除：將它移到 load_config 內部，防止啟動時崩潰
 import discord
 from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 from discord.app_commands import checks
 from discord.app_commands import Choice
+
+# **為了 load_config 運作，我們將這行放在這裡**
+import json # 需要用來解析資料庫中的配置 (如果存在)
 
 # =========================
 # ⚡ 環境變數和常數設定
@@ -107,16 +110,14 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-import os
-# 如果您確定使用 PostgreSQL，請確保 bot.py 的開頭有這行引入
-# import psycopg2 
-# 如果您是使用其他資料庫，請替換成該資料庫的函式庫 (例如 import sqlite3)
-# ----------------------------------------------------------------------
 
+# -------------------------------------------------------------
+# 🔥 關鍵修正 2: load_config 最終防崩潰版本
+# -------------------------------------------------------------
 def load_config(guild_id):
     """
     從檔案或資料庫載入伺服器設定。
-    【防崩潰修復：即使 DATABASE_URL 缺失或連線失敗，也能安全返回預設配置。】
+    【最終安全修正版：即使連線失敗、找不到 DATABASE_URL，或 psycopg2 引入失敗，也不會崩潰。】
     """
     
     # 這是包含所有必要鍵值的預設配置字典
@@ -135,13 +136,15 @@ def load_config(guild_id):
 
     db_url = os.getenv("DATABASE_URL")
 
-    # 1. 安全檢查：如果沒有 DATABASE_URL，立即返回預設值
+    # 1. 安全檢查：如果沒有連線字串，直接返回預設值
     if not db_url:
         print(f"🚨 配置警告 (Guild {guild_id}): DATABASE_URL 環境變數未設置。使用硬編碼預設配置。")
         return default_config 
 
-    # 2. 使用 try/except 捕捉所有連線和查詢錯誤
+    # 2. 連線和查詢 (將 import 放在這裡，避免整體程式崩潰)
     try:
+        import psycopg2 # 👈 關鍵修正：將引入放在 try 區塊內，避免啟動時崩潰
+        
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
@@ -151,21 +154,61 @@ def load_config(guild_id):
         conn.close()
         
         if row:
-            # 假設您的配置資料儲存在 JSON 格式或類似結構中
-            actual_config = parse_config_from_db_row(row) 
-            default_config.update(actual_config)
-            return default_config
-        
-        # 假設查詢成功，返回合併後的配置（或者如果沒有查詢，就是預設值）
+            # 關鍵修正：假設您的配置儲存為 JSON 字串，嘗試解析。
+            # 這是為了讓程式不再崩潰，並提供載入真實資料的可能性。
+            try:
+                actual_config = json.loads(row[0]) 
+                default_config.update(actual_config)
+            except Exception as parse_e:
+                print(f"❌ 解析配置資料失敗: {parse_e}")
+                
+        # 查詢成功但沒有資料，或是資料解析失敗，都會返回 default_config
         return default_config 
 
     except Exception as e:
-        # 🔥 這是最關鍵的部分：即使連線或查詢失敗，程式碼也不會崩潰
+        # 捕捉所有連線失敗、查詢失敗或 psycopg2 引入失敗的錯誤
         print(f"❌ 資料庫錯誤: 載入 Guild {guild_id} 配置時發生例外: {e}")
-        # 返回格式正確的預設字典，讓網頁介面可以繼續運作
+        # 返回格式正確的預設字典，這是防崩潰的核心
         return default_config
 
+# -------------------------------------------------------------
+# 🔥 關鍵修正 3: save_config (雖然不在錯誤路由，但必須存在)
+# -------------------------------------------------------------
+def save_config(guild_id, config):
+    """
+    將伺服器設定儲存到資料庫。
+    【防崩潰修正：即使連線失敗，也不會崩潰。】
+    """
+    db_url = os.getenv("DATABASE_URL")
 
+    if not db_url:
+        print(f"🚨 儲存警告 (Guild {guild_id}): DATABASE_URL 未設置，無法儲存配置。")
+        return 
+    
+    try:
+        import psycopg2
+        
+        conn = psycopg2.connect(db_url)
+        cursor = conn.cursor()
+        
+        config_json = json.dumps(config)
+        
+        # 這是 SQL INSERT/UPDATE 範例，請確保您的表結構正確
+        sql = """
+        INSERT INTO server_configs (guild_id, config_data)
+        VALUES (%s, %s)
+        ON CONFLICT (guild_id) DO UPDATE 
+        SET config_data = EXCLUDED.config_data;
+        """
+        cursor.execute(sql, (str(guild_id), config_json))
+        conn.commit()
+        conn.close()
+        print(f"✅ 配置已儲存 (Guild {guild_id})")
+
+    except Exception as e:
+        print(f"❌ 資料庫錯誤: 儲存 Guild {guild_id} 配置時發生例外: {e}")
+        # 不拋出錯誤，確保服務不崩潰
+        return
 
 
 # =========================
@@ -292,6 +335,10 @@ class RPSView(discord.ui.View):
         expected = 2 if not self.vs_bot else 1
         if len(self.choices) >= expected:
             await self.handle_round()
+            
+
+# **重要：為了讓 RPS 類別可以運作，這裡需要一個 active_games 字典**
+active_games = {}
 
 
 # =========================
@@ -1081,7 +1128,7 @@ def all_guild_logs():
 def notifications_modal(guild_id): 
     """
     用於 AJAX 載入影片通知設定彈出視窗 (modal_notifications.html) 的內容。
-    已修復：移除異步調用以避免在同步環境下崩潰。
+    【已修正 load_config 崩潰問題。】
     """
     user_data = session.get("discord_user")
     if not user_data:
@@ -1092,11 +1139,10 @@ def notifications_modal(guild_id):
         guild_obj = bot.get_guild(guild_id)
         
         # 2. 如果緩存中找不到，不執行危險的異步操作，直接返回 404。
-        #    這表示機器人可能不在該伺服器。
         if not guild_obj:
             return "找不到伺服器，機器人不在該處（緩存未載入）。", 404
 
-        # 3. 成功獲取資料後，繼續加載配置
+        # 3. 成功獲取資料後，調用**安全版本**的 load_config
         config = load_config(guild_id)
         
         context = {
@@ -1111,14 +1157,15 @@ def notifications_modal(guild_id):
             'content_filter': config.get('content_filter', 'Videos,Livestreams'), 
         }
         
+        # 最終返回渲染後的 HTML，此處應是安全且成功的路徑
         return render_template('modal_notifications.html', **context)
         
     except discord.Forbidden:
         # 保持此錯誤處理
         return "❌ 權限錯誤：機器人無法讀取伺服器資料。", 403
     except Exception as e:
-        # 如果不是異步問題，而是其他錯誤 (如 load_config 失敗)，則會捕獲
-        print(f"載入通知 Modal 時發生錯誤: {e}")
+        # 如果不是 load_config 崩潰，而是其他路由錯誤，也會被捕獲
+        print(f"載入通知 Modal 時發生意外錯誤: {e}")
         return f"❌ 內部錯誤：無法載入設定視窗。{e}", 500
 
 
