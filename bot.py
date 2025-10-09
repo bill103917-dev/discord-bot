@@ -969,7 +969,6 @@ def guild_dashboard(guild_id):
     if not guild_found:
         return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
 
-    # 🔥 修正 2: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
         return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
@@ -978,9 +977,11 @@ def guild_dashboard(guild_id):
         try:
             future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop) 
             future.result(timeout=5)
+        except discord.NotFound: # 新增此行
+            return f"❌ 錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
         except Exception as e:
             print(f"Fetch Guild 錯誤 (dashboard): {e}")
-            return f"❌ 找不到伺服器：機器人目前不在 ID 為 {guild_id} 的伺服器中或連線超時。", 404
+            return f"❌ 找不到伺服器：連線超時或其他錯誤。", 404
 
     return redirect(url_for('settings', guild_id=guild_id))
 
@@ -1117,26 +1118,24 @@ def all_guild_logs():
     return render_template('all_logs.html', logs=command_logs)
 
 
-# 🔥 關鍵修正 5: 修正 notifications_modal 路由以使用 run_coroutine_threadsafe
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
 def notifications_modal(guild_id):
     
     global discord_loop
-    # 確保循環已經啟動
     if discord_loop is None or not discord_loop.is_running():
         return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 500
 
     try:
-        # 1. 定義非同步獲取資料的協程 (Coroutine)
         async def fetch_and_prepare_data():
+            # ... (內容不變) ...
             guild_obj = await bot.fetch_guild(guild_id)
             if guild_obj is None:
+                # 雖然 fetch_guild 通常會在找不到時拋出 HTTPException，但以防萬一
                 raise ValueError("找不到伺服器，機器人不在該處。") 
-            
+            # ... (後續獲取頻道、載入配置等程式碼不變) ...
             channels = await guild_obj.fetch_channels() 
             config = load_config(guild_id) 
             
-            # 確保所有變數都有預設值
             video_channel_id = str(config.get('video_notification_channel_id', ''))
             video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
             live_message = config.get('live_notification_message', '@everyone {channel} is Live! {title}\n{link}')
@@ -1153,19 +1152,22 @@ def notifications_modal(guild_id):
                 'content_filter': content_filter
             }
 
-        # 2. 在同步的 Flask 函式中，使用 run_coroutine_threadsafe 執行非同步操作
         future = asyncio.run_coroutine_threadsafe(fetch_and_prepare_data(), discord_loop) 
-        data = future.result(timeout=5) # 阻塞等待結果，最多 5 秒
+        data = future.result(timeout=5)
 
         return render_template('modal_notifications.html', **data)
 
     except ValueError as ve:
-        return f"❌ 錯誤：{str(ve)}", 404
+        # 捕捉我們自己拋出的「找不到伺服器」錯誤
+        return f"❌ 載入設定失敗！錯誤：找不到伺服器。機器人可能已離開或 ID 無效。", 404
+    except discord.NotFound: # 新增對 discord.NotFound 的明確捕捉 (這是 404 錯誤的具體類別)
+        return f"❌ 載入設定失敗！錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
     except TimeoutError:
         return f"❌ 載入設定失敗！錯誤：與 Discord API 連線超時（>5 秒）。", 500
     except Exception as e:
         print(f"Error loading modal: {e}")
         return f"❌ 載入設定失敗！錯誤：{str(e)}", 500
+
 
 
 @app.route("/logs/data")
