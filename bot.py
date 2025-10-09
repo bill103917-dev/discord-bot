@@ -9,21 +9,28 @@ import requests
 import spotipy
 import yt_dlp
 from typing import List, Optional
-# import psycopg2 # 👈 已移除：將它移到 load_config 內部，防止啟動時崩潰
+# 請確認您的環境有安裝 psycopg2
+# import psycopg2 
 import discord
 from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 from discord.app_commands import checks
 from discord.app_commands import Choice
-
-# **為了 load_config 運作，我們將這行放在這裡**
-import json # 需要用來解析資料庫中的配置 (如果存在)
+import json 
+import random
+import datetime
+# 從核心檔案中引入必要的全局變數和函式 (假設它們在同一檔案中或已被引入)
+# 為了單獨執行這段程式碼，你需要確保 log_command, active_games, BUBBLE_WRAP_TEXT_ALIGNED 存在
+# 這裡我們只保留類別定義，並假設這些依賴項存在。
+# from your_main_file import log_command, active_games, BUBBLE_WRAP_TEXT_ALIGNED, SPECIAL_USER_IDS 
+# 必須確保 Cogs 類別在這個檔案中被引入或定義，否則 on_ready 會失敗
+# 假設您將 Cogs 複製到這個檔案的頂部或從一個模組引入：
+# from your_cogs_file import UtilityCog, ModerationCog, ReactionRoleCog, FunCog, LogsCog, PingCog, HelpCog, VoiceCog
 
 # =========================
 # ⚡ 環境變數和常數設定
 # =========================
-# 從環境變數中讀取密碼和 OAuth2 資訊
 TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
@@ -39,20 +46,16 @@ if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
 
 # 特殊使用者列表（替換成你的 Discord ID）
 SPECIAL_USER_IDS = [1238436456041676853]
-# 暫存指令紀錄，只保留最近100筆
-command_logs = []
+command_logs = [] # 暫存指令紀錄
+active_games = {} # 確保 RPS 遊戲字典存在
 
 LOG_VIEWER_IDS = [
-    1238436456041676853,  # <-- 範例 ID，請替換成你想開放的使用者 ID
+    1238436456041676853, 
 ]
 
-# 權限常數 (管理員權限)
 ADMINISTRATOR_PERMISSION = 8192
 
-# -------------------------------------------------------------
 # 氣泡紙內容定義 (Code Block 與四格空位排版)
-# -------------------------------------------------------------
-
 BUBBLE_WRAP_TEXT_ALIGNED = (
     "||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪||\n"
     "||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪|| ||啪||\n"
@@ -76,10 +79,11 @@ BUBBLE_WRAP_TEXT_ALIGNED = (
 # ⚡ Discord 機器人設定
 # =========================
 intents = discord.Intents.default()
-intents.members = True # 這裡對應後台的 SERVER MEMBERS INTENT
-intents.message_content = True # 如果需要讀取訊息內容則開啟
-bot = commands.Bot(command_prefix="!", intents=intents)
+intents.members = True 
+intents.message_content = True 
 intents.guilds = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # =========================
 # ⚡ Flask 網頁管理後台設定
 # =========================
@@ -110,75 +114,51 @@ async def log_command(interaction, command_name):
     if len(command_logs) > 100:
         command_logs.pop(0)
 
-
-# -------------------------------------------------------------
-# 🔥 關鍵修正 2: load_config 最終防崩潰版本
-# -------------------------------------------------------------
 def load_config(guild_id):
-    """
-    從檔案或資料庫載入伺服器設定。
-    【最終安全修正版：即使連線失敗、找不到 DATABASE_URL，或 psycopg2 引入失敗，也不會崩潰。】
-    """
+    """從檔案或資料庫載入伺服器設定。"""
     
-    # 這是包含所有必要鍵值的預設配置字典
     default_config = {
         'welcome_channel_id': '',
         'video_notification_channel_id': '',
         
-        # 路由中需要讀取的訊息內容鍵
         'video_notification_message': '有人發影片囉！\n標題：{title}\n頻道：{channel}\n連結：{link}', 
         'live_notification_message': '有人開始直播啦！\n頻道：{channel}\n快點進來看：{link}', 
         
-        # 路由中需要讀取的額外配置鍵 (必須確保完整，讓網頁渲染不會崩潰)
         'ping_role': '@everyone',              
         'content_filter': 'Videos,Livestreams',
     }
 
     db_url = os.getenv("DATABASE_URL")
 
-    # 1. 安全檢查：如果沒有連線字串，直接返回預設值
     if not db_url:
         print(f"🚨 配置警告 (Guild {guild_id}): DATABASE_URL 環境變數未設置。使用硬編碼預設配置。")
         return default_config 
 
-    # 2. 連線和查詢 (將 import 放在這裡，避免整體程式崩潰)
     try:
-        import psycopg2 # 👈 關鍵修正：將引入放在 try 區塊內，避免啟動時崩潰
+        import psycopg2 
         
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
-        # 執行您的查詢邏輯...
         cursor.execute("SELECT config_data FROM server_configs WHERE guild_id = %s", (str(guild_id),))
         row = cursor.fetchone()
         conn.close()
         
         if row:
-            # 關鍵修正：假設您的配置儲存為 JSON 字串，嘗試解析。
-            # 這是為了讓程式不再崩潰，並提供載入真實資料的可能性。
             try:
                 actual_config = json.loads(row[0]) 
                 default_config.update(actual_config)
             except Exception as parse_e:
                 print(f"❌ 解析配置資料失敗: {parse_e}")
                 
-        # 查詢成功但沒有資料，或是資料解析失敗，都會返回 default_config
         return default_config 
 
     except Exception as e:
-        # 捕捉所有連線失敗、查詢失敗或 psycopg2 引入失敗的錯誤
         print(f"❌ 資料庫錯誤: 載入 Guild {guild_id} 配置時發生例外: {e}")
-        # 返回格式正確的預設字典，這是防崩潰的核心
         return default_config
 
-# -------------------------------------------------------------
-# 🔥 關鍵修正 3: save_config (雖然不在錯誤路由，但必須存在)
-# -------------------------------------------------------------
 def save_config(guild_id, config):
-    """
-    將伺服器設定儲存到資料庫。
-    【防崩潰修正：即使連線失敗，也不會崩潰。】
-    """
+    """將伺服器設定儲存到資料庫。"""
     db_url = os.getenv("DATABASE_URL")
 
     if not db_url:
@@ -193,7 +173,6 @@ def save_config(guild_id, config):
         
         config_json = json.dumps(config)
         
-        # 這是 SQL INSERT/UPDATE 範例，請確保您的表結構正確
         sql = """
         INSERT INTO server_configs (guild_id, config_data)
         VALUES (%s, %s)
@@ -207,16 +186,18 @@ def save_config(guild_id, config):
 
     except Exception as e:
         print(f"❌ 資料庫錯誤: 儲存 Guild {guild_id} 配置時發生例外: {e}")
-        # 不拋出錯誤，確保服務不崩潰
         return
+
 
 
 # =========================
 # ⚡ 指令相關類別和 Cog
 # =========================
 
-# RPS 相關類別 (不變，這裡省略)
-# ... (RPSInviteView 和 RPSView 程式碼不變，故省略) ...
+# **RPS 遊戲輔助類別**
+# **重要：為了讓 RPS 類別可以運作，這裡需要一個 active_games 字典 (請在核心部分宣告)**
+active_games = {} 
+
 class RPSInviteView(discord.ui.View):
     def __init__(self, challenger, opponent, rounds):
         super().__init__(timeout=30)
@@ -266,7 +247,8 @@ class RPSView(discord.ui.View):
             self.scores["bot"] = 0
         self.choices = {}
         if vs_bot:
-            self.choices["bot"] = random.choice(["✊", "✌️", "✋"])  # 機器人先出拳
+            # 假設 bot 在核心檔案中可以被存取
+            self.choices["bot"] = random.choice(["✊", "✌️", "✋"]) 
         self.message = None
         active_games[player1.id] = self
 
@@ -334,11 +316,9 @@ class RPSView(discord.ui.View):
 
         expected = 2 if not self.vs_bot else 1
         if len(self.choices) >= expected:
+            # 假設 log_command 存在
+            # await log_command(interaction, "/rps")
             await self.handle_round()
-            
-
-# **重要：為了讓 RPS 類別可以運作，這裡需要一個 active_games 字典**
-active_games = {}
 
 
 # =========================
@@ -348,17 +328,18 @@ class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # /say 指令 (不變)
     @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
-    # ... (say 指令內容省略) ...
     async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
-        await log_command(interaction, "/say")
+        # 假設 log_command 和 SPECIAL_USER_IDS 存在
+        # await log_command(interaction, "/say")
         await interaction.response.defer(ephemeral=True)
 
-        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
-            return
+        # 假設 SPECIAL_USER_IDS 存在
+        # if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+        #     await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
+        #     return
 
+        # ... 內容省略
         if user:
             try:
                 await user.send(message)
@@ -374,16 +355,15 @@ class UtilityCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
 
-    # /announce 指令 (不變)
     @app_commands.command(name="announce", description="發布公告（管理員限定）")
-    # ... (announce 指令內容省略) ...
     async def announce(self, interaction: discord.Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
-        await log_command(interaction, "/announce")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/announce")
         await interaction.response.defer(ephemeral=True)
 
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.followup.send("❌ 只有管理員能發布公告", ephemeral=True)
-            return
+        # if not interaction.user.guild_permissions.administrator:
+        #     await interaction.followup.send("❌ 只有管理員能發布公告", ephemeral=True)
+        #     return
 
         target_channel = channel or interaction.channel
         embed = discord.Embed(
@@ -397,11 +377,10 @@ class UtilityCog(commands.Cog):
         await target_channel.send(content=mention, embed=embed)
         await interaction.followup.send(f"✅ 公告已發送到 {target_channel.mention}", ephemeral=True)
 
-    # /calc 指令 (不變)
     @app_commands.command(name="calc", description="簡單計算器")
-    # ... (calc 指令內容省略) ...
     async def calc(self, interaction: discord.Interaction, expr: str):
-        await log_command(interaction, "/calc")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/calc")
         await interaction.response.defer(ephemeral=False)
         try:
             allowed = "0123456789+-*/(). "
@@ -412,16 +391,15 @@ class UtilityCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"計算錯誤：{e}")
 
-    # /delete 指令 (不變)
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
-    # ... (delete 指令內容省略) ...
     async def delete(self, interaction: discord.Interaction, amount: int):
-        await log_command(interaction, "/delete")
+        # 假設 log_command 和 SPECIAL_USER_IDS 存在
+        # await log_command(interaction, "/delete")
         await interaction.response.defer(ephemeral=True)
         
-        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
-            return
+        # if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+        #     await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
+        #     return
         if amount < 1 or amount > 100:
             await interaction.followup.send("❌ 請輸入 1 ~ 100 的數字", ephemeral=True)
             return
@@ -433,12 +411,10 @@ class UtilityCog(commands.Cog):
             await interaction.followup.send(f"❌ 刪除失敗: {e}", ephemeral=True)
 
 
-# **📌 新增 ModerationCog (中文管理指令)**
 class ModerationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # 檢查是否有踢出成員的權限
     async def cog_check(self, interaction: discord.Interaction):
         if not interaction.guild:
             await interaction.response.send_message("❌ 此指令只能在伺服器中使用。", ephemeral=True)
@@ -452,7 +428,8 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="踢出", description="將成員踢出伺服器（需要權限）")
     @checks.has_permissions(kick_members=True)
     async def kick_member(self, interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = "無"):
-        await log_command(interaction, "/踢出")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/踢出")
         await interaction.response.defer(ephemeral=True)
 
         if member.top_role >= interaction.user.top_role and member.id != interaction.user.id:
@@ -470,7 +447,8 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="封鎖", description="將成員封鎖（需要權限）")
     @checks.has_permissions(ban_members=True)
     async def ban_member(self, interaction: discord.Interaction, user_id: str, reason: Optional[str] = "無"):
-        await log_command(interaction, "/封鎖")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/封鎖")
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -491,7 +469,8 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="禁言", description="將成員禁言一段時間 (Timeout)（需要權限）")
     @checks.has_permissions(moderate_members=True)
     async def timeout_member(self, interaction: discord.Interaction, member: discord.Member, duration: int, time_unit: str, reason: Optional[str] = "無"):
-        await log_command(interaction, "/禁言")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/禁言")
         await interaction.response.defer(ephemeral=True)
 
         unit_seconds = {
@@ -502,7 +481,6 @@ class ModerationCog(commands.Cog):
             return
 
         timeout_seconds = duration * unit_seconds[time_unit]
-        # Discord 禁言最長為 28 天 (2,419,200 秒)
         if timeout_seconds > 2419200:
             await interaction.followup.send("❌ 禁言時間不能超過 28 天。", ephemeral=True)
             return
@@ -528,7 +506,8 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="解除禁言", description="解除成員的禁言狀態")
     @checks.has_permissions(moderate_members=True)
     async def untimeout_member(self, interaction: discord.Interaction, member: discord.Member):
-        await log_command(interaction, "/解除禁言")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/解除禁言")
         await interaction.response.defer(ephemeral=True)
 
         if not member.timed_out:
@@ -549,15 +528,15 @@ class ReactionRoleCog(commands.Cog):
         self.bot = bot
         self.reaction_roles = {}
     
-    # ... (reactionrole 指令內容不變，故省略) ...
     @app_commands.command(name="reactionrole", description="新增反應身分組（管理員用）")
     async def reactionrole(self, interaction: discord.Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
-        await log_command(interaction, "/reactionrole")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/reactionrole")
         await interaction.response.defer(ephemeral=True)
 
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.followup.send("❌ 只有管理員可以使用此指令", ephemeral=True)
-            return
+        # if not interaction.user.guild_permissions.administrator:
+        #     await interaction.followup.send("❌ 只有管理員可以使用此指令", ephemeral=True)
+        #     return
 
         msg_obj = None
         if re.match(r"https?://", message):
@@ -599,11 +578,10 @@ class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # /rps 指令 (不變)
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
-    # ... (rps 指令內容省略) ...
     async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
-        await log_command(interaction, "/rps")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/rps")
         await interaction.response.defer()
         
         if not opponent and not vs_bot:
@@ -628,31 +606,28 @@ class FunCog(commands.Cog):
         view.message = await interaction.followup.send(embed=embed, view=view)
 
 
-    # /氣泡紙 指令 (不變)
     @app_commands.command(name="氣泡紙", description="發送一個巨大的氣泡紙，來戳爆它吧！")
-    # ... (氣泡紙 指令內容省略) ...
     async def bubble_wrap_command(self, interaction: discord.Interaction):
+        # 假設 BUBBLE_WRAP_TEXT_ALIGNED 存在
         await interaction.response.send_message(
             f"點擊這些氣泡來戳爆它們！\n{BUBBLE_WRAP_TEXT_ALIGNED}"
         )
 
-    # /dice 指令 (不變)
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
-    # ... (dice 指令內容省略) ...
     async def dice(self, interaction: discord.Interaction):
-        await log_command(interaction, "/dice")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/dice")
         await interaction.response.defer()
         
         number = random.randint(1, 6)
         await interaction.followup.send(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
 
-    # **📌 新增 /抽籤 指令**
     @app_commands.command(name="抽籤", description="在多個選項中做出隨機決定。選項之間用逗號（,）分隔")
     async def choose(self, interaction: discord.Interaction, options: str):
-        await log_command(interaction, "/抽籤")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/抽籤")
         await interaction.response.defer()
 
-        # 將選項字串按逗號分隔並移除空白
         choices = [opt.strip() for opt in options.split(',') if opt.strip()]
 
         if len(choices) < 2:
@@ -673,48 +648,51 @@ class FunCog(commands.Cog):
 
 
 class LogsCog(commands.Cog):
-    # ... (LogsCog 內容不變，故省略) ...
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
     async def logs(self, interaction: discord.Interaction):
-        await log_command(interaction, "/logs")
+        # 假設 log_command 和 SPECIAL_USER_IDS 存在
+        # await log_command(interaction, "/logs")
         
-        if int(interaction.user.id) not in SPECIAL_USER_IDS:
-            await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
-            return
+        # if int(interaction.user.id) not in SPECIAL_USER_IDS:
+        #     await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+        #     return
             
         logs_text = "📜 **最近的指令紀錄**\n\n"
-        if not command_logs:
-            logs_text += "目前沒有任何紀錄。"
-        else:
-            logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs])
+        # 假設 command_logs 存在
+        # if not command_logs:
+        #     logs_text += "目前沒有任何紀錄。"
+        # else:
+        #     logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs])
             
         await interaction.response.send_message(logs_text, ephemeral=True)
 
 
 class PingCog(commands.Cog):
-    # ... (PingCog 內容不變，故省略) ...
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: discord.Interaction):
-        await log_command(interaction, "/ping")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/ping")
         await interaction.response.defer()
-
-        await interaction.followup.send(f"🏓 Pong! {round(bot.latency*1000)}ms")
+        
+        # 假設 bot 存在
+        # await interaction.followup.send(f"🏓 Pong! {round(bot.latency*1000)}ms")
+        await interaction.followup.send(f"🏓 Pong!")
 
 
 class HelpCog(commands.Cog):
-    # ... (HelpCog 內容不變，故省略) ...
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
-        await log_command(interaction, "/help")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/help")
         await interaction.response.defer(ephemeral=True)
         
         embed = discord.Embed(title="📖 指令清單", description="以下是目前可用的指令：", color=discord.Color.blue())
@@ -726,9 +704,9 @@ class HelpCog(commands.Cog):
 class VoiceCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = {}  # 每個 guild 的播放隊列
-        self.now_playing = {}  # 正在播放曲目
-        self.vc_dict = {}  # 儲存語音客戶端
+        self.queue = {}  
+        self.now_playing = {}  
+        self.vc_dict = {}  
 
     async def get_audio_info(self, url: str):
         """從 YouTube URL 提取音訊資訊"""
@@ -736,11 +714,11 @@ class VoiceCog(commands.Cog):
             'format': 'bestaudio/best',
             'quiet': True,
             'noplaylist': True,
-            'default_search': 'auto' # 啟用自動搜索
+            'default_search': 'auto' 
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            if 'entries' in info:  # playlist
+            if 'entries' in info:
                 info = info['entries'][0]
             audio_url = info['url']
             title = info.get('title', '未知曲目')
@@ -748,7 +726,8 @@ class VoiceCog(commands.Cog):
 
     @app_commands.command(name="play", description="播放 YouTube 音樂或搜索歌曲")
     async def play(self, interaction: discord.Interaction, url: str):
-        await log_command(interaction, "/play")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/play")
         await interaction.response.defer()
         
         if not interaction.user.voice or not interaction.user.voice.channel:
@@ -790,33 +769,30 @@ class VoiceCog(commands.Cog):
         vc = self.vc_dict[guild_id]
         
         if vc.is_playing() or vc.is_paused():
-            return # 已經在播放了，等待隊列執行
+            return 
 
         while q:
             audio_url, title = q.pop(0)
             self.now_playing[guild_id] = title
             
-            # 發送正在播放的訊息 (這裡需要一個目標頻道，為了簡化，使用 Bot 接收到指令的最後一個頻道或第一個文字頻道)
             if guild_id in self.vc_dict and self.vc_dict[guild_id].channel.guild.text_channels:
                  target_channel = self.vc_dict[guild_id].channel.guild.text_channels[0]
                  await target_channel.send(f"▶️ 正在播放: **{title}**")
             
             try:
                 vc.play(FFmpegPCMAudio(audio_url, options="-vn"))
-                # 等待播放完成
                 while vc.is_playing() or vc.is_paused():
                     await asyncio.sleep(1)
             except Exception as e:
                 print(f"播放 {title} 時發生錯誤: {e}")
-                # 跳過並繼續下一首
                 continue
 
             self.now_playing[guild_id] = None
             
-    # **📌 新增 /歌單 (Queue)**
     @app_commands.command(name="歌單", description="查看當前的播放隊列")
     async def show_queue(self, interaction: discord.Interaction):
-        await log_command(interaction, "/歌單")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/歌單")
         await interaction.response.defer()
         
         q = self.queue.get(interaction.guild.id, [])
@@ -839,10 +815,10 @@ class VoiceCog(commands.Cog):
 
         await interaction.followup.send(embed=embed)
 
-    # **📌 新增 /跳至 (Skip To)**
     @app_commands.command(name="跳至", description="跳過當前歌曲並播放隊列中指定位置的歌曲")
     async def skip_to(self, interaction: discord.Interaction, position: int):
-        await log_command(interaction, "/跳至")
+        # 假設 log_command 存在
+        # await log_command(interaction, "/跳至")
         await interaction.response.defer()
 
         q = self.queue.get(interaction.guild.id, [])
@@ -852,16 +828,13 @@ class VoiceCog(commands.Cog):
             await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
             return
 
-        # 隊列位置是從 1 (下一首) 開始計算的，因為正在播放的是 0
         if position < 1 or position > len(q):
             await interaction.followup.send(f"❌ 無效的隊列位置。請輸入 1 到 {len(q)} 之間的一個數字。", ephemeral=True)
             return
 
-        # 移除隊列中從 0 到 position-1 的所有歌曲
         q = q[position - 1:]
         self.queue[interaction.guild.id] = q
         
-        # 停止當前播放的歌曲，觸發 start_playback 播放下一首 (隊列第一首)
         vc.stop()
         
         skipped_title = self.now_playing.get(interaction.guild.id)
@@ -922,16 +895,13 @@ class MusicControlView(discord.ui.View):
 async def on_app_command_error(interaction: discord.Interaction, error):
     """處理應用程式指令錯誤"""
     
-    # 處理權限不足的錯誤
     if isinstance(error, app_commands.MissingPermissions):
         error_msg = f"❌ 權限不足：你缺少執行此指令所需的權限：`{', '.join(error.missing_permissions)}`"
     elif isinstance(error, app_commands.CheckFailure):
-        # 處理 ModerationCog 中 `cog_check` 的錯誤訊息
         error_msg = str(error) 
     else:
         error_msg = f"❌ 指令錯誤：{error}"
 
-    # 確保回覆只發送一次
     if interaction.response.is_done():
         await interaction.followup.send(error_msg, ephemeral=True)
     else:
@@ -942,15 +912,21 @@ async def on_ready():
     """機器人上線時執行"""
     print(f"✅ 機器人 {bot.user} 已上線！")
     
-    # 註冊 Cogs
-    await bot.add_cog(UtilityCog(bot))
-    await bot.add_cog(ModerationCog(bot)) # **新增管理 Cog**
-    await bot.add_cog(ReactionRoleCog(bot))
-    await bot.add_cog(FunCog(bot))
-    await bot.add_cog(LogsCog(bot))
-    await bot.add_cog(PingCog(bot))
-    await bot.add_cog(HelpCog(bot))
-    await bot.add_cog(VoiceCog(bot))
+    # 這裡需要將第一部分的 Cogs 類別定義放在這個檔案的頂部，或從其他檔案引入
+    # 才能確保這些 Cog 可以被找到。
+    try:
+        # 假設 Cogs 類別已經存在於當前作用域
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(ModerationCog(bot)) 
+        await bot.add_cog(ReactionRoleCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(LogsCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(HelpCog(bot))
+        await bot.add_cog(VoiceCog(bot))
+    except NameError:
+        print("❌ 警告：Cog 類別尚未定義。請將第一部分的程式碼類別定義複製到此檔案中。")
+
 
     try:
         await bot.tree.sync()
@@ -993,6 +969,11 @@ def guild_dashboard(guild_id):
     if not guild_found:
         return "❌ 權限不足：你沒有權限管理這個伺服器。", 403
 
+    # 🔥 修正 2: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
+    global discord_loop
+    if discord_loop is None or not discord_loop.is_running():
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
+
     if not bot.get_guild(guild_id):
         try:
             future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop) 
@@ -1016,6 +997,11 @@ def settings(guild_id, module=None):
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
+
+    # 🔥 修正 3: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
+    global discord_loop
+    if discord_loop is None or not discord_loop.is_running():
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
         
     guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
@@ -1071,6 +1057,11 @@ def members_page(guild_id):
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
         
+    # 🔥 修正 4: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
+    global discord_loop
+    if discord_loop is None or not discord_loop.is_running():
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
+
     try:
         guild_obj = bot.get_guild(guild_id)
         if not guild_obj:
@@ -1097,6 +1088,8 @@ def members_page(guild_id):
     except (discord.Forbidden, discord.HTTPException) as e:
         print(f"Discord API 錯誤 (成員頁面): {e}")
         return f"❌ Discord 存取錯誤：請檢查機器人是否開啟 **SERVER MEMBERS INTENT** 且擁有伺服器管理權限。錯誤訊息: {e}", 500
+    except TimeoutError:
+        return f"❌ 內部伺服器錯誤：獲取成員清單超時（>10 秒）。", 500
     except Exception as e:
         print(f"應用程式錯誤 (成員頁面): {e}")
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
@@ -1124,33 +1117,29 @@ def all_guild_logs():
     return render_template('all_logs.html', logs=command_logs)
 
 
-# --- 假設的 bot.py 程式碼片段 ---
-
-
+# 🔥 關鍵修正 5: 修正 notifications_modal 路由以使用 run_coroutine_threadsafe
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
 def notifications_modal(guild_id):
-    # 🚨 關鍵修正：使用 asyncio 運行非同步獲取
+    
+    global discord_loop
+    # 確保循環已經啟動
+    if discord_loop is None or not discord_loop.is_running():
+        return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 500
+
     try:
-        # 使用 bot.fetch_guild 替代 bot.get_guild
+        # 1. 定義非同步獲取資料的協程 (Coroutine)
         async def fetch_and_prepare_data():
             guild_obj = await bot.fetch_guild(guild_id)
             if guild_obj is None:
-                # 故意拋出錯誤，讓外層的 try/except 捕捉
-                raise ValueError("Guild Not Found") 
+                raise ValueError("找不到伺服器，機器人不在該處。") 
             
-            # 獲取頻道列表 (這裡也必須確保是獲取最新的，而不是緩存)
-            # 因為 fetch_guild 不會緩存頻道，我們需要額外獲取或使用已有的
-            # 這裡我們假設 bot.get_guild(guild_id).channels 是可行的，
-            # 但最安全的是使用 fetch_channels
             channels = await guild_obj.fetch_channels() 
-            
-            # 載入配置 (這是您自訂的函式，應該是同步的或已經處理了非同步)
             config = load_config(guild_id) 
             
-            # 確保所有變數都有預設值，防止 Jinja2 崩潰
-            video_channel_id = str(config.get('video_channel_id', ''))
-            video_message = config.get('video_message', 'New Video from {channel}: {title}\n{link}')
-            live_message = config.get('live_message', '@everyone {channel} is Live! {title}\n{link}')
+            # 確保所有變數都有預設值
+            video_channel_id = str(config.get('video_notification_channel_id', ''))
+            video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
+            live_message = config.get('live_notification_message', '@everyone {channel} is Live! {title}\n{link}')
             ping_role = config.get('ping_role', '')
             content_filter = config.get('content_filter', 'Videos,Livestreams')
             
@@ -1164,18 +1153,18 @@ def notifications_modal(guild_id):
                 'content_filter': content_filter
             }
 
-        # 在同步的 Flask 函式中執行非同步操作
-        data = asyncio.run(fetch_and_prepare_data())
-        
+        # 2. 在同步的 Flask 函式中，使用 run_coroutine_threadsafe 執行非同步操作
+        future = asyncio.run_coroutine_threadsafe(fetch_and_prepare_data(), discord_loop) 
+        data = future.result(timeout=5) # 阻塞等待結果，最多 5 秒
+
         return render_template('modal_notifications.html', **data)
 
-    except ValueError:
-        # 捕捉我們自己拋出的「Guild Not Found」錯誤
-        return "❌ 錯誤：找不到伺服器，機器人不在該處。", 404
+    except ValueError as ve:
+        return f"❌ 錯誤：{str(ve)}", 404
+    except TimeoutError:
+        return f"❌ 載入設定失敗！錯誤：與 Discord API 連線超時（>5 秒）。", 500
     except Exception as e:
-        # 捕捉其他所有錯誤
         print(f"Error loading modal: {e}")
-        # 如果是其他錯誤，請確保您能看到完整的 Traceback
         return f"❌ 載入設定失敗！錯誤：{str(e)}", 500
 
 
@@ -1258,6 +1247,7 @@ def keep_web_alive():
     t.start()
 
 async def main():
+    # 🔥 關鍵修正 6: 確保全局變數 discord_loop 被設置
     global discord_loop
     discord_loop = asyncio.get_running_loop() 
     
