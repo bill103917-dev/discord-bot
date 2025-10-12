@@ -1168,6 +1168,17 @@ def notifications_modal(guild_id):
         print(f"Error loading modal: {e}")
         return f"❌ 載入設定失敗！錯誤：{str(e)}", 500
 
+@app.route("/terms")
+def terms_of_service():
+    """顯示服務條款頁面"""
+    # 這裡可以直接返回一個 HTML 模版
+    return render_template('terms_of_service.html')
+
+@app.route("/privacy")
+def privacy_policy():
+    """顯示隱私權政策頁面"""
+    # 這裡可以直接返回一個 HTML 模版
+    return render_template('privacy_policy.html')
 
 
 @app.route("/logs/data")
