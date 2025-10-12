@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服務條款 - 我是機器人</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 40px;
+            max-width: 800px;
+            margin: 40px auto;
+            color: #ccc; /* 配合 Discord/Render 的深色背景 */
+            background-color: #2f3136;
+        }
+        h1, h2 {
+            color: #7289DA; /* Discord 藍色 */
+            border-bottom: 2px solid #4f545c;
+            padding-bottom: 5px;
+            margin-top: 30px;
+        }
+        a {
+            color: #B9BBBE;
+        }
+    </style>
+</head>
+<body>
+    <h1>我是機器人 服務條款 (Terms of Service)</h1>
+    <p>最後更新日期：10月12日</p>
+
+    <h2>1. 接受條款</h2>
+    <p>使用 我是機器人（「服務」）即表示您同意這些服務條款（「條款」）。如果您不同意這些條款，請勿使用本服務。</p>
+
+    <h2>2. 使用限制</h2>
+    <p>使用者在使用本服務時同意不進行以下行為：</p>
+    <ul>
+        <li>散播垃圾訊息、惡意內容或釣魚訊息。</li>
+        <li>以任何方式試圖破壞、干擾或過度負荷本服務的運作。</li>
+        <li>使用本服務違反 Discord 的服務條款或任何適用法律。</li>
+    </ul>
+
+    <h2>3. 服務中斷與免責聲明</h2>
+    <p>我是機器人 及其開發者不保證服務的穩定性或持續可用性。本服務可能因維護、更新或技術問題而隨時中斷，恕不另行通知。</p>
+    <ul>
+        <li>開發者對因服務中斷或使用本服務而產生的任何直接或間接損害不承擔責任。</li>
+        <li>本服務是「按現狀」提供的，不帶任何明示或暗示的保證。</li>
+    </ul>
+    
+    <h2>4. 智慧財產權</h2>
+    <p>所有 我是機器人 的程式碼、設計和專有內容均屬於開發者所有。</p>
+
+    <h2>5. 條款變更</h2>
+    <p>開發者保留隨時修改這些條款的權利。修改後的條款將在本頁面發布，並在發布後生效。</p>
+
+    <h2>6. 聯繫方式</h2>
+    <p>如果您對這些條款有任何疑問，請透過以下方式聯繫我們：</p>
+    <ul>
+        <li>Discord 伺服器：[您的支援伺服器連結]</li>
+        <li>電子郵件：bill103917@gmail.com</li>
+    </ul>
+    
+    <p><a href="/privacy">點擊此處查看隱私權政策</a></p>
+
+</body>
+</html>
