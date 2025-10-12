@@ -676,13 +676,14 @@ class PingCog(commands.Cog):
 
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: discord.Interaction):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/ping")
-        await interaction.response.defer()
+        # 1. 計算延遲 (Latency)
+        # bot.latency 單位為秒 (s)，乘以 1000 轉換為毫秒 (ms)
+        latency_ms = round(self.bot.latency * 1000) 
         
-        # 假設 bot 存在
-        # await interaction.followup.send(f"🏓 Pong! {round(bot.latency*1000)}ms")
-        await interaction.followup.send(f"🏓 Pong!")
+        await interaction.response.defer()
+
+        await interaction.followup.send(f"🏓 Pong! **{latency_ms}ms**")
+
 
 
 class HelpCog(commands.Cog):
