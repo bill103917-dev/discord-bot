@@ -6,19 +6,21 @@ authlib
 nest-asyncio
 Flask
 Flask[async]
-gunicorn # 部署 web 應用程式到 Render/Heroku 等環境時推薦使用
+gunicorn
 
-#Discord 機器人核心與功能
+# Discord 機器人核心與功能
 discord.py
 discord.py[voice]
 PyNaCl
 aiohttp
 psycopg2-binary
 
-#影片/音樂功能
+# 影片/音樂功能
+# 新增 pytube 作為主要的 YouTube 提取工具
 yt-dlp
+pytube
 spotipy
-pip install pytube
 
-#其他
+
+# 其他
 requests-oauthlib
