@@ -18,8 +18,7 @@ psycopg2-binary
 #影片/音樂功能
 yt-dlp
 spotipy
-install pytube
-
+pip install pytube
 
 #其他
 requests-oauthlib
