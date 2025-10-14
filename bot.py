@@ -980,11 +980,14 @@ class VoiceCog(commands.Cog):
             try:
                 # 💥 FFmpeg 播放修正
                 # before_options 用於穩定串流連接
+                # 在 VoiceCog 的 start_playback 函式中
                 source = FFmpegPCMAudio(
-                    audio_url, 
-                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                    options="-vn"
+                audio_url, 
+                executable='/usr/bin/ffmpeg', # <--- 加上這個絕對路徑
+                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                options="-vn"
                 )
+
                 
                 vc.play(source, after=lambda e: print(f'播放結束或錯誤: {e}') if e else None)
                 
