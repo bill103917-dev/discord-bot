@@ -846,24 +846,46 @@ class VoiceCog(commands.Cog):
         self.now_playing = {} 
         self.vc_dict = {}  
 
+    # VoiceCog 類別中
+
     @to_thread
     def extract_pytube(self, url):
         """嘗試使用 PyTube 提取音訊 URL"""
+        from pytube import YouTube
+        from pytube.exceptions import AgeRestrictedError # 導入錯誤類型
+    
         try:
+        # 💥 修正點：使用 use_oauth=True 和 allow_oauth_cache=True (如果可以)
+        # 由於您無法登入，我們主要使用強制年齡檢查
+        
+        # PyTube 有時會要求使用 YouTube() 的 client 參數來繞過。
+        # 但最常見的是，我們可以直接強制獲取串流
+        
             yt = YouTube(url)
-            # 找到最佳的純音訊串流
-            audio_stream = yt.streams.filter(only_audio=True).order_by('abr').last()
+        
+        # 這是 PyTube 處理年齡限制的常見方法，雖然可能不會對所有影片生效
+            try:
+                yt.bypass_age_gate() 
+            except Exception:
+                pass # 忽略繞過失敗，繼續嘗試提取
             
+        # 找到最佳的純音訊串流
+            audio_stream = yt.streams.filter(only_audio=True).order_by('abr').last()
+        
             if not audio_stream:
                 raise Exception("PyTube 找不到純音訊串流")
-                
+            
             print(f"✅ PyTube 成功提取：{yt.title}")
             return audio_stream.url, yt.title
 
+        except AgeRestrictedError:
+            print("⚠️ PyTube: 該影片有嚴格的年齡限制。")
+            raise # 拋出錯誤，讓程式碼回退到 yt-dlp
+        
         except Exception as e:
-            # 記錄 PyTube 失敗，將交由 yt-dlp 處理
             print(f"⚠️ PyTube 提取失敗: {e}")
-            raise
+            raise # 拋出錯誤，讓程式碼回退到 yt-dlp
+
 
     @to_thread
     def extract_yt_dlp(self, url: str):
