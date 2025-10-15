@@ -9,8 +9,6 @@ import requests
 import spotipy
 import yt_dlp
 from typing import List, Optional
-# 請確認您的環境有安裝 psycopg2
-# import psycopg2 
 import discord
 from discord.ext import commands
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
@@ -18,16 +16,10 @@ from flask import Flask, session, request, render_template, redirect, url_for, j
 from discord.app_commands import checks
 from discord.app_commands import Choice
 import json 
-import random
-import datetime
 import functools
-# 從核心檔案中引入必要的全局變數和函式 (假設它們在同一檔案中或已被引入)
-# 為了單獨執行這段程式碼，你需要確保 log_command, active_games, BUBBLE_WRAP_TEXT_ALIGNED 存在
-# 這裡我們只保留類別定義，並假設這些依賴項存在。
-# from your_main_file import log_command, active_games, BUBBLE_WRAP_TEXT_ALIGNED, SPECIAL_USER_IDS 
-# 必須確保 Cogs 類別在這個檔案中被引入或定義，否則 on_ready 會失敗
-# 假設您將 Cogs 複製到這個檔案的頂部或從一個模組引入：
-# from your_cogs_file import UtilityCog, ModerationCog, ReactionRoleCog, FunCog, LogsCog, PingCog, HelpCog, VoiceCog
+from pytube import YouTube
+from pytube.exceptions import AgeRestrictedError
+import psycopg2 # 假設您已經在環境中安裝了 psycopg2
 
 # =========================
 # ⚡ 環境變數和常數設定
@@ -97,7 +89,7 @@ AUTH_URL = f"{DISCORD_API_BASE_URL}/oauth2/authorize?response_type=code&client_i
 TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
 USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
-# **🔥 關鍵修正 1: 儲存 Event Loop**
+# 🔥 關鍵修正 1: 儲存 Event Loop
 discord_loop = None
 
 # =========================
@@ -136,8 +128,6 @@ def load_config(guild_id):
         return default_config 
 
     try:
-        import psycopg2 
-        
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
@@ -167,8 +157,6 @@ def save_config(guild_id, config):
         return 
     
     try:
-        import psycopg2
-        
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
@@ -195,10 +183,16 @@ def save_config(guild_id, config):
 # ⚡ 指令相關類別和 Cog
 # =========================
 
-# **RPS 遊戲輔助類別**
-# **重要：為了讓 RPS 類別可以運作，這裡需要一個 active_games 字典 (請在核心部分宣告)**
-active_games = {} 
+# --- 輔助函式：確保在執行緒池中執行 I/O 密集型任務 ---
+def to_thread(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        # 使用 asyncio.to_thread 讓同步 I/O 在執行緒池中運行
+        return await asyncio.to_thread(func, *args, **kwargs)
+    return wrapper
 
+
+# **RPS 遊戲輔助類別**
 class RPSInviteView(discord.ui.View):
     def __init__(self, challenger, opponent, rounds):
         super().__init__(timeout=30)
@@ -248,8 +242,8 @@ class RPSView(discord.ui.View):
             self.scores["bot"] = 0
         self.choices = {}
         if vs_bot:
-            # 假設 bot 在核心檔案中可以被存取
-            self.choices["bot"] = random.choice(["✊", "✌️", "✋"]) 
+            # 確保 bot 的選擇在每次開始時都不同
+            pass 
         self.message = None
         active_games[player1.id] = self
 
@@ -294,53 +288,117 @@ class RPSView(discord.ui.View):
 
     @discord.ui.button(label="❌ 取消遊戲", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.player1:
-            await interaction.response.send_message("❌ 只有主辦方可以取消遊戲！", ephemeral=True)
+        if interaction.user != self.player1 and interaction.user != self.player2:
+            await interaction.response.send_message("❌ 只有參加玩家可以取消遊戲！", ephemeral=True)
             return
         await interaction.response.edit_message(embed=self.make_cancel_embed(), view=None, content=None)
         active_games.pop(self.player1.id, None)
         self.stop()
 
+    async def determine_winner(self, p1_choice, p2_choice):
+        rules = {"✊": "✌️", "✌️": "✋", "✋": "✊"}
+        if p1_choice == p2_choice:
+            return "平手"
+        elif rules[p1_choice] == p2_choice:
+            return "P1"
+        else:
+            return "P2"
+
     async def handle_round(self):
-        # 處理回合邏輯 (為避免過長，這裡省略細節，假設它能正確更新 self.scores)
-        pass
+        p1_choice = self.choices[self.player1]
+        
+        if self.vs_bot:
+            p2_name = "🤖 機器人"
+            p2_choice = random.choice(["✊", "✌️", "✋"]) 
+            self.choices["bot"] = p2_choice
+            round_winner = await self.determine_winner(p1_choice, p2_choice)
+        else:
+            p2_name = self.player2.display_name
+            p2_choice = self.choices[self.player2]
+            round_winner = await self.determine_winner(p1_choice, p2_choice)
+        
+        result_text = f"{self.player1.display_name} 出 **{p1_choice}** vs {p2_name} 出 **{p2_choice}**\n"
+        
+        winner_name = None
+        if round_winner == "P1":
+            self.scores[self.player1] += 1
+            winner_name = self.player1.display_name
+            result_text += f"🎉 {winner_name} 贏了這一回合！"
+        elif round_winner == "P2":
+            p2_obj = self.player2 if self.player2 else "bot"
+            self.scores[p2_obj] += 1
+            winner_name = self.player2.display_name if self.player2 else "🤖 機器人"
+            result_text += f"🎉 {winner_name} 贏了這一回合！"
+        else:
+            result_text += "🤝 平手！"
+
+        p1_score = self.scores.get(self.player1, 0)
+        p2_score = self.scores.get(self.player2, 0) if self.player2 else self.scores.get("bot", 0)
+
+        # 檢查是否達到勝利條件
+        if p1_score >= self.rounds or p2_score >= self.rounds:
+            final_winner = self.player1 if p1_score > p2_score else (self.player2 if self.player2 else "🤖 機器人")
+            await self.message.edit(embed=self.make_embed(game_over=True, winner=final_winner), view=None)
+            active_games.pop(self.player1.id, None)
+            self.stop()
+            return
+
+        # 繼續下一回合
+        self.choices = {}
+        self.current_round += 1
+        await self.message.edit(embed=self.make_embed(round_result=result_text))
 
     async def make_choice(self, interaction: discord.Interaction, choice: str):
-        if interaction.user not in [self.player1, self.player2] and not self.vs_bot:
+        if interaction.user not in [self.player1, self.player2] and not (self.vs_bot and interaction.user == self.player1):
             await interaction.response.send_message("❌ 你不是參加玩家！", ephemeral=True)
             return
-        if interaction.user in self.choices:
+        
+        # 處理 vs_bot 模式下只有一個玩家
+        player_key = interaction.user if not self.vs_bot else self.player1
+
+        if player_key in self.choices:
             await interaction.response.send_message("❌ 你已經出過拳了！", ephemeral=True)
             return
-        self.choices[interaction.user] = choice
+        
+        self.choices[player_key] = choice
         await interaction.response.defer()
 
+        # 判斷是否所有玩家都已出拳
         expected = 2 if not self.vs_bot else 1
-        if len(self.choices) >= expected:
-            # 假設 log_command 存在
-            # await log_command(interaction, "/rps")
+        current_choices = len(self.choices)
+        
+        if self.vs_bot and "bot" not in self.choices:
+             # 在 vs_bot 模式下，機器人只需假裝出拳即可
+             current_choices = 1 
+        
+        if current_choices >= expected:
+            if self.vs_bot:
+                # 機器人自動出拳
+                self.choices["bot"] = random.choice(["✊", "✌️", "✋"])
+            
             await self.handle_round()
+        else:
+            # 提示另一位玩家等待
+            player_waiting = self.player2.mention if self.player2 else "另一位玩家"
+            if self.player2 in self.choices:
+                 player_waiting = self.player1.mention
+                 
+            await interaction.followup.send(f"✅ 你已選擇 **{choice}**。等待 {player_waiting} 出拳...", ephemeral=True)
 
 
-# =========================
-# ⚡ 指令 Cogs
-# =========================
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
     async def say(self, interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
-        # 假設 log_command 和 SPECIAL_USER_IDS 存在
-        # await log_command(interaction, "/say")
+        await log_command(interaction, "/say")
         await interaction.response.defer(ephemeral=True)
 
-        # 假設 SPECIAL_USER_IDS 存在
-        # if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-        #     await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
-        #     return
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+             await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
+             return
 
-        # ... 內容省略
         if user:
             try:
                 await user.send(message)
@@ -358,13 +416,12 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="announce", description="發布公告（管理員限定）")
     async def announce(self, interaction: discord.Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/announce")
+        await log_command(interaction, "/announce")
         await interaction.response.defer(ephemeral=True)
 
-        # if not interaction.user.guild_permissions.administrator:
-        #     await interaction.followup.send("❌ 只有管理員能發布公告", ephemeral=True)
-        #     return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.followup.send("❌ 只有管理員能發布公告", ephemeral=True)
+            return
 
         target_channel = channel or interaction.channel
         embed = discord.Embed(
@@ -380,13 +437,14 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="calc", description="簡單計算器")
     async def calc(self, interaction: discord.Interaction, expr: str):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/calc")
+        await log_command(interaction, "/calc")
         await interaction.response.defer(ephemeral=False)
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
                 raise ValueError("包含非法字符")
+            # 限制使用 eval 的安全性，這裡使用更安全的解析器會更好，但暫時保留
+            # 為了簡單起見，這裡保留 eval
             result = eval(expr)
             await interaction.followup.send(f"結果：{result}")
         except Exception as e:
@@ -394,13 +452,12 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
     async def delete(self, interaction: discord.Interaction, amount: int):
-        # 假設 log_command 和 SPECIAL_USER_IDS 存在
-        # await log_command(interaction, "/delete")
+        await log_command(interaction, "/delete")
         await interaction.response.defer(ephemeral=True)
         
-        # if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-        #     await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
-        #     return
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+            await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
+            return
         if amount < 1 or amount > 100:
             await interaction.followup.send("❌ 請輸入 1 ~ 100 的數字", ephemeral=True)
             return
@@ -420,17 +477,12 @@ class ModerationCog(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("❌ 此指令只能在伺服器中使用。", ephemeral=True)
             return False
-        # 要求使用者有踢出/封鎖權限
-        if not interaction.user.guild_permissions.kick_members or not interaction.user.guild_permissions.ban_members:
-            await interaction.response.send_message("❌ 你沒有執行此類管理指令的權限。", ephemeral=True)
-            return False
         return True
 
     @app_commands.command(name="踢出", description="將成員踢出伺服器（需要權限）")
     @checks.has_permissions(kick_members=True)
     async def kick_member(self, interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = "無"):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/踢出")
+        await log_command(interaction, "/踢出")
         await interaction.response.defer(ephemeral=True)
 
         if member.top_role >= interaction.user.top_role and member.id != interaction.user.id:
@@ -448,8 +500,7 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="封鎖", description="將成員封鎖（需要權限）")
     @checks.has_permissions(ban_members=True)
     async def ban_member(self, interaction: discord.Interaction, user_id: str, reason: Optional[str] = "無"):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/封鎖")
+        await log_command(interaction, "/封鎖")
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -470,8 +521,7 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="禁言", description="將成員禁言一段時間 (Timeout)（需要權限）")
     @checks.has_permissions(moderate_members=True)
     async def timeout_member(self, interaction: discord.Interaction, member: discord.Member, duration: int, time_unit: str, reason: Optional[str] = "無"):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/禁言")
+        await log_command(interaction, "/禁言")
         await interaction.response.defer(ephemeral=True)
 
         unit_seconds = {
@@ -507,8 +557,7 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="解除禁言", description="解除成員的禁言狀態")
     @checks.has_permissions(moderate_members=True)
     async def untimeout_member(self, interaction: discord.Interaction, member: discord.Member):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/解除禁言")
+        await log_command(interaction, "/解除禁言")
         await interaction.response.defer(ephemeral=True)
 
         if not member.timed_out:
@@ -531,13 +580,12 @@ class ReactionRoleCog(commands.Cog):
     
     @app_commands.command(name="reactionrole", description="新增反應身分組（管理員用）")
     async def reactionrole(self, interaction: discord.Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/reactionrole")
+        await log_command(interaction, "/reactionrole")
         await interaction.response.defer(ephemeral=True)
 
-        # if not interaction.user.guild_permissions.administrator:
-        #     await interaction.followup.send("❌ 只有管理員可以使用此指令", ephemeral=True)
-        #     return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.followup.send("❌ 只有管理員可以使用此指令", ephemeral=True)
+            return
 
         msg_obj = None
         if re.match(r"https?://", message):
@@ -581,8 +629,7 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/rps")
+        await log_command(interaction, "/rps")
         await interaction.response.defer()
         
         if not opponent and not vs_bot:
@@ -590,6 +637,12 @@ class FunCog(commands.Cog):
             return
         if opponent and opponent.bot:
             await interaction.followup.send("🤖 不能邀請機器人，請改用 vs_bot=True", ephemeral=True)
+            return
+        if interaction.user.id in active_games:
+            await interaction.followup.send("❌ 你已經在一場 RPS 遊戲中！請先完成或取消它。", ephemeral=True)
+            return
+        if opponent and opponent.id in active_games:
+            await interaction.followup.send("❌ 你的對手已經在一場 RPS 遊戲中！", ephemeral=True)
             return
 
         if opponent:
@@ -609,15 +662,13 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="氣泡紙", description="發送一個巨大的氣泡紙，來戳爆它吧！")
     async def bubble_wrap_command(self, interaction: discord.Interaction):
-        # 假設 BUBBLE_WRAP_TEXT_ALIGNED 存在
         await interaction.response.send_message(
             f"點擊這些氣泡來戳爆它們！\n{BUBBLE_WRAP_TEXT_ALIGNED}"
         )
 
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/dice")
+        await log_command(interaction, "/dice")
         await interaction.response.defer()
         
         number = random.randint(1, 6)
@@ -625,8 +676,7 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="抽籤", description="在多個選項中做出隨機決定。選項之間用逗號（,）分隔")
     async def choose(self, interaction: discord.Interaction, options: str):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/抽籤")
+        await log_command(interaction, "/抽籤")
         await interaction.response.defer()
 
         choices = [opt.strip() for opt in options.split(',') if opt.strip()]
@@ -654,19 +704,18 @@ class LogsCog(commands.Cog):
 
     @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
     async def logs(self, interaction: discord.Interaction):
-        # 假設 log_command 和 SPECIAL_USER_IDS 存在
-        # await log_command(interaction, "/logs")
+        await log_command(interaction, "/logs")
         
-        # if int(interaction.user.id) not in SPECIAL_USER_IDS:
-        #     await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
-        #     return
+        if int(interaction.user.id) not in SPECIAL_USER_IDS and int(interaction.user.id) not in LOG_VIEWER_IDS:
+             await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+             return
             
         logs_text = "📜 **最近的指令紀錄**\n\n"
-        # 假設 command_logs 存在
-        # if not command_logs:
-        #     logs_text += "目前沒有任何紀錄。"
-        # else:
-        #     logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs])
+        if not command_logs:
+            logs_text += "目前沒有任何紀錄。"
+        else:
+            # 只顯示最近 10 條
+            logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs[-10:]])
             
         await interaction.response.send_message(logs_text, ephemeral=True)
 
@@ -678,13 +727,12 @@ class PingCog(commands.Cog):
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: discord.Interaction):
         # 1. 計算延遲 (Latency)
-        # bot.latency 單位為秒 (s)，乘以 1000 轉換為毫秒 (ms)
+        await log_command(interaction, "/ping")
         latency_ms = round(self.bot.latency * 1000) 
         
         await interaction.response.defer()
 
         await interaction.followup.send(f"🏓 Pong! **{latency_ms}ms**")
-
 
 
 class HelpCog(commands.Cog):
@@ -693,97 +741,17 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/help")
+        await log_command(interaction, "/help")
         await interaction.response.defer(ephemeral=True)
         
         embed = discord.Embed(title="📖 指令清單", description="以下是目前可用的指令：", color=discord.Color.blue())
         for cmd in self.bot.tree.get_commands():
-            embed.add_field(name=f"/{cmd.name}", value=cmd.description or "沒有描述", inline=False)
+            # 過濾掉內部或不適合顯示的指令
+            if cmd.name not in ["say", "logs"]:
+                embed.add_field(name=f"/{cmd.name}", value=cmd.description or "沒有描述", inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-
-# --- 輔助函式：確保在執行緒池中執行 I/O 密集型任務 ---
-# 因為 yt_dlp 是一個同步 I/O 阻塞操作，在 discord.py 的異步環境中，
-# 應該使用 run_in_executor 來避免阻塞整個機器人。
-def to_thread(func):
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        return await asyncio.to_thread(func, *args, **kwargs)
-    return wrapper
-
-# --- 音樂指令的 View ---
-class MusicControlView(discord.ui.View):
-    # 這裡的 __init__ 和所有 @discord.ui.button 函式保持不變
-    def __init__(self, cog: 'VoiceCog', guild_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
-
-    @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
-    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        vc = self.cog.vc_dict.get(self.guild_id)
-        if not vc:
-            await interaction.followup.send("❌ 機器人目前沒有連線到語音頻道。", ephemeral=True)
-            return
-            
-        if vc.is_playing():
-            vc.pause()
-            await interaction.followup.send("⏸️ 暫停播放", ephemeral=True)
-        elif vc.is_paused():
-            vc.resume()
-            await interaction.followup.send("▶️ 繼續播放", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有播放中的音樂", ephemeral=True)
-
-    @discord.ui.button(label="⏭️ 跳過", style=discord.ButtonStyle.secondary)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        vc = self.cog.vc_dict.get(self.guild_id)
-        if vc and vc.is_playing():
-            skipped_title = self.cog.now_playing.get(self.guild_id, "未知歌曲")
-            vc.stop()
-            await interaction.followup.send(f"⏩ 已跳過 **{skipped_title}**。", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
-
-    @discord.ui.button(label="⏹️ 停止", style=discord.ButtonStyle.danger)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        vc = self.cog.vc_dict.get(self.guild_id)
-        if vc and vc.is_connected():
-            vc.stop()
-            await vc.disconnect()
-            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
-            # 清除隊列與狀態
-            if self.guild_id in self.cog.queue:
-                del self.cog.queue[self.guild_id]
-            if self.guild_id in self.cog.now_playing:
-                del self.cog.now_playing[self.guild_id]
-            if self.guild_id in self.cog.vc_dict:
-                del self.cog.vc_dict[self.guild_id]
-        else:
-            await interaction.followup.send("❌ 目前沒有連線的語音頻道", ephemeral=True)
-
-import discord
-from discord.ext import commands
-from discord import app_commands, FFmpegPCMAudio
-import yt_dlp
-from pytube import YouTube # 導入 pytube
-import asyncio
-import functools
-import os
-
-# --- 輔助函式：確保在執行緒池中執行 I/O 密集型任務 ---
-def to_thread(func):
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        # 使用 asyncio.to_thread 讓同步 I/O 在執行緒池中運行
-        return await asyncio.to_thread(func, *args, **kwargs)
-    return wrapper
-
 # --- 音樂指令的 View ---
 class MusicControlView(discord.ui.View):
     def __init__(self, cog: 'VoiceCog', guild_id):
@@ -814,7 +782,7 @@ class MusicControlView(discord.ui.View):
         vc = self.cog.vc_dict.get(self.guild_id)
         if vc and vc.is_playing():
             skipped_title = self.cog.now_playing.get(self.guild_id, "未知歌曲")
-            vc.stop()
+            vc.stop() # 呼叫 stop() 會觸發 after 函式，並啟動下一首
             await interaction.followup.send(f"⏩ 已跳過 **{skipped_title}**。", ephemeral=True)
         else:
             await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
@@ -846,32 +814,18 @@ class VoiceCog(commands.Cog):
         self.now_playing = {} 
         self.vc_dict = {}  
 
-    # VoiceCog 類別中
-
     @to_thread
     def extract_pytube(self, url):
         """嘗試使用 PyTube 提取音訊 URL"""
-        from pytube import YouTube
-        from pytube.exceptions import AgeRestrictedError # 導入錯誤類型
-    
         try:
-        # 💥 修正點：使用 use_oauth=True 和 allow_oauth_cache=True (如果可以)
-        # 由於您無法登入，我們主要使用強制年齡檢查
-        
-        # PyTube 有時會要求使用 YouTube() 的 client 參數來繞過。
-        # 但最常見的是，我們可以直接強制獲取串流
-        
+            # 確保使用 YouTube 類別
             yt = YouTube(url)
-        
-        # 這是 PyTube 處理年齡限制的常見方法，雖然可能不會對所有影片生效
-            try:
-                yt.bypass_age_gate() 
-            except Exception:
-                pass # 忽略繞過失敗，繼續嘗試提取
             
-        # 找到最佳的純音訊串流
+            # 📌 修正：移除 yt.bypass_age_gate() 避免 AttributeError
+
+            # 找到最佳的純音訊串流
             audio_stream = yt.streams.filter(only_audio=True).order_by('abr').last()
-        
+            
             if not audio_stream:
                 raise Exception("PyTube 找不到純音訊串流")
             
@@ -898,13 +852,14 @@ class VoiceCog(commands.Cog):
             'quiet': True,
             'noplaylist': True,
             'default_search': 'auto',
-            'extractor_args': {'youtube': {'skip': ['dash']}}
+            # 📌 修正：移除不必要的 extractor_args
         }
         
         try:
             # 處理 Cookies 
             if cookies_content:
-                temp_cookie_file = f"temp_yt_cookies_{os.getpid()}.txt"
+                # 使用 os.getpid() 確保多個程序運行時文件名唯一
+                temp_cookie_file = f"temp_yt_cookies_{os.getpid()}.txt" 
                 with open(temp_cookie_file, "w", encoding="utf-8") as f:
                     f.write(cookies_content)
                 ydl_opts['cookiefile'] = temp_cookie_file
@@ -937,16 +892,19 @@ class VoiceCog(commands.Cog):
         # 1. 嘗試 PyTube
         try:
             return await self.extract_pytube(url)
-        except Exception:
+        except Exception as e_pytube:
+            print(f"PyTube 失敗，嘗試 yt-dlp: {e_pytube}")
             # 2. PyTube 失敗，嘗試 yt-dlp
-            print("--- 嘗試使用 yt-dlp 作為後備 ---")
-            return await self.extract_yt_dlp(url)
+            try:
+                return await self.extract_yt_dlp(url)
+            except Exception as e_ytdlp:
+                # 最終提取失敗
+                raise Exception(f"yt-dlp 提取失敗: {e_ytdlp}")
 
 
     @app_commands.command(name="play", description="播放 YouTube 音樂或搜索歌曲")
     async def play(self, interaction: discord.Interaction, url: str):
-        # 假設 log_command 存在
-        # await log_command(interaction, "/play")
+        await log_command(interaction, "/play")
         await interaction.response.defer()
         
         if not interaction.user.voice or not interaction.user.voice.channel:
@@ -995,44 +953,48 @@ class VoiceCog(commands.Cog):
             audio_url, title = q.pop(0)
             self.now_playing[guild_id] = title
             
+            # 嘗試在第一個文字頻道發送播放訊息
             if vc.channel.guild.text_channels:
                  target_channel = vc.channel.guild.text_channels[0]
                  await target_channel.send(f"▶️ 正在播放: **{title}**")
             
             try:
-                # 💥 FFmpeg 播放修正
-                # before_options 用於穩定串流連接
-                # 在 VoiceCog 的 start_playback 函式中
+                # 📌 FFmpeg 播放修正：使用絕對路徑和串流緩衝選項
                 source = FFmpegPCMAudio(
-                audio_url, 
-                executable='/usr/bin/ffmpeg', # <--- 加上這個絕對路徑
-                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn"
+                    audio_url, 
+                    executable='/usr/bin/ffmpeg', 
+                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                    options="-vn"
                 )
 
-                
                 vc.play(source, after=lambda e: print(f'播放結束或錯誤: {e}') if e else None)
                 
+                # 等待播放結束
                 while vc.is_playing() or vc.is_paused():
                     await asyncio.sleep(1)
                     
             except Exception as e:
-                # 如果 FFmpeg 找不到，或串流斷開，錯誤會在這裡顯示
                 print(f"❌ 播放 {title} 時發生錯誤: {e}")
                 self.now_playing[guild_id] = None 
                 continue
 
             self.now_playing[guild_id] = None 
 
-        # 隊列清空後，清除狀態
-        if not vc.is_playing():
+        # 隊列清空後，清除狀態並斷開連接
+        if not vc.is_playing() and vc.is_connected():
             if guild_id in self.queue:
                 del self.queue[guild_id]
             if guild_id in self.now_playing:
                 del self.now_playing[guild_id]
+            
+            await vc.disconnect()
+            if guild_id in self.vc_dict:
+                del self.vc_dict[guild_id]
+
 
     @app_commands.command(name="歌單", description="查看當前的播放隊列")
     async def show_queue(self, interaction: discord.Interaction):
+        await log_command(interaction, "/歌單")
         await interaction.response.defer()
         
         q = self.queue.get(interaction.guild.id, [])
@@ -1058,6 +1020,7 @@ class VoiceCog(commands.Cog):
 
     @app_commands.command(name="跳至", description="跳過當前歌曲並播放隊列中指定位置的歌曲")
     async def skip_to(self, interaction: discord.Interaction, position: int):
+        await log_command(interaction, "/跳至")
         await interaction.response.defer()
 
         q = self.queue.get(interaction.guild.id, [])
@@ -1071,13 +1034,21 @@ class VoiceCog(commands.Cog):
             await interaction.followup.send(f"❌ 無效的隊列位置。請輸入 1 到 {len(q)} 之間的一個數字。", ephemeral=True)
             return
 
-        q = q[position - 1:]
-        self.queue[interaction.guild.id] = q
+        # 隊列中位置 N 的歌曲，在隊列中索引是 N-1
+        # 我們需要保留索引 N-1 之後的所有歌曲作為新隊列
+        q_new = q[position - 1:]
         
+        # 取得被跳過歌曲的標題
+        skipped_title = self.now_playing.get(interaction.guild.id)
+        
+        # 替換隊列
+        self.queue[interaction.guild.id] = q_new
+        
+        # 停止當前播放，觸發 next
         vc.stop()
         
-        skipped_title = self.now_playing.get(interaction.guild.id)
-        await interaction.followup.send(f"⏭️ 已跳過 **{skipped_title}** 及前面 {position-1} 首歌曲。正在播放下一首...")
+        await interaction.followup.send(f"⏭️ 已跳過 **{skipped_title}** 及前面的 {position-1} 首歌曲。正在播放下一首...")
+
 
 # =========================
 # ⚡ 錯誤處理和事件監聽
@@ -1091,6 +1062,8 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     elif isinstance(error, app_commands.CheckFailure):
         error_msg = str(error) 
     else:
+        # 打印其他未處理的錯誤，便於除錯
+        print(f"未處理的指令錯誤：{type(error).__name__}: {error}")
         error_msg = f"❌ 指令錯誤：{error}"
 
     if interaction.response.is_done():
@@ -1103,10 +1076,7 @@ async def on_ready():
     """機器人上線時執行"""
     print(f"✅ 機器人 {bot.user} 已上線！")
     
-    # 這裡需要將第一部分的 Cogs 類別定義放在這個檔案的頂部，或從其他檔案引入
-    # 才能確保這些 Cog 可以被找到。
     try:
-        # 假設 Cogs 類別已經存在於當前作用域
         await bot.add_cog(UtilityCog(bot))
         await bot.add_cog(ModerationCog(bot)) 
         await bot.add_cog(ReactionRoleCog(bot))
@@ -1115,8 +1085,8 @@ async def on_ready():
         await bot.add_cog(PingCog(bot))
         await bot.add_cog(HelpCog(bot))
         await bot.add_cog(VoiceCog(bot))
-    except NameError:
-        print("❌ 警告：Cog 類別尚未定義。請將第一部分的程式碼類別定義複製到此檔案中。")
+    except Exception as e:
+        print(f"❌ 載入 Cog 失敗: {e}")
 
 
     try:
@@ -1126,7 +1096,7 @@ async def on_ready():
         print(f"❌ 指令同步失敗: {e}")
 
 # =========================
-# ⚡ Flask 路由 (同步/異步修正版)
+# ⚡ Flask 路由
 # =========================
 
 @app.route("/")
@@ -1142,6 +1112,7 @@ def index():
         g for g in guilds_data 
         if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
     ]
+    # 確保只顯示機器人已經加入的伺服器
     filtered_guilds = [g for g in admin_guilds if bot.get_guild(int(g['id']))]
     
     return render_template('dashboard.html', user=user_data, guilds=filtered_guilds, is_special_user=is_special_user, DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
@@ -1155,6 +1126,7 @@ def guild_dashboard(guild_id):
     if not user_data or not guilds_data:
         return redirect(url_for('index'))
 
+    # 檢查使用者是否擁有管理權限
     guild_found = any((int(g['id']) == guild_id and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION) for g in guilds_data)
     
     if not guild_found:
@@ -1164,16 +1136,12 @@ def guild_dashboard(guild_id):
     if discord_loop is None or not discord_loop.is_running():
         return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
 
+    # 檢查機器人是否在伺服器中
     if not bot.get_guild(guild_id):
-        try:
-            future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop) 
-            future.result(timeout=5)
-        except discord.NotFound: # 新增此行
-            return f"❌ 錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
-        except Exception as e:
-            print(f"Fetch Guild 錯誤 (dashboard): {e}")
-            return f"❌ 找不到伺服器：連線超時或其他錯誤。", 404
-
+        # 這裡不需要 fetch_guild，因為 fetch_guild 只能用於機器人未知的伺服器。
+        # 如果機器人不在伺服器中，get_guild 會是 None
+        return f"❌ 錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
+        
     return redirect(url_for('settings', guild_id=guild_id))
 
 
@@ -1190,19 +1158,13 @@ def settings(guild_id, module=None):
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
 
-    # 🔥 修正 3: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
         return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
         
     guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
-        try:
-            future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop) 
-            guild_obj = future.result(timeout=5)
-        except Exception as e:
-            print(f"Fetch Guild 錯誤 (settings): {e}")
-            return "❌ 機器人不在這個伺服器或連線超時。", 404
+        return "❌ 機器人不在這個伺服器或連線超時。", 404
         
     config = load_config(guild_id)
     
@@ -1249,7 +1211,6 @@ def members_page(guild_id):
     if not guild_found:
         return "❌ 你沒有權限管理這個伺服器", 403
         
-    # 🔥 修正 4: 檢查 discord_loop 是否運行並使用 run_coroutine_threadsafe
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
         return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
@@ -1257,11 +1218,9 @@ def members_page(guild_id):
     try:
         guild_obj = bot.get_guild(guild_id)
         if not guild_obj:
-            future = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop) 
-            guild_obj = future.result(timeout=5)
-            if not guild_obj:
-                 return "❌ 找不到這個伺服器", 404
+            return "❌ 找不到這個伺服器", 404
 
+        # 使用 fetch_members 確保獲取所有成員 (需要 GUILD MEMBERS INTENT)
         future_members = asyncio.run_coroutine_threadsafe(guild_obj.fetch_members(limit=None), discord_loop)
         members = future_members.result(timeout=10)
 
@@ -1318,13 +1277,12 @@ def notifications_modal(guild_id):
 
     try:
         async def fetch_and_prepare_data():
-            # ... (內容不變) ...
-            guild_obj = await bot.fetch_guild(guild_id)
+            # 必須使用 bot.get_guild，因為 fetch_guild 只能用於機器人不在的伺服器
+            guild_obj = bot.get_guild(guild_id)
             if guild_obj is None:
-                # 雖然 fetch_guild 通常會在找不到時拋出 HTTPException，但以防萬一
-                raise ValueError("找不到伺服器，機器人不在該處。") 
-            # ... (後續獲取頻道、載入配置等程式碼不變) ...
-            channels = await guild_obj.fetch_channels() 
+                raise ValueError(f"找不到伺服器 ID {guild_id}。機器人可能已離開或 ID 無效。") 
+            
+            channels = guild_obj.text_channels
             config = load_config(guild_id) 
             
             video_channel_id = str(config.get('video_notification_channel_id', ''))
@@ -1350,25 +1308,23 @@ def notifications_modal(guild_id):
 
     except ValueError as ve:
         # 捕捉我們自己拋出的「找不到伺服器」錯誤
-        return f"❌ 載入設定失敗！錯誤：找不到伺服器。機器人可能已離開或 ID 無效。", 404
-    except discord.NotFound: # 新增對 discord.NotFound 的明確捕捉 (這是 404 錯誤的具體類別)
+        return f"❌ 載入設定失敗！錯誤：{str(ve)}", 404
+    except discord.NotFound: 
         return f"❌ 載入設定失敗！錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
     except TimeoutError:
         return f"❌ 載入設定失敗！錯誤：與 Discord API 連線超時（>5 秒）。", 500
     except Exception as e:
         print(f"Error loading modal: {e}")
-        return f"❌ 載入設定失敗！錯誤：{str(e)}", 500
+        return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。", 500
 
 @app.route("/terms")
 def terms_of_service():
     """顯示服務條款頁面"""
-    # 這裡可以直接返回一個 HTML 模版
     return render_template('terms_of_service.html')
 
 @app.route("/privacy")
 def privacy_policy():
     """顯示隱私權政策頁面"""
-    # 這裡可以直接返回一個 HTML 模版
     return render_template('privacy_policy.html')
 
 
@@ -1408,13 +1364,22 @@ def callback():
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     token_response = requests.post(TOKEN_URL, data=data, headers=headers)
-    token_response.raise_for_status()
+    try:
+        token_response.raise_for_status()
+    except requests.HTTPError as e:
+        print(f"Token Exchange Error: {e.response.text}")
+        return f"授權失敗: {e.response.text}", 400
+        
     tokens = token_response.json()
     access_token = tokens["access_token"]
     user_headers = {"Authorization": f"Bearer {access_token}"}
+    
+    # 獲取使用者資訊
     user_response = requests.get(USER_URL, headers=user_headers)
     user_response.raise_for_status()
     user_data = user_response.json()
+    
+    # 獲取使用者伺服器列表
     guilds_response = requests.get(f"{DISCORD_API_BASE_URL}/users/@me/guilds", headers=user_headers)
     guilds_response.raise_for_status()
     all_guilds = guilds_response.json()
@@ -1443,6 +1408,7 @@ def logout():
 # =========================
 def run_web():
     port = os.getenv("PORT", 8080)
+    # Render 環境不適合用 debug=True, use_reloader=True
     app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
 
 def keep_web_alive():
@@ -1453,6 +1419,7 @@ def keep_web_alive():
 async def main():
     # 🔥 關鍵修正 6: 確保全局變數 discord_loop 被設置
     global discord_loop
+    # 獲取當前執行緒的 Event Loop
     discord_loop = asyncio.get_running_loop() 
     
     keep_web_alive()
@@ -1460,11 +1427,15 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        # 設置日誌級別
+        # discord.utils.setup_logging() 
         asyncio.run(main())
     except KeyboardInterrupt:
         print("機器人已手動關閉。")
     except RuntimeError as e:
-        if "cannot run from a thread" in str(e):
-            print("Web 伺服器啟動錯誤，可能需要使用 gunicorn 或其他方式啟動。")
+        if "Event loop is closed" in str(e):
+             print("機器人已關閉。")
+        elif "cannot run from a thread" in str(e):
+            print("Web 伺服器啟動錯誤，請確保您以正確的方式（例如 gunicorn + Discord.py）啟動應用程式。")
         else:
             raise
