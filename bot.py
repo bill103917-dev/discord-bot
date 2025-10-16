@@ -1238,6 +1238,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
     """機器人上線時執行"""
+    await bot. change_presence(activity=discord.Game (name=" 正在服務中丨help"))
     print(f"✅ 機器人 {bot.user} 已上線！")
     
     try:
