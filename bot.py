@@ -6,7 +6,7 @@ import asyncio
 import re
 import random
 import requests
-import spotipy
+import spotipy # 雖然未使用，但保留
 import yt_dlp
 from typing import List, Optional
 import discord
@@ -19,7 +19,7 @@ import json
 import functools
 from pytube import YouTube
 from pytube.exceptions import AgeRestrictedError
-import psycopg2 # 假設您已經在環境中安裝了 psycopg2
+import psycopg2 
 
 # =========================
 # ⚡ 環境變數和常數設定
@@ -176,7 +176,6 @@ def save_config(guild_id, config):
     except Exception as e:
         print(f"❌ 資料庫錯誤: 儲存 Guild {guild_id} 配置時發生例外: {e}")
         return
-
 
 
 # =========================
@@ -438,17 +437,19 @@ class UtilityCog(commands.Cog):
     @app_commands.command(name="calc", description="簡單計算器")
     async def calc(self, interaction: discord.Interaction, expr: str):
         await log_command(interaction, "/calc")
-        await interaction.response.defer(ephemeral=False)
+        # 🔥 修正 1：移除 defer，改用單步回應
+        # await interaction.response.defer(ephemeral=False) 
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
                 raise ValueError("包含非法字符")
             # 限制使用 eval 的安全性，這裡使用更安全的解析器會更好，但暫時保留
-            # 為了簡單起見，這裡保留 eval
             result = eval(expr)
-            await interaction.followup.send(f"結果：{result}")
+            # 使用 response.send_message
+            await interaction.response.send_message(f"結果：{result}")
         except Exception as e:
-            await interaction.followup.send(f"計算錯誤：{e}")
+            # 使用 response.send_message
+            await interaction.response.send_message(f"計算錯誤：{e}")
 
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
     async def delete(self, interaction: discord.Interaction, amount: int):
@@ -662,6 +663,7 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="氣泡紙", description="發送一個巨大的氣泡紙，來戳爆它吧！")
     async def bubble_wrap_command(self, interaction: discord.Interaction):
+        # 氣泡紙指令發送內容固定，速度快，使用單步回應
         await interaction.response.send_message(
             f"點擊這些氣泡來戳爆它們！\n{BUBBLE_WRAP_TEXT_ALIGNED}"
         )
@@ -669,20 +671,22 @@ class FunCog(commands.Cog):
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: discord.Interaction):
         await log_command(interaction, "/dice")
-        await interaction.response.defer()
-        
+        # 🔥 修正 2：移除 defer，改用單步回應
+        # await interaction.response.defer() 
         number = random.randint(1, 6)
-        await interaction.followup.send(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
+        await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
 
     @app_commands.command(name="抽籤", description="在多個選項中做出隨機決定。選項之間用逗號（,）分隔")
     async def choose(self, interaction: discord.Interaction, options: str):
         await log_command(interaction, "/抽籤")
-        await interaction.response.defer()
+        # 🔥 修正 3：移除 defer，這是導致 "Unknown interaction" 錯誤的指令。
+        # await interaction.response.defer() 
 
         choices = [opt.strip() for opt in options.split(',') if opt.strip()]
 
         if len(choices) < 2:
-            await interaction.followup.send("❌ 請提供至少兩個選項，並用逗號 (,) 分隔。", ephemeral=True)
+            # 使用 response.send_message
+            await interaction.response.send_message("❌ 請提供至少兩個選項，並用逗號 (,) 分隔。", ephemeral=True)
             return
 
         selected = random.choice(choices)
@@ -695,7 +699,8 @@ class FunCog(commands.Cog):
         embed.add_field(name="🎉 最終選擇", value=f"**{selected}**", inline=False)
         embed.set_footer(text=f"決定者：{interaction.user.display_name}")
         
-        await interaction.followup.send(embed=embed)
+        # ✅ 使用 response.send_message 來避免超時錯誤
+        await interaction.response.send_message(embed=embed)
 
 
 class LogsCog(commands.Cog):
@@ -717,6 +722,7 @@ class LogsCog(commands.Cog):
             # 只顯示最近 10 條
             logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in command_logs[-10:]])
             
+        # 此指令內容快速生成，可使用單步回應
         await interaction.response.send_message(logs_text, ephemeral=True)
 
 
@@ -730,9 +736,10 @@ class PingCog(commands.Cog):
         await log_command(interaction, "/ping")
         latency_ms = round(self.bot.latency * 1000) 
         
-        await interaction.response.defer()
+        # 🔥 修正 4：移除 defer，改用單步回應
+        # await interaction.response.defer()
 
-        await interaction.followup.send(f"🏓 Pong! **{latency_ms}ms**")
+        await interaction.response.send_message(f"🏓 Pong! **{latency_ms}ms**")
 
 
 class HelpCog(commands.Cog):
@@ -742,6 +749,7 @@ class HelpCog(commands.Cog):
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: discord.Interaction):
         await log_command(interaction, "/help")
+        # 此指令內容快速生成，可使用單步回應
         await interaction.response.defer(ephemeral=True)
         
         embed = discord.Embed(title="📖 指令清單", description="以下是目前可用的指令：", color=discord.Color.blue())
@@ -761,6 +769,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(label="⏯️ 暫停/播放", style=discord.ButtonStyle.primary)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # View 互動時必須回應
         await interaction.response.defer(ephemeral=True)
         vc = self.cog.vc_dict.get(self.guild_id)
         if not vc:
@@ -793,8 +802,9 @@ class MusicControlView(discord.ui.View):
         vc = self.cog.vc_dict.get(self.guild_id)
         if vc and vc.is_connected():
             vc.stop()
-            await vc.disconnect()
-            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
+            # 在音樂 Cog 斷線處理，避免重複
+            # await vc.disconnect() 
+            
             # 清除隊列與狀態
             if self.guild_id in self.cog.queue:
                 del self.cog.queue[self.guild_id]
@@ -802,6 +812,9 @@ class MusicControlView(discord.ui.View):
                 del self.cog.now_playing[self.guild_id]
             if self.guild_id in self.cog.vc_dict:
                 del self.cog.vc_dict[self.guild_id]
+                
+            await vc.disconnect()
+            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
         else:
             await interaction.followup.send("❌ 目前沒有連線的語音頻道", ephemeral=True)
 
@@ -821,8 +834,6 @@ class VoiceCog(commands.Cog):
             # 確保使用 YouTube 類別
             yt = YouTube(url)
             
-            # 📌 修正：移除 yt.bypass_age_gate() 避免 AttributeError
-
             # 找到最佳的純音訊串流
             audio_stream = yt.streams.filter(only_audio=True).order_by('abr').last()
             
@@ -905,6 +916,7 @@ class VoiceCog(commands.Cog):
     @app_commands.command(name="play", description="播放 YouTube 音樂或搜索歌曲")
     async def play(self, interaction: discord.Interaction, url: str):
         await log_command(interaction, "/play")
+        # 音樂提取需要時間，故保留 defer
         await interaction.response.defer()
         
         if not interaction.user.voice or not interaction.user.voice.channel:
@@ -943,10 +955,10 @@ class VoiceCog(commands.Cog):
             asyncio.create_task(self.start_playback(interaction.guild.id))
 
     async def start_playback(self, guild_id):
-        q = self.queue[guild_id]
-        vc = self.vc_dict[guild_id]
+        q = self.queue.get(guild_id)
+        vc = self.vc_dict.get(guild_id)
         
-        if vc.is_playing() or vc.is_paused():
+        if not q or not vc or vc.is_playing() or vc.is_paused():
             return 
 
         while q:
@@ -995,6 +1007,7 @@ class VoiceCog(commands.Cog):
     @app_commands.command(name="歌單", description="查看當前的播放隊列")
     async def show_queue(self, interaction: discord.Interaction):
         await log_command(interaction, "/歌單")
+        # 歌單查詢速度快，可使用單步回應
         await interaction.response.defer()
         
         q = self.queue.get(interaction.guild.id, [])
@@ -1021,6 +1034,7 @@ class VoiceCog(commands.Cog):
     @app_commands.command(name="跳至", description="跳過當前歌曲並播放隊列中指定位置的歌曲")
     async def skip_to(self, interaction: discord.Interaction, position: int):
         await log_command(interaction, "/跳至")
+        # 跳轉邏輯速度快，可使用單步回應
         await interaction.response.defer()
 
         q = self.queue.get(interaction.guild.id, [])
@@ -1057,6 +1071,30 @@ class VoiceCog(commands.Cog):
 async def on_app_command_error(interaction: discord.Interaction, error):
     """處理應用程式指令錯誤"""
     
+    # 檢查是否已經回應，避免重複發送導致 404
+    if interaction.response.is_done():
+        try:
+            # 使用 followup 發送錯誤訊息
+            if isinstance(error, app_commands.MissingPermissions):
+                error_msg = f"❌ 權限不足：你缺少執行此指令所需的權限：`{', '.join(error.missing_permissions)}`"
+            elif isinstance(error, app_commands.CheckFailure):
+                error_msg = str(error) 
+            elif isinstance(error, app_commands.errors.CommandInvokeError) and isinstance(error.original, discord.errors.NotFound):
+                 # 捕捉指令執行中的 NotFound，通常是 Unknown interaction
+                 error_msg = f"❌ 指令超時：伺服器回應逾時，請再試一次。"
+            else:
+                print(f"未處理的指令錯誤：{type(error).__name__}: {error}")
+                error_msg = f"❌ 指令錯誤：{error}"
+                
+            await interaction.followup.send(error_msg, ephemeral=True)
+            
+        except discord.errors.NotFound:
+            # 如果連 followup 都失敗，則放棄
+            print("❌ 錯誤處理：無法發送 followup (Unknown interaction)")
+            pass 
+        return
+        
+    # 如果尚未回應，直接回應錯誤訊息
     if isinstance(error, app_commands.MissingPermissions):
         error_msg = f"❌ 權限不足：你缺少執行此指令所需的權限：`{', '.join(error.missing_permissions)}`"
     elif isinstance(error, app_commands.CheckFailure):
@@ -1066,10 +1104,13 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         print(f"未處理的指令錯誤：{type(error).__name__}: {error}")
         error_msg = f"❌ 指令錯誤：{error}"
 
-    if interaction.response.is_done():
-        await interaction.followup.send(error_msg, ephemeral=True)
-    else:
+    try:
         await interaction.response.send_message(error_msg, ephemeral=True)
+    except discord.errors.NotFound:
+        # 處理如果 interaction 已經失效 (Unknown interaction)
+        print("❌ 錯誤處理：無法回應 (Unknown interaction)")
+        pass
+
 
 @bot.event
 async def on_ready():
