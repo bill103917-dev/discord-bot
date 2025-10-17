@@ -1,1 +1,37 @@
-1
+# 檔案名稱：.github/workflows/docker-build.yml
+
+name: Docker Image CI # 工作流的名稱
+
+# 觸發條件：當程式碼被推送到 'main' 分支時
+on:
+  push:
+    branches: [ "main" ]
+
+# 定義一個 Job (任務)
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest # 使用最新的 Ubuntu 虛擬機來執行這個任務
+
+    steps:
+    - name: Checkout Code # 步驟 1: 檢查程式碼
+      # 獲取您的 GitHub 倉庫的程式碼到虛擬機中
+      uses: actions/checkout@v4
+
+    - name: Log in to Docker Hub # 步驟 2: 登入 Docker Hub
+      # 讓 GitHub 可以將構建好的映像檔推送到您的 Docker 帳戶
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }} # 稍後設定
+        password: ${{ secrets.DOCKER_PASSWORD }} # 稍後設定
+
+    - name: Build and Push Docker Image # 步驟 3: 構建映像檔並推送
+      # 使用您的 Dockerfile 進行構建，並將其標記為最新
+      uses: docker/build-push-action@v5
+      with:
+        context: . # 使用當前目錄作為構建上下文
+        push: true # 啟用推送
+        tags: ${{ secrets.DOCKER_USERNAME }}/<dot.py dc我是機器人>:latest 
+        # 請將 <您的映像檔名稱> 替換成一個自訂名稱，例如：my-python-bot
+
+    - name: Build Succeeded Message # 步驟 4: 構建成功提示 (可選)
+      run: echo "Docker 映像檔已成功構建並推送到 Docker Hub！"
