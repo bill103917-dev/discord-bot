@@ -1235,11 +1235,56 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         pass
 
 
+import discord
+from discord.ext import commands
+
+# 假設您的 bot 已經定義...
+# bot = commands.Bot(...) 
+
+import discord
+from discord.ext import commands
+import os
+
+bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+
 @bot.event
 async def on_ready():
-    """機器人上線時執行"""
-    await bot. change_presence(activity=discord.Game (name=" 正在服務中丨help"))
-    print(f"✅ 機器人 {bot.user} 已上線！")
+    
+    # ----------------------------------------------------
+    # 請【只保留一行】您想設定的 activity_to_set 程式碼
+    # ----------------------------------------------------
+    
+    #遊戲
+    activity_to_set = discord.Game(name="服務中 | /help") 
+    
+    #聽
+    #activity_to_set = discord.Activity(
+    #type=discord.ActivityType.listening,
+    #name="您的指令"
+    #)
+    
+    #看
+    #activity_to_set = discord.Activity(
+    #type=discord.ActivityType.watching,
+    #name="伺服器動態"
+    #)
+    
+    #直播
+    #activity_to_set = discord.Streaming(
+    #name="Coding", 
+    #url="https://youtube.com/@bill._.0917?si=YxzMAPf_LcuXBGAx"
+    #)
+    
+    #設定
+    #status=discord.Status.online=綠燈（上線中）
+    #status=discord.Status.idle=黃燈（閒置
+    #status=discord.Status.dnd=紅燈（請勿打擾
+    await bot.change_presence(
+        status=discord.Status.online
+        activity=activity_to_set
+    )
+    
+    print(f'{bot.user.name} 已經成功上線，狀態已設定完成！')
     
     try:
         await bot.add_cog(UtilityCog(bot))
