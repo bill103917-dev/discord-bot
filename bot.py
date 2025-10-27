@@ -629,7 +629,7 @@ class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
+    @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
     @app_commands.describe(user="要測試的對象 (預設為測試你自己)")
     async def gay_probability(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         
