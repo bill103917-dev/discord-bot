@@ -1314,7 +1314,7 @@ async def on_ready():
     #status=discord.Status.idle=黃燈（閒置
     #status=discord.Status.dnd=紅燈（請勿打擾
     await bot.change_presence(
-        status=discord.Status.online
+        status=discord.Status.online,
         activity=activity_to_set
     )
     
