@@ -29,6 +29,7 @@ DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
+HUNDRED_PERCENT_IDS = [1343900739407319070]
 
 if not TOKEN:
     print("❌ DISCORD_TOKEN 沒有正確設定，請到環境變數檢查！")
@@ -628,39 +629,40 @@ class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
+        @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
     @app_commands.describe(user="要測試的對象 (預設為測試你自己)")
     async def gay_probability(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         
         # 1. 決定測試對象
-        # 如果使用者沒有指定 'user' 參數，則預設為使用指令的人
         target_user = user if user else interaction.user
         
-        probability = 0
+        probability = 0 # 預設值
         
-        # 2. 檢查是否為特殊使用者
-        if target_user.id in SPECIAL_USER_IDS:
-            # 如果 ID 在特殊列表中，機率固定為 0%
+        # 2. 檢查是否為 100% 機率使用者 (新條件)
+        if target_user.id in HUNDRED_PERCENT_IDS: # <--- 新增的 100% 判斷
+            probability = 100
+            
+        # 3. 檢查是否為 0% 機率使用者 (舊條件)
+        elif target_user.id in SPECIAL_USER_IDS:
             probability = 0
+            
+        # 4. 否則，隨機 (1-100%)
         else:
-            # 否則，從 1 到 100 隨機選一個數字
             probability = random.randint(1, 100) 
             
-        # 3. 建立 Embed 回應 (模仿您圖片中的樣式)
+        # 5. 建立 Embed 回應 (與您期望的一致)
         embed = discord.Embed(
             title="🏳️‍🌈 隨機同性戀機率 (/gay)",
-            color=discord.Color.random() # 隨機顏色
+            color=discord.Color.random()
         )
         
-        # 模仿圖片中的欄位
         embed.add_field(name="測試者", value=target_user.mention, inline=False)
         embed.add_field(name="機率為", value=f"**{probability}%**", inline=False)
-        
-        # 模仿圖片中 "由 cola_hahaha0 執行" 的頁腳
         embed.set_footer(text=f"由 {interaction.user.display_name} 執行")
         
-        # 4. 發送回應
+        # 6. 發送回應
         await interaction.response.send_message(embed=embed)
+
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     async def rps(self, interaction: discord.Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
