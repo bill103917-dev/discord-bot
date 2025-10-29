@@ -18,9 +18,11 @@ psycopg2-binary
 
 # 影片/音樂功能
 # 新增 pytube 作為主要的 YouTube 提取工具
-yt-dlp
-pytube
 spotipy
+discord.py
+pytube>=15.0.0
+yt-dlp>=2024.01.24
+
 
 
 # 其他
