@@ -9,8 +9,9 @@ import requests
 import functools
 import spotipy # 雖然未使用，但保留
 import yt_dlp
-from typing import List, Optional
 import discord
+from typing import List, Optional
+from pytube import YouTube
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel, User, Message, FFmpegPCMAudio
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
@@ -18,8 +19,7 @@ from discord.app_commands import checks
 from discord.app_commands import Choice
 import json 
 import functools
-from pytube import YouTube, AgeRestrictedError
-from pytube.exceptions import AgeRestrictedError
+from pytube.exceptions import AgeRestrictedError # <-- 更改 AgeRestrictedError 的匯入路徑
 import psycopg2 
 import discord
 from discord.ext.commands.errors import CommandError
