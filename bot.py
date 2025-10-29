@@ -1538,19 +1538,48 @@ import os
 
 @bot.event
 async def on_ready():
+
+    try:
+        # 同步到所有伺服器
+        synced_count = 0
+        for guild in bot.guilds:
+            try:
+                bot.tree.copy_global_to(guild=guild)
+                await bot.tree.sync(guild=guild)
+                synced_count += 1
+            except Exception as e:
+                print(f"無法同步到伺服器 {guild.name}: {e}")
+        print(f"已同步 {synced_count} 個伺服器的斜線指令。")
+
+    except Exception as e:
+        print(f"指令同步失敗: {e}")
+
+    # ⚡ 持久化 View 處理 ⚡
+    # 這裡的關鍵是：我們需要獲取到 VoiceCog 的實例
     
-    # ----------------------------------------------------
-    # 請【只保留一行】您想設定的 activity_to_set 程式碼
-    # ----------------------------------------------------
+    # 假設您的 VoiceCog 在 setup_hook 中被添加
+    voice_cog_instance = bot.get_cog("VoiceCog")
     
-    #遊戲
-    activity_to_set = discord.Game(name="服務中 | /help") 
-    
+    if voice_cog_instance:
+        print("--- 正在加載持久化音樂控制 View ---")
+        for guild in bot.guilds:
+            # 為每個伺服器加載 MusicControlView
+            # View 會自動使用 custom_id 尋找上一次發送的訊息
+            bot.add_view(MusicControlView(voice_cog_instance, guild.id))
+            print(f"已為伺服器 {guild.name} ({guild.id}) 加載 MusicControlView。")
+    else:
+        print("⚠️ 錯誤: VoiceCog 未找到，無法加載 MusicControlView。請確認 VoiceCog 已被正確 add_cog。")
+
     #聽
     #activity_to_set = discord.Activity(
     #type=discord.ActivityType.listening,
     #name="您的指令"
     #)
+        
+    
+    #遊戲
+    activity_to_set = discord.Game(name="服務中 | /help") 
+    
     
     #看
     #activity_to_set = discord.Activity(
