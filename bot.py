@@ -887,313 +887,198 @@ async def get_voice_client(interaction: discord.Interaction) -> Optional[discord
     return interaction.guild.voice_client
 
 
-# --- MusicControlView (互動按鈕介面) ---
+
+# ------------------------------
+# 輔助函式
+# ------------------------------
+
+async def get_voice_client(interaction: Interaction):
+    return interaction.guild.voice_client
+
+# ------------------------------
+# MusicControlView
+# ------------------------------
+
 class MusicControlView(discord.ui.View):
     def __init__(self, cog, guild_id):
-        super().__init__(timeout=None) # 持久化 View
+        super().__init__(timeout=None)  # 持久化
         self.cog = cog
         self.guild_id = guild_id
-        # 設定每個按鈕的 custom_id，用於持久化
-        self.pause_resume_button.custom_id = f"music_control_pause_resume_{guild_id}"
-        self.skip_button.custom_id = f"music_control_skip_{guild_id}"
-        self.stop_button.custom_id = f"music_control_stop_{guild_id}"
-        self.queue_button.custom_id = f"music_control_queue_{guild_id}"
-        self.volume_up_button.custom_id = f"music_control_volume_up_{guild_id}"
-        self.volume_down_button.custom_id = f"music_control_volume_down_{guild_id}"
 
     async def interaction_check(self, interaction: Interaction) -> bool:
-        """檢查用戶是否在 Bot 所在的語音頻道，或者是否為管理員"""
         vc = await get_voice_client(interaction)
-        if not vc: # 如果機器人不在語音頻道，允許管理員操作停止指令
-            if interaction.command and interaction.command.name == "stop_all" and interaction.user.guild_permissions.administrator:
-                return True
-            await interaction.response.send_message("❌ 機器人目前不在語音頻道中。", ephemeral=True)
-            return False
-
+        if not vc:
+            return interaction.user.guild_permissions.administrator
         if interaction.user.voice and interaction.user.voice.channel == vc.channel:
             return True
-        elif interaction.user.guild_permissions.administrator: # 允許管理員在任意頻道操作
-            return True
-        else:
-            await interaction.response.send_message("❌ 你必須在 Bot 所在的語音頻道或擁有管理員權限才能控制音樂。", ephemeral=True)
-            return False
+        return interaction.user.guild_permissions.administrator
 
-    @discord.ui.button(label="⏯️", style=discord.ButtonStyle.primary, custom_id="music_control_pause_resume")
-    async def pause_resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=False) # 延遲回應，不顯示"思考中"
-        vc = await get_voice_client(interaction)
-        if not vc: return # interaction_check 會處理
-
+    @discord.ui.button(label="⏯️", style=discord.ButtonStyle.primary)
+    async def pause_resume_button(self, interaction: Interaction, button: discord.ui.Button):
+        guild_id = self.guild_id
+        vc = self.cog.vc_dict.get(guild_id)
+        if not vc or (not vc.is_playing() and not vc.is_paused()):
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂。", ephemeral=True)
+            return
         if vc.is_playing():
             vc.pause()
-            await interaction.followup.send("⏸️ 暫停播放", ephemeral=True)
-        elif vc.is_paused():
+            await interaction.response.send_message("⏸️ 暫停播放", ephemeral=True)
+        else:
             vc.resume()
-            await interaction.followup.send("▶️ 繼續播放", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
-        
-        await self.cog.update_control_message(self.guild_id) # 更新控制訊息
+            await interaction.response.send_message("▶️ 繼續播放", ephemeral=True)
+        await self.cog.update_control_message(guild_id)
 
-    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.secondary, custom_id="music_control_skip")
-    async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=False)
-        vc = await get_voice_client(interaction)
-        if not vc: return
-
-        if vc.is_playing() or vc.is_paused():
-            skipped_title = self.cog.now_playing.get(self.guild_id, "當前歌曲")
-            vc.stop() # 呼叫 stop() 會觸發 after 函式
-            await interaction.followup.send(f"⏩ 已跳過 **{skipped_title}**。", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
-        
-        # update_control_message 將會在 after callback 被觸發後調用
-
-    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger, custom_id="music_control_stop")
-    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=False)
-        vc = await get_voice_client(interaction)
-        
-        if vc and vc.is_connected():
-            vc.stop() # 停止播放，觸發 after callback
-            
-            # 清除隊列和當前播放狀態
-            self.cog.queue.pop(self.guild_id, None) 
-            self.cog.now_playing.pop(self.guild_id, None)
-            self.cog.current_volume.pop(self.guild_id, None) # 清除音量
-            
-            await vc.disconnect()
-            self.cog.vc_dict.pop(self.guild_id, None)
-            
-            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有連線的語音頻道", ephemeral=True)
-        
-        await self.cog.update_control_message(self.guild_id) # 更新控制訊息 (應該是清空狀態)
-
-    @discord.ui.button(label="📋 歌單", style=discord.ButtonStyle.secondary, custom_id="music_control_queue")
-    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True) # 回應給用戶看，不更新主訊息
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.secondary)
+    async def skip_button(self, interaction: Interaction, button: discord.ui.Button):
         guild_id = self.guild_id
-        q = self.cog.queue.get(guild_id, [])
-        now_playing = self.cog.now_playing.get(guild_id)
+        vc = self.cog.vc_dict.get(guild_id)
+        if not vc or (not vc.is_playing() and not vc.is_paused()):
+            await interaction.response.send_message("❌ 目前沒有播放中的音樂。", ephemeral=True)
+            return
+        skipped_title = self.cog.now_playing.get(guild_id, ("當前歌曲", 0, 0))[0]
+        vc.stop()  # 會觸發 after callback
+        await interaction.response.send_message(f"⏩ 已跳過 **{skipped_title}**。", ephemeral=True)
 
-        embed = discord.Embed(
-            title="🎶 播放隊列",
-            color=discord.Color.blue()
-        )
+    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
+    async def stop_button(self, interaction: Interaction, button: discord.ui.Button):
+        guild_id = self.guild_id
+        vc = self.cog.vc_dict.get(guild_id)
+        if vc and vc.is_connected():
+            vc.stop()
+            await vc.disconnect()
+            self.cog.queue.pop(guild_id, None)
+            self.cog.now_playing.pop(guild_id, None)
+            self.cog.current_volume.pop(guild_id, None)
+            self.cog.vc_dict.pop(guild_id, None)
+            await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 目前沒有連線的語音頻道。", ephemeral=True)
+        await self.cog.update_control_message(guild_id)
 
-        if now_playing:
-            embed.add_field(name="正在播放", value=f"1️⃣ **{now_playing}**", inline=False)
-        
-        if q:
-            queue_list = "\n".join([f"{i+2}️⃣ {title}" for i, (_, title) in enumerate(q[:10])])
-            embed.add_field(name="即將播放 (最多顯示 10 首)", value=queue_list, inline=False)
-        
-        if not now_playing and not q:
-            embed.description = "隊列目前是空的。"
-
-        await interaction.followup.send(embed=embed, ephemeral=True) # 以臨時訊息發送歌單
-
-    @discord.ui.button(label="🔊 +", style=discord.ButtonStyle.success, custom_id="music_control_volume_up")
-    async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        vc = await get_voice_client(interaction)
-        if not vc: return
-
-        current_vol = self.cog.current_volume.get(self.guild_id, 0.5) # 預設 0.5 (50%)
-        new_vol = min(1.0, current_vol + 0.25) # 每次增加 25%，上限 100%
-
-        if vc.is_playing() and vc.source:
+    @discord.ui.button(label="🔊 +", style=discord.ButtonStyle.success)
+    async def volume_up_button(self, interaction: Interaction, button: discord.ui.Button):
+        guild_id = self.guild_id
+        vc = self.cog.vc_dict.get(guild_id)
+        if not vc:
+            await interaction.response.send_message("❌ 機器人不在語音頻道", ephemeral=True)
+            return
+        current_vol = self.cog.current_volume.get(guild_id, 0.5)
+        new_vol = min(1.0, current_vol + 0.25)
+        self.cog.current_volume[guild_id] = new_vol
+        if vc.source:
             vc.source.volume = new_vol
-        
-        self.cog.current_volume[self.guild_id] = new_vol
-        await interaction.followup.send(f"🔊 音量已調整為 {int(new_vol * 100)}%", ephemeral=True)
-        await self.cog.update_control_message(self.guild_id) # 更新控制訊息
+        await interaction.response.send_message(f"🔊 音量已調整為 {int(new_vol*100)}%", ephemeral=True)
+        await self.cog.update_control_message(guild_id)
 
-    @discord.ui.button(label="🔇 -", style=discord.ButtonStyle.danger, custom_id="music_control_volume_down")
-    async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        vc = await get_voice_client(interaction)
-        if not vc: return
-
-        current_vol = self.cog.current_volume.get(self.guild_id, 0.5)
-        new_vol = max(0.0, current_vol - 0.25) # 每次減少 25%，下限 0%
-
-        if vc.is_playing() and vc.source:
+    @discord.ui.button(label="🔇 -", style=discord.ButtonStyle.danger)
+    async def volume_down_button(self, interaction: Interaction, button: discord.ui.Button):
+        guild_id = self.guild_id
+        vc = self.cog.vc_dict.get(guild_id)
+        if not vc:
+            await interaction.response.send_message("❌ 機器人不在語音頻道", ephemeral=True)
+            return
+        current_vol = self.cog.current_volume.get(guild_id, 0.5)
+        new_vol = max(0.0, current_vol - 0.25)
+        self.cog.current_volume[guild_id] = new_vol
+        if vc.source:
             vc.source.volume = new_vol
-        
-        self.cog.current_volume[self.guild_id] = new_vol
-        await interaction.followup.send(f"🔇 音量已調整為 {int(new_vol * 100)}%", ephemeral=True)
-        await self.cog.update_control_message(self.guild_id) # 更新控制訊息
+        await interaction.response.send_message(f"🔇 音量已調整為 {int(new_vol*100)}%", ephemeral=True)
+        await self.cog.update_control_message(guild_id)
 
-# --- VoiceCog (音樂功能核心) ---
+# ------------------------------
+# VoiceCog
+# ------------------------------
+
 class VoiceCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = {}             # {guild_id: [(audio_url, title, duration), ...]} 隊列儲存完整資訊
-        self.now_playing = {}       # {guild_id: (title, duration, start_time)} 當前播放資訊
-        self.vc_dict = {}           # {guild_id: voice_client} 語音客戶端
-        self.current_volume = {}    # {guild_id: float} 當前音量 (0.0 - 1.0)
-        self.control_messages = {}  # {guild_id: message_id} 儲存音樂控制訊息ID
-        
-        # 確保在機器人啟動時加載持久化 View
-        # self.bot.add_view(MusicControlView(self, guild_id)) # guild_id 無法直接在這裡獲取
-        # 我們會在 on_ready 中動態加載所有 guild 的 view
+        self.queue = {}             # {guild_id: [(audio_url, title, duration), ...]}
+        self.now_playing = {}       # {guild_id: (title, duration, start_time)}
+        self.vc_dict = {}           # {guild_id: voice_client}
+        self.current_volume = {}    # {guild_id: float}
+        self.control_messages = {}  # {guild_id: message_id}
 
-    # ==========================================================
-    # 輔助函式：音訊提取 (PyTube, yt-dlp)
-    # ==========================================================
-    @to_thread
-    def extract_pytube(self, url):
-        """嘗試使用 PyTube 提取音訊 URL"""
-        try:
-            yt = YouTube(url)
-            
-            audio_stream = yt.streams.filter(only_audio=True, file_extension='mp4').order_by('abr').desc().first()
-            if not audio_stream:
-                audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
-                if not audio_stream:
-                    raise Exception("PyTube 找不到純音訊串流")
-            
-            # PyTube 無法直接獲取 duration_seconds，可能需要額外請求
-            # 這裡簡單處理，或者從 yt-dlp 補齊
-            duration = yt.length if yt.length else 0 # PyTube 的 length 是秒數
-            
-            print(f"✅ PyTube 成功提取：{yt.title}")
-            return audio_stream.url, yt.title, duration
-
-        except AgeRestrictedError:
-            print("⚠️ PyTube: 該影片有嚴格的年齡限制。")
-            raise # 拋出錯誤，讓程式碼回退到 yt-dlp
-        
-        except Exception as e:
-            print(f"⚠️ PyTube 提取失敗: {e}")
-            raise # 拋出錯誤，讓程式碼回退到 yt-dlp
-
-    @to_thread
-    def extract_yt_dlp(self, url: str):
-        """嘗試使用 yt-dlp 提取音訊 URL (作為後備和搜尋)"""
-        cookies_content = os.getenv('YOUTUBE_COOKIES')
-        temp_cookie_file = None
-        
+    # =====================
+    # 音訊提取
+    # =====================
+    async def extract_yt_dlp(self, url: str):
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
-            'noplaylist': True, # 確保只處理單一項目
-            'default_search': 'auto',
-            'retries': 3,
-            'youtube_include_dash_manifest': False, 
-            'custom_http_headers': {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.60 Safari/537.36'
-            },
-            'extract_flat': True, # 搜尋時只獲取基本資訊，提高速度
-            'force_generic_extractor': True, # 處理非 YouTube 連結
+            'noplaylist': True,
         }
-        
-        try:
-            if cookies_content:
-                temp_cookie_file = f"temp_yt_cookies_{os.getpid()}.txt" 
-                with open(temp_cookie_file, "w", encoding="utf-8") as f:
-                    f.write(cookies_content)
-                ydl_opts['cookiefile'] = temp_cookie_file
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                # 如果是搜尋結果或播放列表，只取第一個
-                if 'entries' in info:
-                    info = info['entries'][0]
-                
-                # 重新提取一次獲取完整的 url 和 duration (因為 extract_flat=True 可能只給基本資訊)
-                # 這裡需要檢查 info 是否有 'url' 和 'duration'，如果沒有，就用原始 URL 再提取一次完整資訊
-                if not info.get('url') or not info.get('duration'):
-                    full_info_opts = ydl_opts.copy()
-                    full_info_opts['extract_flat'] = False # 獲取詳細資訊
-                    with yt_dlp.YoutubeDL(full_info_opts) as full_ydl:
-                        info = full_ydl.extract_info(info['webpage_url'] if 'webpage_url' in info else url, download=False)
-                        if 'entries' in info: # 如果還是播放列表，取第一項
-                            info = info['entries'][0]
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if 'entries' in info:
+                info = info['entries'][0]
+            audio_url = info.get('url')
+            title = info.get('title', '未知曲目')
+            duration = info.get('duration', 0)
+            return audio_url, title, duration
 
+    # =====================
+    # 播放控制
+    # =====================
+    async def start_playback(self, guild_id):
+        lock = getattr(self, f"_lock_{guild_id}", None)
+        if not lock:
+            lock = asyncio.Lock()
+            setattr(self, f"_lock_{guild_id}", lock)
+        async with lock:
+            q = self.queue.get(guild_id)
+            vc = self.vc_dict.get(guild_id)
+            if not q or not vc or vc.is_playing() or vc.is_paused():
+                await self.update_control_message(guild_id)
+                return
 
-                audio_url = info.get('url')
-                title = info.get('title', '未知曲目')
-                duration = info.get('duration', 0) # 秒數
+            audio_url, title, duration = q.pop(0)
+            self.now_playing[guild_id] = (title, duration, asyncio.get_event_loop().time())
+            await self.update_control_message(guild_id)
 
-                if not audio_url:
-                    raise Exception("yt-dlp 未能提取到有效的音訊 URL")
-                
-                print(f"✅ yt-dlp 成功提取：{title}")
-                return audio_url, title, duration
-        
-        except Exception as e:
-            raise Exception(f"yt-dlp 提取失敗: {e}")
-            
-        finally:
-            if temp_cookie_file and os.path.exists(temp_cookie_file):
-                os.remove(temp_cookie_file)
-
-    async def get_audio_info(self, url: str):
-        """雙重提取邏輯：先 PyTube，失敗後再 yt-dlp"""
-        try:
-            # 只有當 url 明顯是 YouTube 連結時才嘗試 PyTube
-            if "youtube.com/watch?v=" in url or "youtu.be/" in url:
-                return await self.extract_pytube(url)
-            else:
-                # 如果是搜尋詞或其他連結，直接用 yt-dlp
-                raise Exception("非 YouTube 連結或搜尋詞，跳過 PyTube。")
-        except Exception as e_pytube:
-            print(f"PyTube 失敗或跳過，嘗試 yt-dlp: {e_pytube}")
             try:
-                return await self.extract_yt_dlp(url)
-            except Exception as e_ytdlp:
-                raise Exception(f"音訊提取失敗。請檢查連結或搜尋關鍵字是否有效。\n詳細錯誤: {e_ytdlp}")
+                current_vol = self.current_volume.setdefault(guild_id, 0.5)
+                source = FFmpegPCMAudio(
+                    audio_url,
+                    executable='/usr/bin/ffmpeg',
+                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                    options="-vn"
+                )
+                source = discord.PCMVolumeTransformer(source, volume=current_vol)
+                callback = functools.partial(self.player_after_callback, guild_id)
+                vc.play(source, after=callback)
+            except Exception as e:
+                print(f"❌ 嘗試播放 {title} 發生錯誤: {e}")
+                await self.player_after_callback(guild_id, e)
 
-    # ==========================================================
-    # 輔助函式：時間格式化
-    # ==========================================================
-    def format_duration(self, seconds):
-        if seconds is None:
-            return "未知"
-        
-        minutes, seconds = divmod(int(seconds), 60)
-        hours, minutes = divmod(minutes, 60)
-
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    async def player_after_callback(self, guild_id, error):
+        vc = self.vc_dict.get(guild_id)
+        if error:
+            print(f"播放錯誤: {error}")
+        self.now_playing.pop(guild_id, None)
+        await self.update_control_message(guild_id)
+        if self.queue.get(guild_id):
+            await self.start_playback(guild_id)
         else:
-            return f"{minutes:02d}:{seconds:02d}"
+            if vc and vc.is_connected():
+                await vc.disconnect()
+                self.vc_dict.pop(guild_id, None)
+                self.control_messages.pop(guild_id, None)
+                self.current_volume.pop(guild_id, None)
 
-    # ==========================================================
-    # 輔助函式：更新音樂控制訊息 (核心顯示邏輯)
-    # ==========================================================
-    async def update_control_message(self, guild_id: int, channel: Optional[discord.TextChannel] = None):
-        """
-        更新或發送音樂控制面板訊息
-        """
-        control_message_id = self.control_messages.get(guild_id)
+    # =====================
+    # 控制面板
+    # =====================
+    async def update_control_message(self, guild_id: int, channel: discord.TextChannel = None):
         vc = self.vc_dict.get(guild_id)
         q = self.queue.get(guild_id, [])
         now_playing_info = self.now_playing.get(guild_id)
-        
-        # 決定 Bot 應該在哪個文字頻道發送或更新訊息
-        target_channel = channel # 優先使用指定頻道 (例如 /play 命令的頻道)
-        if not target_channel and vc and vc.channel.guild.text_channels:
-            # 如果沒有指定，嘗試在 Bot 所在的語音頻道中的第一個文字頻道發送
-            target_channel = vc.channel.guild.text_channels[0]
-        
-        if not target_channel:
-            print(f"警告: 無法找到 {guild_id} 的文字頻道來更新控制訊息。")
-            return
-            
-        embed = discord.Embed(
-            title="🎶 音樂播放器",
-            color=discord.Color.blue()
-        )
+        view = MusicControlView(self, guild_id)
 
-        # 狀態顯示
+        target_channel = channel or (vc.channel.guild.text_channels[0] if vc and vc.channel.guild.text_channels else None)
+        if not target_channel:
+            return
+
+        embed = discord.Embed(title="🎶 音樂播放器", color=discord.Color.blue())
         status_text = "目前無播放"
         if vc and vc.is_playing():
             status_text = "▶️ 播放中"
@@ -1201,281 +1086,150 @@ class VoiceCog(commands.Cog):
             status_text = "⏸️ 已暫停"
         elif vc and not vc.is_playing() and q:
             status_text = "🔃 即將播放"
-        
         embed.add_field(name="狀態", value=status_text, inline=False)
-        
-        # 當前播放資訊
+
         if now_playing_info:
-            title, total_duration, start_time = now_playing_info
-            
-            # 簡化的進度條 (文字)
-            # 這裡我們只顯示歌曲總長度，因為要實時更新進度條需要更複雜的 task 和編輯操作
-            duration_formatted = self.format_duration(total_duration)
-            
-            # 音量顯示
-            current_vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
-            
-            embed.add_field(name="現在播放", value=f"**{title}**\n`{duration_formatted}` (音量: {current_vol_percent}%)", inline=False)
+            title, total_duration, _ = now_playing_info
+            vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
+            embed.add_field(name="現在播放", value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%", inline=False
+                        title = info.get('title', '未知曲目')
+            duration = info.get('duration', 0)
+            return audio_url, title, duration
+
+    # =====================
+    # 播放控制
+    # =====================
+    async def start_playback(self, guild_id):
+        lock = getattr(self, f"_lock_{guild_id}", None)
+        if not lock:
+            lock = asyncio.Lock()
+            setattr(self, f"_lock_{guild_id}", lock)
+        async with lock:
+            q = self.queue.get(guild_id)
+            vc = self.vc_dict.get(guild_id)
+            if not q or not vc or vc.is_playing() or vc.is_paused():
+                await self.update_control_message(guild_id)
+                return
+
+            audio_url, title, duration = q.pop(0)
+            self.now_playing[guild_id] = (title, duration, asyncio.get_event_loop().time())
+            await self.update_control_message(guild_id)
+
+            try:
+                current_vol = self.current_volume.setdefault(guild_id, 0.5)
+                source = FFmpegPCMAudio(
+                    audio_url,
+                    executable='/usr/bin/ffmpeg',
+                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                    options="-vn"
+                )
+                source = discord.PCMVolumeTransformer(source, volume=current_vol)
+                callback = functools.partial(self.player_after_callback, guild_id)
+                vc.play(source, after=callback)
+            except Exception as e:
+                print(f"❌ 嘗試播放 {title} 發生錯誤: {e}")
+                await self.player_after_callback(guild_id, e)
+
+    async def player_after_callback(self, guild_id, error):
+        vc = self.vc_dict.get(guild_id)
+        if error:
+            print(f"播放錯誤: {error}")
+        self.now_playing.pop(guild_id, None)
+        await self.update_control_message(guild_id)
+        if self.queue.get(guild_id):
+            await self.start_playback(guild_id)
+        else:
+            if vc and vc.is_connected():
+                await vc.disconnect()
+                self.vc_dict.pop(guild_id, None)
+                self.control_messages.pop(guild_id, None)
+                self.current_volume.pop(guild_id, None)
+
+    # =====================
+    # 控制面板
+    # =====================
+    async def update_control_message(self, guild_id: int, channel: discord.TextChannel = None):
+        vc = self.vc_dict.get(guild_id)
+        q = self.queue.get(guild_id, [])
+        now_playing_info = self.now_playing.get(guild_id)
+        view = MusicControlView(self, guild_id)
+
+        target_channel = channel or (vc.channel.guild.text_channels[0] if vc and vc.channel.guild.text_channels else None)
+        if not target_channel:
+            return
+
+        embed = discord.Embed(title="🎶 音樂播放器", color=discord.Color.blue())
+        status_text = "目前無播放"
+        if vc and vc.is_playing():
+            status_text = "▶️ 播放中"
+        elif vc and vc.is_paused():
+            status_text = "⏸️ 已暫停"
+        elif vc and not vc.is_playing() and q:
+            status_text = "🔃 即將播放"
+        embed.add_field(name="狀態", value=status_text, inline=False)
+
+        if now_playing_info:
+            title, duration, _ = now_playing_info
+            vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
+            embed.add_field(name="現在播放", value=f"**{title}** (`{duration}s`) 音量: {vol_percent}%", inline=False)
         else:
             embed.add_field(name="現在播放", value="無", inline=False)
 
-        # 隊列資訊
         if q:
-            queue_titles = [f"**{idx+1}**. {info[1]} (`{self.format_duration(info[2])}`)" for idx, info in enumerate(q[:5])] # 顯示前5首
-            embed.add_field(name=f"即將播放 ({len(q)} 首)", value="\n".join(queue_titles) if queue_titles else "隊列是空的。", inline=False)
+            queue_text = "\n".join([f"{i+1}. {info[1]} (`{info[2]}s`)" for i, info in enumerate(q[:10])])
+            embed.add_field(name=f"即將播放 ({len(q)} 首)", value=queue_text, inline=False)
         else:
-            embed.add_field(name="隊列", value="隊列是空的。", inline=False)
-
-        # 創建或獲取 View
-        view = MusicControlView(self, guild_id)
+            embed.add_field(name="隊列", value="隊列是空的", inline=False)
 
         try:
-            if control_message_id:
-                # 嘗試獲取並編輯舊訊息
-                msg = await target_channel.fetch_message(control_message_id)
+            msg_id = self.control_messages.get(guild_id)
+            if msg_id:
+                msg = await target_channel.fetch_message(msg_id)
                 await msg.edit(embed=embed, view=view)
             else:
-                # 第一次發送訊息
                 msg = await target_channel.send(embed=embed, view=view)
                 self.control_messages[guild_id] = msg.id
         except discord.NotFound:
-            # 訊息不存在，重新發送
             msg = await target_channel.send(embed=embed, view=view)
             self.control_messages[guild_id] = msg.id
         except Exception as e:
-            print(f"更新/發送控制訊息失敗: {e}")
+            print(f"更新控制訊息失敗: {e}")
 
-
-    # ==========================================================
-    # 播放結束回調函式
-    # ==========================================================
-    async def player_after_callback(self, guild_id, error):
-        """
-        播放結束或發生錯誤時的回調函數 (在 Bot 的 Event Loop 中執行)
-        """
-        vc = self.vc_dict.get(guild_id)
-        
-        if error:
-            print(f"播放時發生錯誤: {error}")
-            # 可以在這裡發送錯誤訊息到文字頻道
-            if vc and vc.channel and vc.channel.guild.text_channels:
-                 target_channel = vc.channel.guild.text_channels[0]
-                 await target_channel.send(f"❌ 播放 **{self.now_playing.get(guild_id, ('未知歌曲',0,0))[0]}** 時發生錯誤: {error}。跳過。")
-        
-        # 清除當前播放狀態
-        self.now_playing.pop(guild_id, None)
-        
-        # 更新控制訊息
-        await self.update_control_message(guild_id)
-
-        # 準備播放下一首
-        if self.queue.get(guild_id):
-            # 如果隊列還有歌曲，則繼續播放
-            await self.start_playback(guild_id)
-        else:
-            # 隊列清空，清除狀態並斷開連接
-            if guild_id in self.queue:
-                del self.queue[guild_id]
-            if vc and vc.is_connected():
-                print(f"隊列清空，Bot 在 {vc.channel.name} 斷開連接。")
-                await vc.disconnect()
-                self.vc_dict.pop(guild_id, None)
-                self.control_messages.pop(guild_id, None) # 清除控制訊息ID
-                self.current_volume.pop(guild_id, None) # 清除音量
-
-
-    # ==========================================================
-    # 播放邏輯核心
-    # ==========================================================
-    async def start_playback(self, guild_id):
-        q = self.queue.get(guild_id)
-        vc = self.vc_dict.get(guild_id)
-        
-        if not q or not vc or vc.is_playing() or vc.is_paused():
-            # 如果隊列空了，或Bot不在，或正在播放/暫停，則不啟動新播放
-            # 但我們應該更新控制訊息來反映當前狀態
-            await self.update_control_message(guild_id)
-            return 
-
-        # 播放隊列中的第一首
-        audio_url, title, duration = q.pop(0)
-        self.now_playing[guild_id] = (title, duration, asyncio.get_event_loop().time()) # 記錄播放開始時間
-        
-        # 更新控制訊息 (顯示正在播放的歌曲)
-        await self.update_control_message(guild_id)
-        
-        try:
-            # 設置音量
-            current_vol = self.current_volume.setdefault(guild_id, 0.5) # 預設 50% 音量
-            
-            source = FFmpegPCMAudio(
-                audio_url, 
-                executable='/usr/bin/ffmpeg', 
-                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn"
-            )
-            source.volume = current_vol # 設定音量
-            
-            callback = functools.partial(self.player_after_callback, guild_id)
-            vc.play(source, after=callback)
-            
-        except Exception as e:
-            print(f"❌ 嘗試播放 {title} 時發生錯誤: {e}")
-            await self.player_after_callback(guild_id, e) # 手動觸發錯誤回調
-
-    # ==========================================================
-    # 語音指令
-    # ==========================================================
-    @app_commands.command(name="play", description="播放 YouTube 音樂或搜索歌曲")
-    @app_commands.describe(query="歌曲連結或搜索關鍵字")
-    async def play(self, interaction: discord.Interaction, query: str):
-        await log_command(interaction, "/play")
-        # 直接 defer，稍後再發送或更新控制訊息
-        await interaction.response.defer(ephemeral=False) 
-        
+    # =====================
+    # 指令
+    # =====================
+    @app_commands.command(name="play", description="播放 YouTube 音樂或搜尋歌曲")
+    @app_commands.describe(query="歌曲連結或關鍵字")
+    async def play(self, interaction: Interaction, query: str):
+        await interaction.response.defer(ephemeral=False)
         if not interaction.user.voice or not interaction.user.voice.channel:
             await interaction.followup.send("❌ 你必須先加入語音頻道", ephemeral=True)
             return
-        
+
         channel = interaction.user.voice.channel
         guild_id = interaction.guild.id
 
         vc = interaction.guild.voice_client
         if not vc:
-            try:
-                vc = await channel.connect()
-            except asyncio.TimeoutError:
-                await interaction.followup.send("❌ 連接到語音頻道超時，請重試。", ephemeral=True)
-                return
-            except discord.ClientException:
-                await interaction.followup.send("❌ 機器人無法加入語音頻道。", ephemeral=True)
-                return
+            vc = await channel.connect()
         elif vc.channel != channel:
             await vc.move_to(channel)
-        
         self.vc_dict[guild_id] = vc
 
         try:
-            audio_url, title, duration = await self.get_audio_info(query)
+            audio_url, title, duration = await self.extract_yt_dlp(query)
         except Exception as e:
             await interaction.followup.send(f"❌ 取得音訊失敗: {e}", ephemeral=True)
-            # 如果 Bot 剛剛連接且提取失敗，且隊列為空，則讓它斷開
-            if not vc.is_playing() and not self.queue.get(guild_id):
-                 await vc.disconnect()
-                 self.vc_dict.pop(guild_id, None)
-                 self.control_messages.pop(guild_id, None)
-            await self.update_control_message(guild_id, interaction.channel) # 嘗試更新控制訊息
             return
 
         q = self.queue.setdefault(guild_id, [])
         q.append((audio_url, title, duration))
-
-        # 更新控制訊息 (顯示新加入的歌曲和隊列)
         await self.update_control_message(guild_id, interaction.channel)
-        
-        # 檢查是否需要啟動播放
-        if not vc.is_playing() and not vc.is_paused(): # 如果沒有在播放，也沒有暫停，就啟動
-             asyncio.create_task(self.start_playback(guild_id))
 
-        # 這裡的 followup.send 可以用於發送簡短的確認訊息，或直接依靠 update_control_message
-        # 為了更像截圖，我們依靠 update_control_message 來顯示大部分內容
-        await interaction.followup.send(f"✅ **{title}** 已加入隊列！", ephemeral=True) # 簡單確認，避免主面板被大量訊息刷屏
+        if not vc.is_playing() and not vc.is_paused():
+            asyncio.create_task(self.start_playback(guild_id))
 
-
-    @app_commands.command(name="skip", description="跳過當前歌曲")
-    async def skip(self, interaction: discord.Interaction):
-        await log_command(interaction, "/skip")
-        await interaction.response.defer(ephemeral=False)
-        guild_id = interaction.guild.id
-        vc = self.vc_dict.get(guild_id)
-
-        if not vc or (not vc.is_playing() and not vc.is_paused()):
-            await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
-            return
-        
-        skipped_title = self.now_playing.get(guild_id, ("當前歌曲",0,0))[0]
-        vc.stop() # 呼叫 stop() 會觸發 after 函式
-        await interaction.followup.send(f"⏩ 已跳過 **{skipped_title}**。", ephemeral=True)
-        # update_control_message 會在 after callback 裡觸發
-
-    @app_commands.command(name="stop", description="停止播放並離開語音頻道")
-    async def stop(self, interaction: discord.Interaction):
-        await log_command(interaction, "/stop")
-        await interaction.response.defer(ephemeral=False)
-        guild_id = interaction.guild.id
-        vc = self.vc_dict.get(guild_id)
-        
-        if vc and vc.is_connected():
-            vc.stop() 
-            
-            self.queue.pop(guild_id, None) 
-            self.now_playing.pop(guild_id, None)
-            self.current_volume.pop(guild_id, None)
-            
-            await vc.disconnect()
-            self.vc_dict.pop(guild_id, None)
-            
-            await interaction.followup.send("⏹️ 已停止播放並離開語音頻道。", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 目前沒有連線的語音頻道。", ephemeral=True)
-        
-        await self.update_control_message(guild_id, interaction.channel) # 清空面板
-
-
-    @app_commands.command(name="pause", description="暫停當前播放")
-    async def pause(self, interaction: discord.Interaction):
-        await log_command(interaction, "/pause")
-        await interaction.response.defer(ephemeral=False)
-        guild_id = interaction.guild.id
-        vc = self.vc_dict.get(guild_id)
-
-        if not vc or not vc.is_playing():
-            await interaction.followup.send("❌ 目前沒有播放中的音樂。", ephemeral=True)
-            return
-
-        vc.pause()
-        await interaction.followup.send("⏸️ 已暫停播放。", ephemeral=True)
-        await self.update_control_message(guild_id) # 更新面板狀態
-
-    @app_commands.command(name="resume", description="繼續播放暫停的音樂")
-    async def resume(self, interaction: discord.Interaction):
-        await log_command(interaction, "/resume")
-        await interaction.response.defer(ephemeral=False)
-        guild_id = interaction.guild.id
-        vc = self.vc_dict.get(guild_id)
-
-        if not vc or not vc.is_paused():
-            await interaction.followup.send("❌ 目前沒有暫停的音樂。", ephemeral=True)
-            return
-
-        vc.resume()
-        await interaction.followup.send("▶️ 已繼續播放。", ephemeral=True)
-        await self.update_control_message(guild_id) # 更新面板狀態
-
-    @app_commands.command(name="volume", description="調整音樂音量 (0-100)")
-    @app_commands.describe(level="音量等級 (0-100)")
-    async def set_volume(self, interaction: discord.Interaction, level: app_commands.Range[int, 0, 100]):
-        await log_command(interaction, "/volume")
-        await interaction.response.defer(ephemeral=False)
-        guild_id = interaction.guild.id
-        vc = self.vc_dict.get(guild_id)
-
-        if not vc:
-            await interaction.followup.send("❌ 機器人目前不在語音頻道中。", ephemeral=True)
-            return
-        
-        new_vol_float = level / 100.0
-        
-        # 如果正在播放，立即改變音量
-        if vc.is_playing() and vc.source:
-            vc.source.volume = new_vol_float
-        
-        self.current_volume[guild_id] = new_vol_float
-        await interaction.followup.send(f"🔊 音量已調整為 **{level}%**。", ephemeral=True)
-        await self.update_control_message(guild_id) # 更新面板音量顯示
-
-    # 📌 移除 /歌單 和 /跳至 指令，因為功能已經整合到控制面板或被替代
-    # 如果確實需要 /跳至 作為獨立指令，可以重新實現
+        await interaction.followup.send(f"✅ **{title}** 已加入隊列！", ephemeral=True)
 # =========================
 # ⚡ 錯誤處理和事件監聽
 # =========================
