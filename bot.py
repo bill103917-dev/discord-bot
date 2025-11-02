@@ -18,6 +18,7 @@ from flask import Flask, session, request, render_template, redirect, url_for, j
 from discord.app_commands import checks
 from discord.app_commands import Choice
 import json 
+from yt_dlp import YoutubeDL
 import functools
 from pytube.exceptions import AgeRestrictedError # <-- 更改 AgeRestrictedError 的匯入路徑
 import psycopg2 
@@ -1216,12 +1217,31 @@ class VoiceCog(commands.Cog):
             await vc.move_to(channel)
         self.vc_dict[guild_id] = vc
 
+        # ------------------------
+        # 使用 yt-dlp 處理連結或關鍵字
+        # ------------------------
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'noplaylist': True,
+            'default_search': 'ytsearch1'  # 搜尋第一個結果
+        }
+
         try:
-            audio_url, title, duration = await self.extract_yt_dlp(query)
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if 'entries' in info:  # 關鍵字搜尋會回傳 entries
+                    info = info['entries'][0]
+                audio_url = info['url']
+                title = info.get('title', '未知曲目')
+                duration = info.get('duration', 0)
         except Exception as e:
             await interaction.followup.send(f"❌ 取得音訊失敗: {e}", ephemeral=True)
             return
 
+        # ------------------------
+        # 加入播放隊列
+        # ------------------------
         q = self.queue.setdefault(guild_id, [])
         q.append((audio_url, title, duration))
         await self.update_control_message(guild_id, interaction.channel)
