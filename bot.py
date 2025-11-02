@@ -1092,10 +1092,17 @@ class VoiceCog(commands.Cog):
         if now_playing_info:
             title, total_duration, _ = now_playing_info
             vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
-            embed.add_field(name="現在播放", value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%", inline=False
-                        title = info.get('title', '未知曲目')
-            duration = info.get('duration', 0)
-            return audio_url, title, duration
+            # 關鍵：把括號補上，單獨完成 add_field
+            embed.add_field(
+                name="現在播放",
+                value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%",
+                inline=False
+            )
+
+        # 這裡才是 yt-dlp 提取後的資訊
+        title = info.get('title', '未知曲目')
+        duration = info.get('duration', 0)
+        return audio_url, title, duration
 
     # =====================
     # 播放控制
