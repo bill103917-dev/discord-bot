@@ -801,7 +801,7 @@ class SupportCog(commands.Cog):
         
         # 1. 訊息內容 (用於 @ 管理員)
         # 這裡 @ user 是 @ 伺服器內成員，但由於此訊息來自 DM，我們主要依靠 Embed 內容
-        message_content = f"**<@{target_guild.owner_id}> 或任何管理員請注意：有新的用戶問題**" 
+        message_content = f"**<@&1227938559130861578> 請注意：有新的用戶問題**" 
         
         # 2. Embed 內容
         embed = discord.Embed(
