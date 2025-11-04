@@ -20,7 +20,7 @@ from discord.app_commands import Choice
 import json 
 from yt_dlp import YoutubeDL
 import functools
-from yt_dlp import AgeRestrictedError # 修正：直接從 yt_dlp 匯入
+from yt_dlp.utils import DownloadError # 修正：使用 DownloadError 處理所有下載相關錯誤
 import psycopg2 
 import discord
 from discord.ext.commands.errors import CommandError
