@@ -803,7 +803,7 @@ class SupportCog(commands.Cog):
                  await message.channel.send("❌ 處理您的請求失敗，請稍後再試。")
             
     # -----------------------------------------------------
-    # 核心轉發邏輯函式 (修改此處以發送 @提及)
+    # 核心轉發邏輯函式 (修改此處以新增「打開連結」按鈕)
     # -----------------------------------------------------
     async def process_forward(self, user: discord.User, question: str, guild_id_str: str):
         
@@ -845,7 +845,27 @@ class SupportCog(commands.Cog):
         embed.set_footer(text=f"請點擊下方按鈕進行回覆或標記為已處理。")
         
         try:
+            # 1. 偵測訊息中的連結
+            # 使用正則表達式尋找任何 http(s):// 開頭的連結
+            # 考慮到用戶的訊息可能包含多個連結，我們只取第一個
+            url_pattern = r"(https?://[^\s]+)"
+            match = re.search(url_pattern, question)
+            
+            # 2. 創建 View
             view = ReplyView(user.id, question, self)
+
+            # 3. 如果找到連結，在 ReplyView 中新增一個 URL 按鈕
+            if match:
+                first_url = match.group(0).strip()
+                # 確保連結按鈕是在 View 的其他按鈕之前或之後
+                # 這裡將其放在 ReplyView 內部按鈕之後
+                view.add_item(discord.ui.Button(
+                    label="🔗 打開用戶提供的連結",
+                    style=discord.ButtonStyle.link,
+                    url=first_url
+                ))
+            
+            # 4. 發送訊息
             await target_channel.send(content=message_content, embed=embed, view=view)
             
         except discord.Forbidden:
