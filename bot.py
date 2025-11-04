@@ -696,11 +696,9 @@ class SupportCog(commands.Cog):
     # -----------------------------------------------------
     # 🌟 新增指令：手動叫出伺服器選擇選單 🌟
     # -----------------------------------------------------
-    # 允許在私訊中使用的指令
     @app_commands.command(name="support", description="在私訊中手動呼叫伺服器選擇選單")
-    @app_commands.guild_only(False) # 允許在全球範圍使用 (包括私訊)
     async def support_command(self, interaction: discord.Interaction):
-        # 檢查是否在私訊頻道中
+        # 檢查是否在私訊頻道中 (保留這個檢查來確保邏輯正確)
         if interaction.guild is not None or not isinstance(interaction.channel, discord.DMChannel):
             await interaction.response.send_message("❌ 這個指令只能在和機器人的私訊頻道中使用。", ephemeral=True)
             return
@@ -725,12 +723,9 @@ class SupportCog(commands.Cog):
             color=discord.Color.blue()
         )
         
-        # 確保 ServerSelectView Class 已在上方定義
         view = ServerSelectView(self.bot, user_id, self)
         
-        # 使用 respond 傳送訊息
         await interaction.response.send_message(embed=initial_embed, view=view)
-
 
     # -----------------------------------------------------
     # 監聽器：處理私訊訊息 (核心功能入口)
