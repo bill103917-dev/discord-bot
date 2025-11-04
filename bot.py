@@ -406,7 +406,7 @@ import os
 # ----------------------------------------------------------------------
 
 CONFIG_FILE = "support_config.json" 
-SUPPORT_CHANNEL_CONFIG: Dict[int, int] = {} # {guild_id: channel_id}
+SUPPORT_CHANNEL_CONFIG: Dict[int, Tuple[int, Optional[int]]] = {} 
 USER_TARGET_GUILD: Dict[int, int] = {} # {user_id: guild_id}
 
 def load_support_config():
@@ -438,7 +438,7 @@ load_support_config()
 
 
 # ----------------------------------------------------------------------
-# 🌟 Modal: 管理員填寫回覆的介面 🌟
+# 🌟 Modal: 管理員填寫回覆的介面 (允許多次回覆) 🌟
 # ----------------------------------------------------------------------
 
 class ReplyModal(ui.Modal, title='回覆用戶問題'):
@@ -447,7 +447,7 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         self.original_user_id = original_user_id
         self.original_content = original_content
         self.cog = cog
-        self.admin_message = admin_message # 用於回覆後更新管理員訊息
+        self.admin_message = admin_message # 用於回覆後更新管理員訊息的狀態
 
     response_title = ui.TextInput(
         label='回覆標題 (可選)',
@@ -466,32 +466,47 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         user = self.cog.bot.get_user(self.original_user_id)
-            
+        
+        # --- 🌟 修改用戶回覆訊息格式 🌟 ---
+        admin_name = interaction.user.global_name or interaction.user.name
+        reply_content = str(self.response_content)
+        
         embed = discord.Embed(
             title=str(self.response_title).strip() if self.response_title else '管理員回覆',
-            description=str(self.response_content),
+            description=f"<@{interaction.user.id}> 說了：\n>>> {reply_content}", # 使用提及和 Block Quote 樣式
             color=discord.Color.green()
         )
         embed.add_field(name="您的原問題", value=f"```\n{self.original_content[:1000]}{'...' if len(self.original_content) > 1000 else ''}\n```", inline=False)
-        embed.set_footer(text=f"由 {interaction.user.name} ({interaction.user.id}) 回覆")
+        embed.set_footer(text=f"這是第 {len(self.admin_message.components)} 次回覆。") # 使用 components 數量作為計數參考
 
         try:
             if user:
                 await user.send(embed=embed)
                 await interaction.followup.send(f"✅ 回覆已成功發送給 {user.name}。", ephemeral=True)
                 
-                # 回覆成功後，自動更新管理員的訊息為「已回覆」
+                # --- 🌟 修改管理員訊息狀態 🌟 ---
                 if self.admin_message:
-                    # 複製並更新原 Embed 訊息
                     original_embed = self.admin_message.embeds[0]
-                    original_embed.title = f"✅ 已回覆 - 來自 {user.name} 的問題"
+                    # 查找現有的回覆計數，如果找不到則從 0 開始
+                    reply_count = sum(1 for field in original_embed.fields if field.name.startswith("最後回覆"))
+                    
+                    # 更新主標題
+                    original_embed.title = f"💬 正在處理 - 來自 {user.name} 的問題"
                     original_embed.color = discord.Color.blue()
                     
-                    # 創建新的 View，只有一個「已回覆」按鈕
-                    finished_view = ui.View(timeout=None)
-                    finished_view.add_item(ui.Button(label='已完成回覆', style=discord.ButtonStyle.secondary, disabled=True))
+                    # 移除舊的「最後回覆」欄位
+                    original_embed.fields = [f for f in original_embed.fields if not f.name.startswith("最後回覆")]
                     
-                    await self.admin_message.edit(embed=original_embed, view=finished_view)
+                    # 新增新的「最後回覆」欄位
+                    original_embed.add_field(
+                        name=f"最後回覆 ({reply_count + 1} 次)", 
+                        value=f"由 <@{interaction.user.id}> 於 <t:{int(interaction.created_at.timestamp())}:R> 回覆",
+                        inline=False
+                    )
+                    
+                    # **關鍵：不移除 View，保持按鈕可用**
+                    await self.admin_message.edit(embed=original_embed)
+
             else:
                  await interaction.followup.send("❌ 無法找到原始用戶或機器人無法私訊該用戶。", ephemeral=True)
             
@@ -501,8 +516,9 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
             await interaction.followup.send(f"❌ 發送回覆時發生錯誤: {e}", ephemeral=True)
 
 
+
 # ----------------------------------------------------------------------
-# 🌟 View: 管理員回覆按鈕 (新增停止回覆按鈕) 🌟
+# 🌟 View: 管理員回覆按鈕 (保持按鈕在位) 🌟
 # ----------------------------------------------------------------------
 
 class ReplyView(ui.View):
@@ -520,7 +536,7 @@ class ReplyView(ui.View):
              await interaction.response.send_message("❌ 您沒有權限回覆此問題。", ephemeral=True)
              return
              
-        # 將訊息傳遞給 Modal，以便在回覆後更新
+        # 將訊息傳遞給 Modal
         modal = ReplyModal(self.original_user_id, self.original_content, self.cog, admin_message=interaction.message)
         await interaction.response.send_modal(modal)
 
@@ -530,20 +546,17 @@ class ReplyView(ui.View):
              await interaction.response.send_message("❌ 您沒有權限操作此按鈕。", ephemeral=True)
              return
         
-        # 1. 更新原訊息的 Embed 狀態
         user = self.cog.bot.get_user(self.original_user_id)
         original_embed = interaction.message.embeds[0]
         original_embed.title = f"🛑 已處理 - 來自 {user.name} 的問題"
         original_embed.color = discord.Color.dark_grey()
         
-        # 2. 移除 View
+        # 移除 View，標記為最終狀態
         finished_view = ui.View(timeout=None)
         finished_view.add_item(ui.Button(label=f'已由 {interaction.user.name} 標記為處理完畢', style=discord.ButtonStyle.secondary, disabled=True))
         
-        # 3. 編輯訊息
         await interaction.response.edit_message(embed=original_embed, view=finished_view)
         await interaction.followup.send("✅ 該問題已標記為處理完畢，並停止了回覆按鈕。", ephemeral=True)
-
 
 # ----------------------------------------------------------------------
 # 🌟 View: 用戶伺服器選擇介面 (與先前相同) 🌟
@@ -690,24 +703,33 @@ class SupportCog(commands.Cog):
     # -----------------------------------------------------
     # 🌟 指令：設定管理員回覆頻道 🌟
     # -----------------------------------------------------
-    @app_commands.command(name="set_support_channel", description="[管理員] 設定用戶問題轉發頻道")
+    # -----------------------------------------------------
+    # 🌟 指令：設定管理員回覆頻道 (新增 role 參數) 🌟
+    # -----------------------------------------------------
+    @app_commands.command(name="set_support_channel", description="[管理員] 設定用戶問題轉發頻道與通知角色")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(channel="用戶的問題訊息將會被轉發到這個頻道")
-    async def set_support_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    @app_commands.describe(
+        channel="用戶的問題訊息將會被轉發到這個頻道。",
+        role="可選：當有新問題時，要@提及哪個角色來通知管理員。"
+    )
+    async def set_support_channel(self, interaction: discord.Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True)
             return
 
         guild_id = interaction.guild.id
-        channel_id = channel.id
-
-        self.support_config[guild_id] = channel_id
+        
+        # 儲存 (頻道ID, 角色ID) 的 tuple
+        role_id = role.id if role else None
+        self.support_config[guild_id] = (channel.id, role_id)
         await self.save_state_async() 
+        
+        notification_text = f"通知角色：{role.mention}" if role else "無通知角色。"
 
         embed = discord.Embed(
-            title="✅ 問題轉發頻道設定成功",
-            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。",
+            title="✅ 問題轉發設定成功",
+            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。\n\n{notification_text}",
             color=discord.Color.green()
         )
         await interaction.response.send_message(embed=embed, ephemeral=False)
@@ -781,29 +803,40 @@ class SupportCog(commands.Cog):
                  await message.channel.send("❌ 處理您的請求失敗，請稍後再試。")
             
     # -----------------------------------------------------
-    # 核心轉發邏輯函式 (修改此處以符合新的訊息格式)
+    # 核心轉發邏輯函式 (修改此處以發送 @提及)
     # -----------------------------------------------------
     async def process_forward(self, user: discord.User, question: str, guild_id_str: str):
         
         target_guild_id = int(guild_id_str)
         target_guild = self.bot.get_guild(target_guild_id)
 
-        support_channel_id = self.support_config.get(target_guild_id)
+        # 🌟 獲取 (頻道ID, 角色ID) 🌟
+        config_data = self.support_config.get(target_guild_id)
+        
+        if not config_data:
+            # 伺服器未設定，清理狀態並退出
+            self.user_target_guild.pop(user.id, None)
+            asyncio.create_task(self.save_state_async())
+            await user.send(f"❌ 伺服器 **{target_guild.name}** 尚未設定管理頻道，請重新選擇伺服器。")
+            return
+            
+        support_channel_id, role_id = config_data # 解包數據
         target_channel = target_guild.get_channel(support_channel_id)
 
         if not target_channel or not isinstance(target_channel, discord.TextChannel):
+            # 頻道無效，清理狀態並退出
             self.user_target_guild.pop(user.id, None)
             asyncio.create_task(self.save_state_async())
             await user.send(f"❌ 伺服器 **{target_guild.name}** 設定的頻道無效或已被刪除，請重新選擇伺服器。")
             return
             
-        # 🌟 根據您的要求修改格式 🌟
+        # 🌟 設置 @提及 內容 🌟
+        message_content = ""
+        if role_id:
+            message_content = f"<@&{role_id}>：有新的用戶問題" # @角色
+        else:
+            message_content = f"**<@{target_guild.owner_id}> 或任何管理員請注意：有新的用戶問題**" 
         
-        # 1. 訊息內容 (用於 @ 管理員)
-        # 這裡 @ user 是 @ 伺服器內成員，但由於此訊息來自 DM，我們主要依靠 Embed 內容
-        message_content = f"**<@&1227938559130861578> 請注意：有新的用戶問題**" 
-        
-        # 2. Embed 內容
         embed = discord.Embed(
             title=f"❓ 來自 {user.name} 的問題",
             description=f"**發送者:** <@{user.id}> ({user.name}#{user.discriminator})\n**伺服器:** `{target_guild.name}` ({target_guild_id})\n\n**訊息內容:**\n```\n{question}\n```\n",
@@ -813,8 +846,6 @@ class SupportCog(commands.Cog):
         
         try:
             view = ReplyView(user.id, question, self)
-            
-            # 發送訊息：包含 @ 提醒、Embed 和按鈕
             await target_channel.send(content=message_content, embed=embed, view=view)
             
         except discord.Forbidden:
