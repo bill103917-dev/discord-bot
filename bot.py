@@ -1414,6 +1414,8 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
     
+    await self.bot.tree.sync()
+
     # ⚡ 持久化 View 處理 ⚡
     support_cog_instance = bot.get_cog("SupportCog")
     voice_cog_instance = bot.get_cog("VoiceCog")
