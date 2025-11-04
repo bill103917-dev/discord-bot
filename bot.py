@@ -1871,11 +1871,7 @@ async def on_ready():
     print(f'{bot.user.name} 已經成功上線，狀態已設定完成！')
     
 
-    try:
-        await bot.tree.sync()
-        print("✅ 指令已同步！")
-    except Exception as e:
-        print(f"❌ 指令同步失敗: {e}")
+
 
 
 
