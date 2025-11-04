@@ -1,6 +1,6 @@
-使用［voice］
+#使用［voice］
 #aacord 機器人核心學功NdLScord.py 及其所有語音依賴
-一次性安裝
+#一次性安裝
 discord.py[voice]==2.3.2
 aiohttp
 psycopg2-binary
