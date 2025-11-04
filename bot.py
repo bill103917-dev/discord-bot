@@ -391,6 +391,386 @@ class RPSView(discord.ui.View):
             await interaction.followup.send(f"✅ 你已選擇 **{choice}**。等待 {player_waiting} 出拳...", ephemeral=True)
 
 
+import discord
+from discord.ext import commands
+from discord import ui, app_commands, Interaction
+from typing import Dict, Tuple, Optional, List
+import json
+import asyncio
+import os 
+# 確保您的 bot.py 已經有 commands.Bot, ui, asyncio, json, os 的 import
+
+
+# ----------------------------------------------------------------------
+# 🌟 輔助：配置和狀態管理 (全域變數和函式) 🌟
+# ----------------------------------------------------------------------
+
+CONFIG_FILE = "support_config.json" 
+SUPPORT_CHANNEL_CONFIG: Dict[int, int] = {} # {guild_id: channel_id}
+USER_TARGET_GUILD: Dict[int, int] = {} # {user_id: guild_id}
+
+def load_support_config():
+    """從文件加載配置和用戶狀態"""
+    global SUPPORT_CHANNEL_CONFIG, USER_TARGET_GUILD
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            data = json.load(f)
+            SUPPORT_CHANNEL_CONFIG = {int(k): v for k, v in data.get("channels", {}).items()}
+            USER_TARGET_GUILD = {int(k): v for k, v in data.get("targets", {}).items()}
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"❌ 加載支援配置時發生錯誤: {e}")
+
+def save_support_config():
+    """將配置和用戶狀態儲存到文件"""
+    try:
+        data = {
+            "channels": {str(k): v for k, v in SUPPORT_CHANNEL_CONFIG.items()},
+            "targets": {str(k): v for k, v in USER_TARGET_GUILD.items()}
+        }
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"❌ 儲存支援配置時發生錯誤: {e}")
+
+load_support_config()
+
+
+# ----------------------------------------------------------------------
+# 🌟 Modal: 管理員填寫回覆的介面 🌟
+# ----------------------------------------------------------------------
+
+class ReplyModal(ui.Modal, title='回覆用戶問題'):
+    def __init__(self, original_user_id: int, original_content: str, cog: 'SupportCog', admin_message: discord.Message = None):
+        super().__init__(timeout=None)
+        self.original_user_id = original_user_id
+        self.original_content = original_content
+        self.cog = cog
+        self.admin_message = admin_message # 用於回覆後更新管理員訊息
+
+    response_title = ui.TextInput(
+        label='回覆標題 (可選)',
+        style=discord.TextStyle.short,
+        required=False,
+        max_length=100
+    )
+
+    response_content = ui.TextInput(
+        label='回覆內容',
+        style=discord.TextStyle.long,
+        required=True,
+        max_length=1500
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user = self.cog.bot.get_user(self.original_user_id)
+            
+        embed = discord.Embed(
+            title=str(self.response_title).strip() if self.response_title else '管理員回覆',
+            description=str(self.response_content),
+            color=discord.Color.green()
+        )
+        embed.add_field(name="您的原問題", value=f"```\n{self.original_content[:1000]}{'...' if len(self.original_content) > 1000 else ''}\n```", inline=False)
+        embed.set_footer(text=f"由 {interaction.user.name} ({interaction.user.id}) 回覆")
+
+        try:
+            if user:
+                await user.send(embed=embed)
+                await interaction.followup.send(f"✅ 回覆已成功發送給 {user.name}。", ephemeral=True)
+                
+                # 回覆成功後，自動更新管理員的訊息為「已回覆」
+                if self.admin_message:
+                    # 複製並更新原 Embed 訊息
+                    original_embed = self.admin_message.embeds[0]
+                    original_embed.title = f"✅ 已回覆 - 來自 {user.name} 的問題"
+                    original_embed.color = discord.Color.blue()
+                    
+                    # 創建新的 View，只有一個「已回覆」按鈕
+                    finished_view = ui.View(timeout=None)
+                    finished_view.add_item(ui.Button(label='已完成回覆', style=discord.ButtonStyle.secondary, disabled=True))
+                    
+                    await self.admin_message.edit(embed=original_embed, view=finished_view)
+            else:
+                 await interaction.followup.send("❌ 無法找到原始用戶或機器人無法私訊該用戶。", ephemeral=True)
+            
+        except discord.Forbidden:
+            await interaction.followup.send(f"❌ 無法私訊該用戶 ({user.name})，可能因為用戶已封鎖 Bot 或關閉了私訊。", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ 發送回覆時發生錯誤: {e}", ephemeral=True)
+
+
+# ----------------------------------------------------------------------
+# 🌟 View: 管理員回覆按鈕 (新增停止回覆按鈕) 🌟
+# ----------------------------------------------------------------------
+
+class ReplyView(ui.View):
+    def __init__(self, original_user_id: int, original_content: str, cog: 'SupportCog'):
+        super().__init__(timeout=None) 
+        self.original_user_id = original_user_id
+        self.original_content = original_content
+        self.reply_button.custom_id = f"reply_to_{original_user_id}" 
+        self.stop_button.custom_id = f"stop_reply_{original_user_id}"
+        self.cog = cog
+
+    @ui.button(label='回覆問題', style=discord.ButtonStyle.success, custom_id="reply_button", emoji="💬")
+    async def reply_button(self, interaction: discord.Interaction, button: ui.Button):
+        if not interaction.user.guild_permissions.manage_guild:
+             await interaction.response.send_message("❌ 您沒有權限回覆此問題。", ephemeral=True)
+             return
+             
+        # 將訊息傳遞給 Modal，以便在回覆後更新
+        modal = ReplyModal(self.original_user_id, self.original_content, self.cog, admin_message=interaction.message)
+        await interaction.response.send_modal(modal)
+
+    @ui.button(label='停止回覆/已處理', style=discord.ButtonStyle.danger, custom_id="stop_button", emoji="🛑")
+    async def stop_button(self, interaction: discord.Interaction, button: ui.Button):
+        if not interaction.user.guild_permissions.manage_guild:
+             await interaction.response.send_message("❌ 您沒有權限操作此按鈕。", ephemeral=True)
+             return
+        
+        # 1. 更新原訊息的 Embed 狀態
+        user = self.cog.bot.get_user(self.original_user_id)
+        original_embed = interaction.message.embeds[0]
+        original_embed.title = f"🛑 已處理 - 來自 {user.name} 的問題"
+        original_embed.color = discord.Color.dark_grey()
+        
+        # 2. 移除 View
+        finished_view = ui.View(timeout=None)
+        finished_view.add_item(ui.Button(label=f'已由 {interaction.user.name} 標記為處理完畢', style=discord.ButtonStyle.secondary, disabled=True))
+        
+        # 3. 編輯訊息
+        await interaction.response.edit_message(embed=original_embed, view=finished_view)
+        await interaction.followup.send("✅ 該問題已標記為處理完畢，並停止了回覆按鈕。", ephemeral=True)
+
+
+# ----------------------------------------------------------------------
+# 🌟 View: 用戶伺服器選擇介面 (與先前相同) 🌟
+# ----------------------------------------------------------------------
+
+class ServerSelectView(ui.View):
+    def __init__(self, bot: commands.Bot, user_id: int, cog: 'SupportCog'):
+        super().__init__(timeout=None) 
+        self.bot = bot
+        self.user_id = user_id
+        self.cog = cog
+        
+        self.reset_button.custom_id = f"support_reset_{user_id}"
+        self.server_select.custom_id = f"support_select_{user_id}"
+        
+        self._load_options()
+        
+    def _load_options(self):
+        self.server_select.options.clear()
+        user = self.bot.get_user(self.user_id)
+        if not user:
+             self.server_select.placeholder = "載入中..."
+             return
+        shared_guilds: List[discord.Guild] = [
+            guild for guild in self.bot.guilds 
+            if guild.get_member(self.user_id) is not None
+        ]
+        if not shared_guilds:
+            self.server_select.placeholder = "❌ 找不到共享伺服器"
+            self.server_select.disabled = True
+            return
+
+        options: List[discord.SelectOption] = []
+        for guild in shared_guilds:
+            is_configured = guild.id in self.cog.support_config
+            label = guild.name
+            description = "未設定轉發頻道" if not is_configured else None
+            is_disabled = not is_configured 
+
+            options.append(
+                discord.SelectOption(
+                    label=label, 
+                    value=str(guild.id),
+                    description=description,
+                    default=False,
+                    disabled=is_disabled
+                )
+            )
+            
+        self.server_select.options = options
+        self.server_select.placeholder = "請選擇您要發送問題的伺服器"
+        self.server_select.disabled = False
+        
+
+    @ui.select() 
+    async def server_select(self, interaction: discord.Interaction, select: ui.Select):
+        await interaction.response.defer(ephemeral=True)
+        selected_guild_id = int(select.values[0])
+        selected_guild = self.bot.get_guild(selected_guild_id)
+        
+        if not selected_guild or selected_guild_id not in self.cog.support_config:
+            await interaction.followup.send("❌ 選擇的伺服器無效或未設定管理頻道，請重新選擇。", ephemeral=True)
+            return
+
+        self.cog.user_target_guild[self.user_id] = selected_guild_id
+        asyncio.create_task(self.cog.save_state_async())
+        
+        self.server_select.disabled = True
+        self.reset_button.disabled = False
+        
+        success_embed = discord.Embed(
+            title="✅ 設定成功！",
+            description=f"您接下來在這裡傳送的訊息將會轉發到 **{selected_guild.name}** 管理員所設定的頻道。",
+            color=discord.Color.green()
+        )
+        success_embed.set_footer(text="若要更改伺服器，請點擊下方的「重新選擇」按鈕。")
+        
+        try:
+            await interaction.message.edit(embed=success_embed, view=self)
+            await interaction.followup.send("伺服器已設定，您現在可以直接輸入問題內容。", ephemeral=True)
+        except Exception as e:
+            print(f"更新私訊介面失敗: {e}")
+
+    @ui.button(label='重新選擇', style=discord.ButtonStyle.secondary, disabled=False, custom_id="reset_button")
+    async def reset_button(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        self.cog.user_target_guild.pop(self.user_id, None)
+        asyncio.create_task(self.cog.save_state_async())
+        
+        self.server_select.disabled = False
+        button.disabled = True
+        self._load_options() 
+        
+        initial_embed = discord.Embed(
+            title="請選擇要聯繫管理員的伺服器",
+            description="請從下方的下拉選單中選擇您要發送問題的伺服器。",
+            color=discord.Color.blue()
+        )
+
+        try:
+            await interaction.message.edit(embed=initial_embed, view=self)
+            await interaction.followup.send("✅ 已清除目標伺服器，請重新選擇。", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"介面重置失敗: {e}", ephemeral=True)
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+
+# ----------------------------------------------------------------------
+# 🌟 Cog: 支援系統核心模組 (主要修改：轉發訊息格式) 🌟
+# ----------------------------------------------------------------------
+
+class SupportCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.support_config = SUPPORT_CHANNEL_CONFIG
+        self.user_target_guild = USER_TARGET_GUILD
+    
+    # --- 異步儲存狀態 ---
+    async def save_state_async(self):
+        await asyncio.to_thread(save_support_config)
+
+
+    # -----------------------------------------------------
+    # 🌟 指令：設定管理員回覆頻道 🌟
+    # -----------------------------------------------------
+    @app_commands.command(name="set_support_channel", description="[管理員] 設定用戶問題轉發頻道")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(channel="用戶的問題訊息將會被轉發到這個頻道")
+    async def set_support_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True)
+            return
+
+        guild_id = interaction.guild.id
+        channel_id = channel.id
+
+        self.support_config[guild_id] = channel_id
+        await self.save_state_async() 
+
+        embed = discord.Embed(
+            title="✅ 問題轉發頻道設定成功",
+            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=False)
+
+
+    # -----------------------------------------------------
+    # 監聽器：處理私訊訊息 (核心功能入口)
+    # -----------------------------------------------------
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or message.guild is not None:
+            return
+
+        user_id = message.author.id
+        target_guild_id = self.user_target_guild.get(user_id)
+        
+        if target_guild_id:
+            target_guild = self.bot.get_guild(target_guild_id)
+            if target_guild:
+                await self.process_forward(message.author, message.content, str(target_guild_id))
+            else:
+                self.user_target_guild.pop(user_id, None)
+                asyncio.create_task(self.save_state_async())
+                await message.channel.send("❌ 您之前選擇的伺服器無效或機器人已退出，請重新發送訊息來設置。")
+                
+        else:
+            initial_embed = discord.Embed(
+                title="選擇要聯繫管理員的伺服器",
+                description="請從下方的下拉選單中選擇您要發送問題的伺服器。**只有設定了轉發頻道的伺服器才能被選擇。**",
+                color=discord.Color.blue()
+            )
+            
+            view = ServerSelectView(self.bot, user_id, self)
+            
+            try:
+                await message.channel.send(embed=initial_embed, view=view)
+            except Exception as e:
+                 await message.channel.send("❌ 處理您的請求失敗，請稍後再試。")
+            
+    # -----------------------------------------------------
+    # 核心轉發邏輯函式 (修改此處以符合新的訊息格式)
+    # -----------------------------------------------------
+    async def process_forward(self, user: discord.User, question: str, guild_id_str: str):
+        
+        target_guild_id = int(guild_id_str)
+        target_guild = self.bot.get_guild(target_guild_id)
+
+        support_channel_id = self.support_config.get(target_guild_id)
+        target_channel = target_guild.get_channel(support_channel_id)
+
+        if not target_channel or not isinstance(target_channel, discord.TextChannel):
+            self.user_target_guild.pop(user.id, None)
+            asyncio.create_task(self.save_state_async())
+            await user.send(f"❌ 伺服器 **{target_guild.name}** 設定的頻道無效或已被刪除，請重新選擇伺服器。")
+            return
+            
+        # 🌟 根據您的要求修改格式 🌟
+        
+        # 1. 訊息內容 (用於 @ 管理員)
+        # 這裡 @ user 是 @ 伺服器內成員，但由於此訊息來自 DM，我們主要依靠 Embed 內容
+        message_content = f"**<@{target_guild.owner_id}> 或任何管理員請注意：有新的用戶問題**" 
+        
+        # 2. Embed 內容
+        embed = discord.Embed(
+            title=f"❓ 來自 {user.name} 的問題",
+            description=f"**發送者:** <@{user.id}> ({user.name}#{user.discriminator})\n**伺服器:** `{target_guild.name}` ({target_guild_id})\n\n**訊息內容:**\n```\n{question}\n```\n",
+            color=discord.Color.gold()
+        )
+        embed.set_footer(text=f"請點擊下方按鈕進行回覆或標記為已處理。")
+        
+        try:
+            view = ReplyView(user.id, question, self)
+            
+            # 發送訊息：包含 @ 提醒、Embed 和按鈕
+            await target_channel.send(content=message_content, embed=embed, view=view)
+            
+        except discord.Forbidden:
+            await user.send("❌ 機器人沒有權限在該伺服器的管理頻道發送訊息。")
+        except Exception as e:
+            await user.send(f"❌ 轉發時發生未知錯誤: {e}")
+
+
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1321,7 +1701,9 @@ import os
 async def on_ready():
 
     try:
-        # 同步到所有伺服器
+        bot.add_view(ServerSelectView(bot, 0, support_cog_instance))
+        bot.add_view(ReplyView(0, "", support_cog_instance))
+
         synced_count = 0
         for guild in bot.guilds:
             try:
@@ -1393,6 +1775,7 @@ async def on_ready():
         await bot.add_cog(LogsCog(bot))
         await bot.add_cog(PingCog(bot))
         await bot.add_cog(HelpCog(bot))
+        await bot.add_cog(SupportCog(bot))
         await bot.add_cog(VoiceCog(bot))
     except Exception as e:
         print(f"❌ 載入 Cog 失敗: {e}")
