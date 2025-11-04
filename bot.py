@@ -987,6 +987,28 @@ class ModerationCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ 踢出失敗: {e}", ephemeral=True)
 
+    
+    # 🌟 請使用這個新的指令來清除舊指令 🌟
+    @app_commands.command(name="cleanup_sync", description="清除所有舊指令並重新同步。僅限 Bot Owner 使用。")
+    @app_commands.default_permissions(manage_guild=True) # 限制擁有管理伺服器權限的人才能使用
+    async def cleanup_sync(self, interaction: discord.Interaction):
+        # ⚠️ 安全檢查：確保只有機器人的擁有者能執行此操作
+        if interaction.user.id != self.bot.owner_id:
+            await interaction.response.send_message("❌ 您沒有權限執行此操作。", ephemeral=True)
+            return
+            
+        await interaction.response.defer(ephemeral=True) # 讓指令在後台執行
+        
+        # 1. 清除所有已註冊的全局指令
+        self.bot.tree.clear_commands(guild=None) 
+        
+        # 2. 重新同步（這會將目前記憶體中正確的指令清單同步上去）
+        await self.bot.tree.sync() 
+
+        await interaction.followup.send("✅ 所有舊指令已清除並重新同步完成。請在 Discord 中檢查。", ephemeral=True)
+        print("✅ 指令已強制清除並重新同步。")
+
+
     @app_commands.command(name="封鎖", description="將成員封鎖（需要權限）")
     @checks.has_permissions(ban_members=True)
     async def ban_member(self, interaction: discord.Interaction, user_id: str, reason: Optional[str] = "無"):
