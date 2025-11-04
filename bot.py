@@ -2208,7 +2208,7 @@ if __name__ == "__main__":
     try:
         bot.add_cog(UtilityCog(bot))
         bot.add_cog(ModerationCog(bot)) 
-        bot.add_cog(ReactionRoleCog(bot))
+        bot.add_cog(ReactionRoleCog(bot)) 
         bot.add_cog(FunCog(bot))
         bot.add_cog(LogsCog(bot))
         bot.add_cog(PingCog(bot))
