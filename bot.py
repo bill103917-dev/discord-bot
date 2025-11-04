@@ -693,6 +693,44 @@ class SupportCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=False)
 
+    # -----------------------------------------------------
+    # 🌟 新增指令：手動叫出伺服器選擇選單 🌟
+    # -----------------------------------------------------
+    # 允許在私訊中使用的指令
+    @app_commands.command(name="support", description="在私訊中手動呼叫伺服器選擇選單")
+    @app_commands.guild_only(False) # 允許在全球範圍使用 (包括私訊)
+    async def support_command(self, interaction: discord.Interaction):
+        # 檢查是否在私訊頻道中
+        if interaction.guild is not None or not isinstance(interaction.channel, discord.DMChannel):
+            await interaction.response.send_message("❌ 這個指令只能在和機器人的私訊頻道中使用。", ephemeral=True)
+            return
+
+        user_id = interaction.user.id
+        
+        # 檢查用戶是否已經有目標伺服器
+        if self.user_target_guild.get(user_id):
+            target_guild_id = self.user_target_guild[user_id]
+            target_guild = self.bot.get_guild(target_guild_id)
+            if target_guild:
+                await interaction.response.send_message(
+                    f"✅ 您目前已設定將問題轉發至 **{target_guild.name}**。請直接輸入您的問題。",
+                    ephemeral=True
+                )
+                return
+
+        # 如果沒有，顯示選擇介面
+        initial_embed = discord.Embed(
+            title="選擇要聯繫管理員的伺服器",
+            description="請從下方的下拉選單中選擇您要發送問題的伺服器。**只有設定了轉發頻道的伺服器才能被選擇。**",
+            color=discord.Color.blue()
+        )
+        
+        # 確保 ServerSelectView Class 已在上方定義
+        view = ServerSelectView(self.bot, user_id, self)
+        
+        # 使用 respond 傳送訊息
+        await interaction.response.send_message(embed=initial_embed, view=view)
+
 
     # -----------------------------------------------------
     # 監聽器：處理私訊訊息 (核心功能入口)
