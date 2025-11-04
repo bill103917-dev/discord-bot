@@ -1807,19 +1807,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
 
-    # 確保所有 Cog 已經被加載
-    try:
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(ModerationCog(bot)) 
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(LogsCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot)) # 確保 VoiceCog 在此處加載
-    except Exception as e:
-        print(f"❌ 載入 Cog 失敗: {e}")
+
         
     # ⚡ 持久化 View 處理 ⚡
     # 必須在 Cog 被 add 後才能從 bot.get_cog 獲取實例
@@ -2218,10 +2206,16 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        # 先啟動 Web 服務的背景線程
+        bot.add_cog(UtilityCog(bot))
+        bot.add_cog(ModerationCog(bot)) 
+        bot.add_cog(ReactionRoleCog(bot))
+        bot.add_cog(FunCog(bot))
+        bot.add_cog(LogsCog(bot))
+        bot.add_cog(PingCog(bot))
+        bot.add_cog(HelpCog(bot))
+        bot.add_cog(SupportCog(bot))
+        bot.add_cog(VoiceCog(bot))
         keep_web_alive() 
-        # 然後啟動 Discord 機器人
-        # asyncio.run 會創建並運行一個新的事件循環
         asyncio.run(main())
     except KeyboardInterrupt:
         print("機器人已手動關閉。")
