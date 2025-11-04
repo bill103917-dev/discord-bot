@@ -1756,18 +1756,6 @@ async def on_ready():
         bot.add_view(ServerSelectView(bot, 0, support_cog_instance))
         bot.add_view(ReplyView(0, "", support_cog_instance))
 
-        synced_count = 0
-        for guild in bot.guilds:
-            try:
-                bot.tree.copy_global_to(guild=guild)
-                await bot.tree.sync(guild=guild)
-                synced_count += 1
-            except Exception as e:
-                print(f"無法同步到伺服器 {guild.name}: {e}")
-        print(f"已同步 {synced_count} 個伺服器的斜線指令。")
-
-    except Exception as e:
-        print(f"指令同步失敗: {e}")
 
     # ⚡ 持久化 View 處理 ⚡
     # 這裡的關鍵是：我們需要獲取到 VoiceCog 的實例
