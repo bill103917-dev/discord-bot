@@ -1657,19 +1657,29 @@ async def main():
     discord_loop = asyncio.get_running_loop() 
     
     # 🌟 關鍵修改：在啟動前加載所有 Cog
+async def main():
+    global discord_loop
+    discord_loop = asyncio.get_running_loop() 
+    
+    # 🌟 關鍵修改：在啟動前加載所有 Cog (移除 await)
     try:
+        print("正在加載 Cogs...")
         # 傳遞 SPECIAL_USER_IDS 給需要它的 Cog
-        await bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
-        await bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 🌟 修正：傳遞 ID
-        await bot.add_cog(ReactionRoleCog(bot)) 
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 🌟 修正：LogsCog 也需要 ID
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot))
+        
+        # ⚠️ 移除 'await' 關鍵字
+        bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
+        bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
+        bot.add_cog(ReactionRoleCog(bot)) 
+        bot.add_cog(FunCog(bot))
+        bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
+        bot.add_cog(PingCog(bot))
+        bot.add_cog(HelpCog(bot))
+        bot.add_cog(SupportCog(bot))
+        bot.add_cog(VoiceCog(bot))
+        
         print("✅ 所有 Cogs 已成功加載。")
     except Exception as e:
+        # 如果這裡仍然報錯，請務必查看日誌
         print(f"❌ 載入 Cog 失敗: {e}")
 
     # 這裡只啟動機器人
