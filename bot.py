@@ -20,7 +20,7 @@ from discord.app_commands import Choice
 import json 
 from yt_dlp import YoutubeDL
 import functools
-from pytube.exceptions import AgeRestrictedError # <-- 更改 AgeRestrictedError 的匯入路徑
+from yt_dlp.utils import AgeRestrictedError # 使用 yt_dlp 的錯誤
 import psycopg2 
 import discord
 from discord.ext.commands.errors import CommandError
@@ -1617,7 +1617,7 @@ class VoiceCog(commands.Cog):
                 self.current_volume.pop(guild_id, None)
 
     # =====================
-    # 控制面板
+    # 控制面板 (修正重複的函式定義)
     # =====================
     async def update_control_message(self, guild_id: int, channel: discord.TextChannel = None):
         vc = self.vc_dict.get(guild_id)
@@ -1625,7 +1625,13 @@ class VoiceCog(commands.Cog):
         now_playing_info = self.now_playing.get(guild_id)
         view = MusicControlView(self, guild_id)
 
-        target_channel = channel or (vc.channel.guild.text_channels[0] if vc and vc.channel.guild.text_channels else None)
+        target_channel = channel
+        
+        # 如果沒有指定頻道，則使用語音頻道所在的文字頻道（或第一個文字頻道）
+        if not target_channel and vc and vc.channel.guild.text_channels:
+            # 優先使用第一個文字頻道
+            target_channel = vc.channel.guild.text_channels[0] 
+        
         if not target_channel:
             return
 
@@ -1640,13 +1646,19 @@ class VoiceCog(commands.Cog):
         embed.add_field(name="狀態", value=status_text, inline=False)
 
         if now_playing_info:
-            title, duration, _ = now_playing_info
+            # 獲取 (title, duration, start_time)
+            title, total_duration, _ = now_playing_info 
             vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
-            embed.add_field(name="現在播放", value=f"**{title}** (`{duration}s`) 音量: {vol_percent}%", inline=False)
+            embed.add_field(
+                name="現在播放",
+                value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%",
+                inline=False
+            )
         else:
             embed.add_field(name="現在播放", value="無", inline=False)
 
         if q:
+            # 隊列資訊：(audio_url, title, duration)
             queue_text = "\n".join([f"{i+1}. {info[1]} (`{info[2]}s`)" for i, info in enumerate(q[:10])])
             embed.add_field(name=f"即將播放 ({len(q)} 首)", value=queue_text, inline=False)
         else:
@@ -1655,16 +1667,20 @@ class VoiceCog(commands.Cog):
         try:
             msg_id = self.control_messages.get(guild_id)
             if msg_id:
+                # 嘗試獲取並編輯舊訊息
                 msg = await target_channel.fetch_message(msg_id)
                 await msg.edit(embed=embed, view=view)
             else:
+                # 發送新訊息
                 msg = await target_channel.send(embed=embed, view=view)
                 self.control_messages[guild_id] = msg.id
         except discord.NotFound:
+            # 舊訊息可能被刪除了，發送新訊息
             msg = await target_channel.send(embed=embed, view=view)
             self.control_messages[guild_id] = msg.id
         except Exception as e:
             print(f"更新控制訊息失敗: {e}")
+
 
     # =====================
     # 指令
@@ -1768,37 +1784,62 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         pass
 
 
-import discord
-from discord.ext import commands
-
-# 假設您的 bot 已經定義...
-# bot = commands.Bot(...) 
-
-
-
 @bot.event
 async def on_ready():
 
+    # 確保所有 Cog 已經被加載
     try:
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(ModerationCog(bot)) 
+        await bot.add_cog(ReactionRoleCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(LogsCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(HelpCog(bot))
+        await bot.add_cog(SupportCog(bot))
+        await bot.add_cog(VoiceCog(bot)) # 確保 VoiceCog 在此處加載
+    except Exception as e:
+        print(f"❌ 載入 Cog 失敗: {e}")
+        
+    # ⚡ 持久化 View 處理 ⚡
+    # 必須在 Cog 被 add 後才能從 bot.get_cog 獲取實例
+    support_cog_instance = bot.get_cog("SupportCog")
+    voice_cog_instance = bot.get_cog("VoiceCog")
+
+    if support_cog_instance:
+        # 0 是佔位符，因為 View 需要實例來正確註冊
         bot.add_view(ServerSelectView(bot, 0, support_cog_instance))
         bot.add_view(ReplyView(0, "", support_cog_instance))
-        voice_cog_instance = bot.get_cog("VoiceCog"
 
-    # ⚡ 持久化 View 處理 ⚡
-    # 這裡的關鍵是：我們需要獲取到 VoiceCog 的實例
-    
-    # 假設您的 VoiceCog 在 setup_hook 中被添加
-    )
-    
     if voice_cog_instance:
         print("--- 正在加載持久化音樂控制 View ---")
         for guild in bot.guilds:
             # 為每個伺服器加載 MusicControlView
-            # View 會自動使用 custom_id 尋找上一次發送的訊息
             bot.add_view(MusicControlView(voice_cog_instance, guild.id))
             print(f"已為伺服器 {guild.name} ({guild.id}) 加載 MusicControlView。")
     else:
         print("⚠️ 錯誤: VoiceCog 未找到，無法加載 MusicControlView。請確認 VoiceCog 已被正確 add_cog。")
+
+
+    #遊戲
+    activity_to_set = discord.Game(name="服務中 | /help") 
+    
+    #設定
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=activity_to_set
+    )
+    
+    print(f'{bot.user.name} 已經成功上線，狀態已設定完成！')
+    
+
+    try:
+        await bot.tree.sync()
+        print("✅ 指令已同步！")
+    except Exception as e:
+        print(f"❌ 指令同步失敗: {e}")
+
+
 
     #聽
     #activity_to_set = discord.Activity(
@@ -1807,8 +1848,6 @@ async def on_ready():
     #)
         
     
-    #遊戲
-    activity_to_set = discord.Game(name="服務中 | /help") 
     
     
     #看
@@ -1827,33 +1866,6 @@ async def on_ready():
     #status=discord.Status.online=綠燈（上線中）
     #status=discord.Status.idle=黃燈（閒置
     #status=discord.Status.dnd=紅燈（請勿打擾
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=activity_to_set
-    )
-    
-    print(f'{bot.user.name} 已經成功上線，狀態已設定完成！')
-    
-    try:
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(ModerationCog(bot)) 
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(LogsCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot))
-    except Exception as e:
-        print(f"❌ 載入 Cog 失敗: {e}")
-
-
-    try:
-        await bot.tree.sync()
-        print("✅ 指令已同步！")
-    except Exception as e:
-        print(f"❌ 指令同步失敗: {e}")
-
 # =========================
 # ⚡ Flask 路由
 # =========================
@@ -2178,23 +2190,24 @@ def keep_web_alive():
 async def main():
     # 🔥 關鍵修正 6: 確保全局變數 discord_loop 被設置
     global discord_loop
-    # 獲取當前執行緒的 Event Loop
+    # 獲取當前執行緒的 Event Loop，用於 Flask 存取
     discord_loop = asyncio.get_running_loop() 
     
-    keep_web_alive()
+    # 這裡只啟動機器人，Web 服務在外部啟動
     await bot.start(TOKEN)
 
 if __name__ == "__main__":
     try:
-        # 設置日誌級別
-        # discord.utils.setup_logging() 
+        # 先啟動 Web 服務的背景線程
+        keep_web_alive() 
+        # 然後啟動 Discord 機器人
+        # asyncio.run 會創建並運行一個新的事件循環
         asyncio.run(main())
     except KeyboardInterrupt:
         print("機器人已手動關閉。")
     except RuntimeError as e:
-        if "Event loop is closed" in str(e):
-             print("機器人已關閉。")
-        elif "cannot run from a thread" in str(e):
-            print("Web 伺服器啟動錯誤，請確保您以正確的方式（例如 gunicorn + Discord.py）啟動應用程式。")
+        if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
+             # 這是常見的關閉或啟動錯誤，可以忽略
+             print("機器人執行時發生 Runtime 錯誤或已關閉。")
         else:
             raise
