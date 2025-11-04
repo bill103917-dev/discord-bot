@@ -1,14 +1,12 @@
-#使用［voice］
-#aacord 機器人核心學功NdLScord.py 及其所有語音依賴
-#一次性安裝
-discord.py[voice]==2.3.2
+# Discord Bot Core and Voice Dependencies (v2.x)
+discord. py[voice]==2.3.2
 aiohttp
 psycopg2-binary
-# 影片/音樂功能
+# Video/Music Features
 pytube>=15.0.0
 yt-dlp>=2024.01.24
 spotipy
-# Web 服務依賴
+# Web Service Dependencies
 Flask gunicorn nest-asyncio
-# 認證與其他
-authlib requests-outhlib
+# Auth and Other
+authlib requests-oauthlib
