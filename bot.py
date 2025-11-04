@@ -1743,10 +1743,6 @@ from discord.ext import commands
 # 假設您的 bot 已經定義...
 # bot = commands.Bot(...) 
 
-import discord
-from discord.ext import commands
-import os
-
 
 
 @bot.event
@@ -1755,13 +1751,13 @@ async def on_ready():
     try:
         bot.add_view(ServerSelectView(bot, 0, support_cog_instance))
         bot.add_view(ReplyView(0, "", support_cog_instance))
-
+        voice_cog_instance = bot.get_cog("VoiceCog"
 
     # ⚡ 持久化 View 處理 ⚡
     # 這裡的關鍵是：我們需要獲取到 VoiceCog 的實例
     
     # 假設您的 VoiceCog 在 setup_hook 中被添加
-    voice_cog_instance = bot.get_cog("VoiceCog")
+    )
     
     if voice_cog_instance:
         print("--- 正在加載持久化音樂控制 View ---")
