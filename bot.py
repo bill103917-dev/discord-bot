@@ -1807,6 +1807,36 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
 
+    # 確保所有 Cog 已經被加載（新增檢查以避免重複加載）
+    try:
+        # 使用 bot.get_cog 檢查 Cog 是否已存在
+        if not bot.get_cog("UtilityCog"):
+            await bot.add_cog(UtilityCog(bot))
+        if not bot.get_cog("ModerationCog"):
+            await bot.add_cog(ModerationCog(bot))
+        if not bot.get_cog("ReactionRoleCog"):
+            await bot.add_cog(ReactionRoleCog(bot))
+        if not bot.get_cog("FunCog"):
+            await bot.add_cog(FunCog(bot))
+        if not bot.get_cog("LogsCog"):
+            await bot.add_cog(LogsCog(bot))
+        if not bot.get_cog("PingCog"):
+            await bot.add_cog(PingCog(bot))
+        if not bot.get_cog("HelpCog"):
+            await bot.add_cog(HelpCog(bot))
+        if not bot.get_cog("SupportCog"):
+            await bot.add_cog(SupportCog(bot))
+        if not bot.get_cog("VoiceCog"):
+            await bot.add_cog(VoiceCog(bot)) 
+            
+    except Exception as e:
+        print(f"❌ 載入 Cog 失敗: {e}")
+        
+    try:
+        await bot.tree.sync()
+        print("✅ 指令已同步！")
+    except Exception as e:
+        print(f"❌ 指令同步失敗: {e}")
 
         
     # ⚡ 持久化 View 處理 ⚡
@@ -2206,15 +2236,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        bot.add_cog(UtilityCog(bot))
-        bot.add_cog(ModerationCog(bot)) 
-        bot.add_cog(ReactionRoleCog(bot)) 
-        bot.add_cog(FunCog(bot))
-        bot.add_cog(LogsCog(bot))
-        bot.add_cog(PingCog(bot))
-        bot.add_cog(HelpCog(bot))
-        bot.add_cog(SupportCog(bot))
-        bot.add_cog(VoiceCog(bot))
         keep_web_alive() 
         asyncio.run(main())
     except KeyboardInterrupt:
