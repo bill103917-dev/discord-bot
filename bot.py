@@ -1414,8 +1414,6 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
     
-    await self.bot.tree.sync()
-
     # ⚡ 持久化 View 處理 ⚡
     support_cog_instance = bot.get_cog("SupportCog")
     voice_cog_instance = bot.get_cog("VoiceCog")
@@ -1654,45 +1652,28 @@ def keep_web_alive():
     t.daemon = True
     t.start()
 
-    
-    # 🌟 關鍵修改：在啟動前加載所有 Cog
 async def main():
     global discord_loop
     discord_loop = asyncio.get_running_loop() 
     
-    # 🌟 修正：在 discord.py v2.x 中，add_cog 是同步的（不需要 await）
-    print("正在加載 Cogs...")
-    
-    cogs_to_load = [
-        UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS),
-        ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS),
-        ReactionRoleCog(bot),
-        FunCog(bot),
-        LogsCog(bot, special_user_ids=SPECIAL_USER_IDS),
-        PingCog(bot),
-        HelpCog(bot),
-        SupportCog(bot), 
-        VoiceCog(bot),
-    ]
-
-    loaded_count = 0
-    for cog in cogs_to_load:
-        try:
-            # ⚠️ 在 v2.x 環境中，移除 await 關鍵字
-            bot.add_cog(cog) 
-            loaded_count += 1
-        except Exception as e:
-            # 捕獲並列印任何特定的 Cog 載入錯誤
-            print(f"❌ 載入 Cog 失敗: {cog.qualified_name} - 錯誤: {e}")
-            
-    if loaded_count == len(cogs_to_load):
+    # 🌟 關鍵修改：在啟動前加載所有 Cog
+    try:
+        # 傳遞 SPECIAL_USER_IDS 給需要它的 Cog
+        await bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
+        await bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 🌟 修正：傳遞 ID
+        await bot.add_cog(ReactionRoleCog(bot)) 
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 🌟 修正：LogsCog 也需要 ID
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(HelpCog(bot))
+        await bot.add_cog(SupportCog(bot))
+        await bot.add_cog(VoiceCog(bot))
         print("✅ 所有 Cogs 已成功加載。")
-    else:
-        print(f"⚠️ 部分 Cogs 載入失敗。成功載入 {loaded_count}/{len(cogs_to_load)} 個。")
+    except Exception as e:
+        print(f"❌ 載入 Cog 失敗: {e}")
 
     # 這裡只啟動機器人
     await bot.start(TOKEN)
-
 
 if __name__ == "__main__":
     try:
