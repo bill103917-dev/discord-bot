@@ -589,7 +589,6 @@ class ServerSelectView(ui.View):
                     value=str(guild.id),
                     description=description,
                     default=False,
-                    disabled=is_disabled
                 )
             )
             
@@ -597,6 +596,26 @@ class ServerSelectView(ui.View):
         self.server_select.placeholder = "請選擇您要發送問題的伺服器"
         self.server_select.disabled = False
         
+    @ui.select() 
+    async def server_select(self, interaction: discord.Interaction, select: ui.Select):
+        await interaction.response.defer(ephemeral=True)
+
+        selected_guild_id = int(select.values[0])
+        
+        # 🌟 確保用戶沒有選擇一個未配置的伺服器 🌟
+        if selected_guild_id not in self.cog.support_config:
+            await interaction.followup.send("❌ 該伺服器尚未設定轉發頻道，請選擇一個已設定的伺服器。", ephemeral=True)
+            return
+        # --------------------------------------------------
+        
+        selected_guild = self.bot.get_guild(selected_guild_id)
+        
+        if not selected_guild: # 只需要檢查伺服器是否存在
+            await interaction.followup.send("❌ 選擇的伺服器無效，請重新選擇。", ephemeral=True)
+            return
+
+        # ... (保留您原有的儲存狀態和更新 View 的邏輯) ...
+
 
     @ui.select() 
     async def server_select(self, interaction: discord.Interaction, select: ui.Select):
