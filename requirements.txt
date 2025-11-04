@@ -7,6 +7,10 @@ pytube>=15.0.0
 yt-dlp>=2024.01.24
 spotipy
 # Web Service Dependencies
-Flask gunicorn nest-asyncio
+Flask 
+gunicorn 
+nest-asyncio
+
 # Auth and Other
-authlib requests-oauthlib
+authlib 
+requests-oauthlib
