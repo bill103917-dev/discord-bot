@@ -1652,38 +1652,45 @@ def keep_web_alive():
     t.daemon = True
     t.start()
 
-async def main():
-    global discord_loop
-    discord_loop = asyncio.get_running_loop() 
     
     # 🌟 關鍵修改：在啟動前加載所有 Cog
 async def main():
     global discord_loop
     discord_loop = asyncio.get_running_loop() 
     
-    # 🌟 關鍵修改：在啟動前加載所有 Cog (移除 await)
-    try:
-        print("正在加載 Cogs...")
-        # 傳遞 SPECIAL_USER_IDS 給需要它的 Cog
-        
-        # ⚠️ 移除 'await' 關鍵字
-        bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
-        bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
-        bot.add_cog(ReactionRoleCog(bot)) 
-        bot.add_cog(FunCog(bot))
-        bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
-        bot.add_cog(PingCog(bot))
-        bot.add_cog(HelpCog(bot))
-        bot.add_cog(SupportCog(bot))
-        bot.add_cog(VoiceCog(bot))
-        
+    # 🌟 修正：在 discord.py v2.x 中，add_cog 是同步的（不需要 await）
+    print("正在加載 Cogs...")
+    
+    cogs_to_load = [
+        UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS),
+        ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS),
+        ReactionRoleCog(bot),
+        FunCog(bot),
+        LogsCog(bot, special_user_ids=SPECIAL_USER_IDS),
+        PingCog(bot),
+        HelpCog(bot),
+        SupportCog(bot), 
+        VoiceCog(bot),
+    ]
+
+    loaded_count = 0
+    for cog in cogs_to_load:
+        try:
+            # ⚠️ 在 v2.x 環境中，移除 await 關鍵字
+            bot.add_cog(cog) 
+            loaded_count += 1
+        except Exception as e:
+            # 捕獲並列印任何特定的 Cog 載入錯誤
+            print(f"❌ 載入 Cog 失敗: {cog.qualified_name} - 錯誤: {e}")
+            
+    if loaded_count == len(cogs_to_load):
         print("✅ 所有 Cogs 已成功加載。")
-    except Exception as e:
-        # 如果這裡仍然報錯，請務必查看日誌
-        print(f"❌ 載入 Cog 失敗: {e}")
+    else:
+        print(f"⚠️ 部分 Cogs 載入失敗。成功載入 {loaded_count}/{len(cogs_to_load)} 個。")
 
     # 這裡只啟動機器人
     await bot.start(TOKEN)
+
 
 if __name__ == "__main__":
     try:
