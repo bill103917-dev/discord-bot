@@ -9,7 +9,7 @@ Flask[async]
 gunicorn
 
 # Discord 機器人核心與功能
-discord.py
+discord.py==2.3.2
 discord.py[voice]
 PyNaCl
 aiohttp
