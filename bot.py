@@ -1809,15 +1809,15 @@ async def on_ready():
 
     # 確保所有 Cog 已經被加載
     try:
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(ModerationCog(bot)) 
+        await bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS))
+        await bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
         await bot.add_cog(ReactionRoleCog(bot))
         await bot.add_cog(FunCog(bot))
-        await bot.add_cog(LogsCog(bot))
+        await bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 修正此處
         await bot.add_cog(PingCog(bot))
         await bot.add_cog(HelpCog(bot))
         await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot)) # 確保 VoiceCog 在此處加載
+        await bot.add_cog(VoiceCog(bot))
     except Exception as e:
         print(f"❌ 載入 Cog 失敗: {e}")
         
