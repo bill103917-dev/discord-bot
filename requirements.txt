@@ -1,16 +1,11 @@
-# Discord Bot Core and Voice Dependencies (v2.x)
-discord. py[voice]==2.3.2
+discord. py [voice]
+Flask 
+gunicorn 
+nest-asyncio 
 aiohttp
 psycopg2-binary
-# Video/Music Features
 pytube>=15.0.0
 yt-dlp>=2024.01.24
 spotipy
-# Web Service Dependencies
-Flask 
-gunicorn 
-nest-asyncio
-
-# Auth and Other
 authlib 
 requests-oauthlib
