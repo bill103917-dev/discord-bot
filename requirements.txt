@@ -1,4 +1,4 @@
-discord.py [voice]
+discord.py[voice]
 Flask 
 gunicorn 
 nest-asyncio 
