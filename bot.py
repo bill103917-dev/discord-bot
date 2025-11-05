@@ -1646,9 +1646,6 @@ def logout():
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
-bot = None
-
-
 def run_web():
     port = os.getenv("PORT", 8080)
     # Render 或其他平台不適合 debug=True, use_reloader=True
