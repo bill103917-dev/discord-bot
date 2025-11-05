@@ -1645,31 +1645,45 @@ def logout():
     return redirect(url_for("index"))
 
 # =========================
-# Run web (thread) and start bot
+# ⚡ 執行區塊 (修正版)
 # =========================
 
 def run_web():
-    try:
-        app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
-    except Exception as e:
-        print("Flask crashed:", e)
+    port = os.getenv("PORT", 8080)
+    # Render 或其他平台不適合 debug=True, use_reloader=True
+    app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
 
-async def main():
-    web_thread = threading.Thread(target=run_web, daemon=True)
-    web_thread.start()
-    await bot.start(TOKEN)
-    
 def keep_web_alive():
-    import threading
+    """在背景執行 Flask"""
     t = threading.Thread(target=run_web)
     t.daemon = True
     t.start()
-    
-if __name__ == "__main__":
+
+async def start_bot():
+    """啟動 Discord bot"""
+    global discord_loop
+    discord_loop = asyncio.get_running_loop()
+    print("啟動 Discord Bot...")
     try:
-        asyncio.run(main())
+        await bot.start(TOKEN)
     except KeyboardInterrupt:
-        print("KeyboardInterrupt. Shutting down.")
+        print("機器人已手動關閉。")
     except Exception as e:
-        print("Fatal error:", e)
+        print(f"Discord Bot 啟動錯誤: {e}")
         traceback.print_exc()
+
+if __name__ == "__main__":
+    # 1️⃣ 啟動 Flask Web 服務 (背景線程)
+    keep_web_alive()
+    print("Flask Web 已啟動於背景線程。")
+
+    # 2️⃣ 啟動 Discord Bot
+    # 使用 asyncio.run 確保全局 event loop
+    try:
+        asyncio.run(start_bot())
+    except RuntimeError as e:
+        # 常見錯誤處理
+        if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
+            print("⚠️ Event loop 已關閉或不可從當前線程啟動。")
+        else:
+            raise
