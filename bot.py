@@ -1130,16 +1130,33 @@ class SupportCog(commands.Cog):
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
+        
+        # 🎯 步驟 1: 立即延遲響應，避免 3 秒超時
+        await interaction.response.defer(ephemeral=True)
+
         if interaction.guild is None:
-            await interaction.response.send_message("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True)
+            # 使用 followup 來發送錯誤，因為已經 defer 了
+            await interaction.followup.send("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True) 
             return
+            
         guild_id = interaction.guild.id
         role_id = role.id if role else None
         self.support_config[guild_id] = (channel.id, role_id)
-        await self.save_state_async()
+        
+        # 步驟 2: 執行耗時操作 (File I/O)
+        await self.save_state_async() 
+        
+        # 步驟 3: 建立最終響應
         notification_text = f"通知角色：{role.mention}" if role else "無通知角色。"
-        embed = discord.Embed(title="✅ 問題轉發設定成功", description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。\n\n{notification_text}", color=discord.Color.green())
-        await interaction.response.send_message(embed=embed)
+        embed = discord.Embed(
+            title="✅ 問題轉發設定成功", 
+            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。\n\n{notification_text}", 
+            color=discord.Color.green()
+        )
+        
+        # 步驟 4: 使用 followup 發送最終訊息 (代替 response.send_message)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
 
     @app_commands.command(name="support", description="在私訊中手動呼叫伺服器選擇選單")
     async def support_command(self, interaction: Interaction):
