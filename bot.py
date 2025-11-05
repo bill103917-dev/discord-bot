@@ -673,19 +673,32 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
     async def gay_probability(self, interaction: Interaction, user: Optional[discord.User] = None):
+        # 紀錄指令使用
         await log_command(interaction, "/gay")
+        
         target_user = user if user else interaction.user
+        
         if target_user.id in HUNDRED_PERCENT_IDS:
             probability = 100
+            
         elif target_user.id in SPECIAL_USER_IDS:
             probability = 0
+            
+        # 其他使用者則隨機抽取 1% 到 100% 之間的數字
         else:
             probability = random.randint(1, 100)
-        embed = discord.Embed(title="🏳️‍🌈 隨機同性戀機率 (/gay)", color=discord.Color.random())
+            
+        # 建立並發送 Embed
+        embed = discord.Embed(
+            title="🏳️‍🌈 隨機同性戀機率 (/gay)", 
+            color=discord.Color.random()
+        )
         embed.add_field(name="測試者", value=target_user.mention, inline=False)
         embed.add_field(name="機率為", value=f"**{probability}%**", inline=False)
         embed.set_footer(text=f"由 {interaction.user.display_name} 執行")
+        
         await interaction.response.send_message(embed=embed)
+
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     async def rps(self, interaction: Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
