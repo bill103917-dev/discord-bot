@@ -1046,19 +1046,39 @@ class ServerSelectView(ui.View):
     def _load_options(self):
         self.server_select.options.clear()
         user = self.bot.get_user(self.user_id)
+        
         if not user:
             self.server_select.placeholder = "載入中..."
             self.server_select.disabled = True
             return
+            
         shared_guilds = [g for g in self.bot.guilds if g.get_member(self.user_id) is not None]
+        
         if not shared_guilds:
             self.server_select.placeholder = "❌ 找不到共享伺服器"
             self.server_select.disabled = True
             return
+            
         options = []
         for guild in shared_guilds:
             label = guild.name
-            options.append(discord.SelectOption(label=label, value=str(guild.id)))
+            guild_id = guild.id
+            
+            # 🎯 檢查 SupportCog 的配置
+            # self.cog.support_config 儲存了 {guild_id: (channel_id, role_id)}
+            if guild_id in self.cog.support_config:
+                channel_id, _ = self.cog.support_config[guild_id]
+                description = f"✅ 已設定頻道。{self.bot.get_channel(channel_id).name if self.bot.get_channel(channel_id) else '頻道 ID 無效'}"
+            else:
+                # 📌 關鍵修正：當未設定時，設定 description 提示用戶
+                description = "⚠️ 本伺服器未設定回覆頻道，請勿選擇。" 
+            
+            options.append(discord.SelectOption(
+                label=label, 
+                value=str(guild_id),
+                description=description # 💡 將提示文字加入 description 
+            ))
+            
         self.server_select.options = options
         self.server_select.placeholder = "請選擇您要發送問題的伺服器"
         self.server_select.disabled = False
