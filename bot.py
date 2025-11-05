@@ -86,9 +86,8 @@ ADMINISTRATOR_PERMISSION = 0x00000008  # administrator bit
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-intents.guilds = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
@@ -1647,6 +1646,8 @@ def logout():
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
+bot = None
+
 
 def run_web():
     port = os.getenv("PORT", 8080)
