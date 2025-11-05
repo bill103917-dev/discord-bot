@@ -1327,11 +1327,7 @@ ADMINISTRATOR_PERMISSION = 0x8
 SPECIAL_USER_IDS = []  # 你可以放特定管理員ID
 LOG_VIEWER_IDS = []    # 可看日誌的使用者ID
 
-# Discord 事件循環（bot.py中會設置）
-discord_loop = None
-bot = None  # 由你的 bot.py 設定全域 bot 實例
 
-# 命令日誌
 command_logs = []
 
 # --------------------------
