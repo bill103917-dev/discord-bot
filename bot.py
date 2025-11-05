@@ -126,17 +126,28 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         await interaction.response.defer(ephemeral=True)
         user_obj = self.cog.bot.get_user(self.original_user_id)
         admin_name = interaction.user.display_name
-        reply_content = str(self.response_content)
+        reply_content = str(self.response_content).strip()
+        response_title = str(self.response_title).strip() or "管理員回覆" # 如果沒有標題，使用預設值
 
+        # 🎯 關鍵修正：將原始問題和管理員回覆的結構調整
         embed = discord.Embed(
-            title=str(self.response_title).strip() or "管理員回覆",
-            description=f"<@{interaction.user.id}> 說：\n>>> {reply_content}",
+            title=f"💬 {response_title}",
+            description=f"**管理員說：**\n>>> {reply_content}", # 🎯 這裡顯示管理員的回覆內容
             color=discord.Color.green()
         )
-        embed.add_field(name="您的原問題", value=f"```\n{self.original_content[:1000]}{'...' if len(self.original_content) > 1000 else ''}\n```", inline=False)
+        
+        # 🎯 這裡將用戶的原始問題作為一個 field 加入
+        # 標題明確指出這是回覆用戶的「哪個」問題
+        embed.add_field(
+            name=f"管理員回覆您的問題:", 
+            value=f"```\n{self.original_content[:1000]}{'...' if len(self.original_content) > 1000 else ''}\n```", 
+            inline=False
+        )
+        embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}") # 加上時間和回覆者
 
         if user_obj:
             try:
+                # 這裡不再需要 content，因為所有內容都在 embed 裡
                 await user_obj.send(embed=embed)
                 await interaction.followup.send("✅ 回覆已成功發送。", ephemeral=True)
             except discord.Forbidden:
@@ -145,7 +156,6 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
                 await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
         else:
             await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
-
 
 class ReplyView(ui.View):
     def __init__(self, original_user_id: int, original_content: str, cog):
