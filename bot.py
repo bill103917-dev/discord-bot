@@ -1263,19 +1263,22 @@ async def on_ready():
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
     # add cogs (instantiate and add)
+    # add cogs (instantiate and add)
     try:
-        bot.add_cog(HelpCog(bot))
-        bot.add_cog(LogsCog(bot))
-        bot.add_cog(PingCog(bot))
-        bot.add_cog(ReactionRoleCog(bot))
-        bot.add_cog(UtilityCog(bot))
-        bot.add_cog(ModerationCog(bot))
-        bot.add_cog(FunCog(bot))
-        bot.add_cog(SupportCog(bot))
-        bot.add_cog(VoiceCog(bot))
+        await bot.add_cog(HelpCog(bot))
+        await bot.add_cog(LogsCog(bot))
+        await bot.add_cog(PingCog(bot))
+        await bot.add_cog(ReactionRoleCog(bot))
+        await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(ModerationCog(bot))
+        await bot.add_cog(FunCog(bot))
+        await bot.add_cog(SupportCog(bot))
+        await bot.add_cog(VoiceCog(bot))
+        print("✅ All Cogs loaded.")
     except Exception as e:
-        print("Cog add error:", e)
+        print("❌ Cog add error:", e)
         traceback.print_exc()
+
 
     # register persistent views if needed
     try:
