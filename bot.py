@@ -1,7 +1,3 @@
-# bot.py — 單一檔案完整版本
-# 注意：執行前請確定已安裝依賴：discord.py, flask, psycopg2-binary (若使用 DB), yt-dlp, pytube (若需要)
-# pip install -U "discord.py" flask yt-dlp pytube psycopg2-binary
-
 import os
 import sys
 import re
