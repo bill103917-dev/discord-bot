@@ -1250,21 +1250,17 @@ class LogsCog(commands.Cog):
         await interaction.response.send_message(logs_text, ephemeral=True)
 
 
+
+
 class PingCog(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: discord.Interaction):
-        # 1. 計算延遲 (Latency)
-        await log_command(interaction, "/ping")
-        latency_ms = round(self.bot.latency * 1000) 
-        
-        # 🔥 修正 4：移除 defer，改用單步回應
-        # await interaction.response.defer()
-
-        await interaction.response.send_message(f"🏓 Pong! **{latency_ms}ms**")
-
+        await interaction.response.defer(ephemeral=True)
+        latency_ms = round(self.bot.latency * 1000)
+        await interaction.followup.send(f"🏓 Pong! **{latency_ms}ms**", ephemeral=True)
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
@@ -1806,61 +1802,52 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 
 @bot.event
 async def on_ready():
+    # 先避免重複執行 on_ready 內的初始化動作
+    if getattr(bot, "_has_ready_run", False):
+        return
+    bot._has_ready_run = True
 
-    # 確保所有 Cog 已經被加載
     try:
-        await bot.add_cog(UtilityCog(bot, special_user_ids=SPECIAL_USER_IDS))
-        await bot.add_cog(ModerationCog(bot, special_user_ids=SPECIAL_USER_IDS)) 
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(LogsCog(bot, special_user_ids=SPECIAL_USER_IDS)) # 修正此處
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot))
+        # 同步加 Cog（同步呼叫足以）
+        bot.add_cog(UtilityCog(bot))
+        bot.add_cog(ModerationCog(bot))
+        bot.add_cog(ReactionRoleCog(bot))
+        bot.add_cog(FunCog(bot))
+        bot.add_cog(LogsCog(bot))
+        bot.add_cog(PingCog(bot))
+        bot.add_cog(HelpCog(bot))
+        bot.add_cog(SupportCog(bot))
+        bot.add_cog(VoiceCog(bot))
     except Exception as e:
         print(f"❌ 載入 Cog 失敗: {e}")
-        
-    # ⚡ 持久化 View 處理 ⚡
-    # 必須在 Cog 被 add 後才能從 bot.get_cog 獲取實例
+
+    # 持久化 View 註冊 — 確保 Cog 實例存在
     support_cog_instance = bot.get_cog("SupportCog")
     voice_cog_instance = bot.get_cog("VoiceCog")
 
     if support_cog_instance:
-        # 0 是佔位符，因為 View 需要實例來正確註冊
         bot.add_view(ServerSelectView(bot, 0, support_cog_instance))
         bot.add_view(ReplyView(0, "", support_cog_instance))
 
     if voice_cog_instance:
         print("--- 正在加載持久化音樂控制 View ---")
         for guild in bot.guilds:
-            # 為每個伺服器加載 MusicControlView
             bot.add_view(MusicControlView(voice_cog_instance, guild.id))
             print(f"已為伺服器 {guild.name} ({guild.id}) 加載 MusicControlView。")
     else:
         print("⚠️ 錯誤: VoiceCog 未找到，無法加載 MusicControlView。請確認 VoiceCog 已被正確 add_cog。")
 
+    activity_to_set = discord.Game(name="服務中 | /help")
+    await bot.change_presence(status=discord.Status.online, activity=activity_to_set)
 
-    #遊戲
-    activity_to_set = discord.Game(name="服務中 | /help") 
-    
-    #設定
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=activity_to_set
-    )
-    
     print(f'{bot.user.name} 已經成功上線，狀態已設定完成！')
-    
 
+    # 只 sync 一次
     try:
         await bot.tree.sync()
         print("✅ 指令已同步！")
     except Exception as e:
         print(f"❌ 指令同步失敗: {e}")
-
-
-
     #聽
     #activity_to_set = discord.Activity(
     #type=discord.ActivityType.listening,
