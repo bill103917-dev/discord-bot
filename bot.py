@@ -1071,7 +1071,7 @@ class ServerSelectView(ui.View):
                 description = f"✅ 已設定頻道。{self.bot.get_channel(channel_id).name if self.bot.get_channel(channel_id) else '頻道 ID 無效'}"
             else:
                 # 📌 關鍵修正：當未設定時，設定 description 提示用戶
-                description = "⚠️ 本伺服器未設定回覆頻道，請勿選擇。" 
+                description = "⚠️ 本伺服器未設定回覆頻道。" 
             
             options.append(discord.SelectOption(
                 label=label, 
