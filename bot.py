@@ -75,7 +75,6 @@ SPECIAL_USER_IDS = [1238436456041676853]   # 請替換
 LOG_VIEWER_IDS = [1238436456041676853]
 HUNDRED_PERCENT_IDS = [1343900739407319070]
 ADMINISTRATOR_PERMISSION = 0x00000008  # administrator bit
-
 # =========================
 # Bot + Intents
 # =========================
