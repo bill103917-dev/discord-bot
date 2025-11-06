@@ -1146,6 +1146,7 @@ class SupportCog(commands.Cog):
         self.user_target_guild: Dict[int, int] = {}
         self.config_file = "support_config.json"
         self.load_support_config()
+        self.save_state_async()
 
     def load_support_config(self):
         try:
@@ -1169,35 +1170,69 @@ class SupportCog(commands.Cog):
     async def save_state_async(self):
         await asyncio.to_thread(self.save_support_config)
 
+
+    @app_commands.command(name="unset_support_channel", description="[管理員] 取消本伺服器的用戶問題轉發設定")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def unset_support_channel(self, interaction: Interaction):
+        
+        # 1. 立即延遲響應
+        await interaction.response.defer(ephemeral=True)
+        
+        if interaction.guild is None:
+            await interaction.followup.send("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True)
+            return
+
+        guild_id = interaction.guild.id
+        
+        # 2. 檢查並移除配置
+        if guild_id in self.support_config:
+            # 移除設定
+            del self.support_config[guild_id]
+            
+            # 儲存狀態（持久化）
+            await self.save_state_async()
+            
+            # 發送成功訊息
+            embed = discord.Embed(
+                title="🗑️ 用戶問題轉發已取消", 
+                description=f"伺服器 **{interaction.guild.name}** 的用戶問題轉發設定已成功移除。", 
+                color=discord.Color.orange()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        else:
+            # 發送未設定訊息
+            await interaction.followup.send("❌ 本伺服器尚未設定用戶問題轉發頻道。", ephemeral=True)
+
     @app_commands.command(name="set_support_channel", description="[管理員] 設定用戶問題轉發頻道與通知角色")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
         
-        # 🎯 步驟 1: 立即延遲響應，避免 3 秒超時
+        # 1. 立即延遲響應
         await interaction.response.defer(ephemeral=True)
 
         if interaction.guild is None:
-            # 使用 followup 來發送錯誤，因為已經 defer 了
             await interaction.followup.send("❌ 此指令只能在伺服器頻道中使用。", ephemeral=True) 
             return
             
         guild_id = interaction.guild.id
         role_id = role.id if role else None
+        
+        # 2. 更新配置
         self.support_config[guild_id] = (channel.id, role_id)
         
-        # 步驟 2: 執行耗時操作 (File I/O)
+        # 3. 儲存狀態（持久化）
         await self.save_state_async() 
         
-        # 步驟 3: 建立最終響應
+        # 4. 發送結果
         notification_text = f"通知角色：{role.mention}" if role else "無通知角色。"
         embed = discord.Embed(
             title="✅ 問題轉發設定成功", 
-            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。\n\n{notification_text}", 
+            description=f"伺服器 **{interaction.guild.name}** 的用戶問題將會被轉發到 {channel.mention}。\n\n{notification_text}\n\n**此設定已持久保存，機器人重啟後仍有效。**", 
             color=discord.Color.green()
         )
-        
-        # 步驟 4: 使用 followup 發送最終訊息 (代替 response.send_message)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
