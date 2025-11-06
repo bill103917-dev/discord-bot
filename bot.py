@@ -1146,8 +1146,7 @@ class SupportCog(commands.Cog):
         self.user_target_guild: Dict[int, int] = {}
         self.config_file = "support_config.json"
         self.load_support_config()
-        self.save_state_async()
-
+        self.bot.loop.create_task(self.load_state_async())
     def load_support_config(self):
         try:
             with open(self.config_file, "r") as f:
