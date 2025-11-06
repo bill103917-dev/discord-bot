@@ -1168,6 +1168,10 @@ class SupportCog(commands.Cog):
 
     async def save_state_async(self):
         await asyncio.to_thread(self.save_support_config)
+    # 新增異步讀取方法
+    async def load_state_async(self):
+        """將同步的 load_support_config 包裝成異步版本"""
+        await asyncio.to_thread(self.load_support_config)
 
 
     @app_commands.command(name="unset_support_channel", description="[管理員] 取消本伺服器的用戶問題轉發設定")
