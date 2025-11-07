@@ -1405,6 +1405,10 @@ from flask import Flask, render_template, session, redirect, url_for, request, j
 import asyncio
 import requests
 import os
+# ❗ 修正點 1: 匯入自定義配置函數和時間函數
+# 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
+from utils import load_config, save_config, safe_now 
+
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
@@ -1475,7 +1479,7 @@ def guild_dashboard(guild_id):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
 
     if not bot.get_guild(guild_id):
         return f"❌ 錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
@@ -1502,13 +1506,14 @@ def settings(guild_id, module=None):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
 
     guild_obj = bot.get_guild(guild_id)
     if not guild_obj:
         return "❌ 機器人不在這個伺服器或連線超時。", 404
 
-    config = load_config(guild_id)  # 你自訂的設定讀取函式
+    # ❗ load_config, save_config 現在從 utils.py 引入
+    config = load_config(guild_id) 
 
     if request.method == 'POST':
         if module == 'notifications':
@@ -1516,7 +1521,7 @@ def settings(guild_id, module=None):
             config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
             config['video_notification_message'] = request.form.get('video_message', '')
             config['live_notification_message'] = request.form.get('live_message', '')
-            save_config(guild_id, config)  # 你自訂的設定存檔函式
+            save_config(guild_id, config) 
             return redirect(url_for('settings', guild_id=guild_id, module=module))
         return redirect(url_for('settings', guild_id=guild_id))
 
@@ -1555,14 +1560,15 @@ def members_page(guild_id):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 500
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
 
     try:
         guild_obj = bot.get_guild(guild_id)
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        future_members = asyncio.run_coroutine_threadsafe(guild_obj.fetch_members(limit=None), discord_loop)
+        # 這裡的 limit=None 在大伺服器上可能會導致超時
+        future_members = asyncio.run_coroutine_threadsafe(guild_obj.fetch_members(limit=None), discord_loop) 
         members = future_members.result(timeout=10)
         members_list = [
             {
@@ -1589,7 +1595,7 @@ def members_page(guild_id):
 def notifications_modal(guild_id):
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 500
+        return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
 
     try:
         async def fetch_and_prepare_data():
@@ -1597,6 +1603,7 @@ def notifications_modal(guild_id):
             if guild_obj is None:
                 raise ValueError(f"找不到伺服器 ID {guild_id}。機器人可能已離開或 ID 無效。") 
             channels = guild_obj.text_channels
+            # ❗ load_config 現在從 utils.py 引入
             config = load_config(guild_id)
             video_channel_id = str(config.get('video_notification_channel_id', ''))
             video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
@@ -1732,6 +1739,8 @@ def logout():
     session.pop("discord_user", None)
     session.pop("discord_guilds", None)
     return redirect(url_for("index"))
+
+
 
 # =========================
 # ⚡ 執行區塊 (修正版)
