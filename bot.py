@@ -8,7 +8,7 @@ import threading
 import asyncio
 import traceback
 from typing import Optional, List, Dict, Tuple
-
+from utils import load_config, save_config
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
