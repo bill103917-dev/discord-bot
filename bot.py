@@ -1359,8 +1359,6 @@ async def on_ready():
         discord_loop = None
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
-    # add cogs (instantiate and add)
-    # add cogs (instantiate and add)
     try:
         await bot.add_cog(HelpCog(bot))
         await bot.add_cog(LogsCog(bot))
