@@ -8,7 +8,8 @@ import threading
 import asyncio
 import traceback
 from typing import Optional, List, Dict, Tuple
-from utils import load_config, save_config
+from utils import load_config, save_config 
+from utils import safe_now
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
@@ -46,9 +47,6 @@ if not TOKEN:
 # =========================
 # Utils & Shared State
 # =========================
-def safe_now():
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-
 def to_thread(func):
     import functools
     @functools.wraps(func)
