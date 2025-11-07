@@ -1344,12 +1344,34 @@ async def on_app_command_error(interaction: Interaction, error):
         print("Error handling failed: interaction not found")
 
 # =========================
-# on_ready: load cogs and sync once
+# 載入所有 Cogs 的單一函數 (新增)
+# =========================
+async def load_all_cogs(bot_instance):
+    """在 bot.start 之前，單次載入所有 Cogs 以避免重複。"""
+    try:
+        await bot_instance.add_cog(HelpCog(bot_instance))
+        await bot_instance.add_cog(LogsCog(bot_instance))
+        await bot_instance.add_cog(PingCog(bot_instance))
+        await bot_instance.add_cog(ReactionRoleCog(bot_instance))
+        await bot_instance.add_cog(UtilityCog(bot_instance))
+        await bot_instance.add_cog(ModerationCog(bot_instance))
+        await bot_instance.add_cog(FunCog(bot_instance))
+        await bot_instance.add_cog(SupportCog(bot_instance))
+        await bot_instance.add_cog(VoiceCog(bot_instance))
+        print("✅ All Cogs loaded successfully before bot start.")
+    except Exception as e:
+        print("❌ Startup Cog add error:", e)
+        traceback.print_exc()
+
+
+# =========================
+# on_ready: 修正版 (移除重複的 Cog 載入)
 # =========================
 
 @bot.event
 async def on_ready():
     global discord_loop
+    # 確保只運行一次
     if getattr(bot, "_has_ready_run", False):
         return
     bot._has_ready_run = True
@@ -1359,27 +1381,17 @@ async def on_ready():
         discord_loop = None
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
-    try:
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(LogsCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(ModerationCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(VoiceCog(bot))
-        print("✅ All Cogs loaded.")
-    except Exception as e:
-        print("❌ Cog add error:", e)
-        traceback.print_exc()
-
+    # ❗ 修正點：移除所有 bot.add_cog(...) 的呼叫！
+    # 這些 Cog 已經在 bot.start() 之前透過 load_all_cogs 函數載入了。
+    # 移除以下整個 try/except 區塊，以防止指令重複註冊。
+    # print("✅ All Cogs loaded.") # 也移除這行
 
     # register persistent views if needed
     try:
         # Support views
         support_cog = bot.get_cog("SupportCog")
         if support_cog:
+            # 這裡必須在 Cog 加載後執行，所以保留
             bot.add_view(ReplyView(0, "", support_cog))
             # ServerSelectView needs user-specific instances, we don't add global one here
     except Exception:
@@ -1397,7 +1409,7 @@ async def on_ready():
         print("✅ Commands synced.")
     except Exception as e:
         print("❌ Failed to sync commands:", e)
-
+        
 # =========================
 # ⚡ Flask Web 部分
 # =========================
@@ -1734,7 +1746,7 @@ def logout():
     return redirect(url_for("index"))
 
 # =========================
-# ⚡ 執行區塊 (修正版)
+# ⚡ 執行區塊 (最終修正版)
 # =========================
 def run_web():
     port = os.getenv("PORT", 8080)
@@ -1752,6 +1764,10 @@ async def start_bot():
     global discord_loop
     discord_loop = asyncio.get_running_loop()
     print("啟動 Discord Bot...")
+    
+    # ❗ 修正點：在 bot.start 之前載入所有 Cogs
+    await load_all_cogs(bot)
+    
     try:
         await bot.start(TOKEN)
     except KeyboardInterrupt:
