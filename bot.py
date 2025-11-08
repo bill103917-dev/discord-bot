@@ -970,9 +970,8 @@ class MinesweeperView(discord.ui.View):
              del self.cog.player_flag_status[self.player_id]
 
 
-### 2. 機器人 Cog 類別 (`MinesweeperCog`)
 
-```python
+
 class MinesweeperCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
