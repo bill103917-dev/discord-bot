@@ -111,7 +111,6 @@
                         <div class="card-title">影片與直播通知</div>
                         <div class="card-description">設定 YouTube 或其他平台的影片和直播自動發送通知，包含篩選與訊息客製化。</div>
                     </div>
-                    <!-- 修正 1: 新增 ID 和 data-guild-id 供 JS 識別 -->
                     <button id="openNotificationSettings" class="btn btn-info" 
                         data-url="{{ url_for('notifications_modal', guild_id=guild_obj.id) }}"
                         data-guild-id="{{ guild_obj.id }}">
@@ -196,11 +195,10 @@
             });
         }
         
-        // 修正 2: 新增點擊監聽器
+        // 1. 綁定模態視窗開啟按鈕
         $(document).ready(function() {
             // 偵測點擊「編輯通知設定」按鈕
             $('#openNotificationSettings').on('click', function() {
-                // 從按鈕的 data 屬性中獲取 Guild ID
                 const guildId = $(this).data('guild-id');
                 
                 if (guildId) {
@@ -210,7 +208,60 @@
                 }
             });
         });
+
+        // 2. 🚨 處理模態視窗內的表單提交 (使用事件委派，因為表單是動態載入的)
+        $(document).on('submit', '#notificationForm', function(e) {
+            e.preventDefault(); // 阻止瀏覽器的預設提交行為 (防止跳轉頁面)
+
+            const form = $(this);
+            const formActionUrl = form.attr('action');
+            const formData = form.serialize();
+            
+            // 顯示載入動畫或鎖定按鈕
+            const updateButton = $('#updateChannelBtn');
+            updateButton.prop('disabled', true).text('儲存中...');
+            
+            // 清除之前的錯誤或成功訊息
+            form.find('.alert').remove();
+
+            $.ajax({
+                url: formActionUrl,
+                method: 'POST',
+                data: formData,
+                success: function(response) {
+                    // 假設後端成功後會返回一個 JSON 訊息或狀態 200
+                    
+                    // 顯示成功訊息，然後關閉模態視窗
+                    $('#modalContent').html('<div class="alert alert-success p-5" role="alert">✅ **設定已成功儲存！**</div>');
+                    
+                    // 延遲後關閉模態視窗並刷新頁面 (確保主頁面顯示最新設定)
+                    setTimeout(function() {
+                        $('#notificationModal').modal('hide');
+                        window.location.reload(); // 刷新頁面以反映新設定
+                    }, 1000); 
+                },
+                error: function(xhr, status, error) {
+                    // 顯示錯誤訊息
+                    let errorMsg = '發生未知的伺服器錯誤。';
+                    try {
+                        const responseJson = JSON.parse(xhr.responseText);
+                        errorMsg = responseJson.message || errorMsg;
+                    } catch {
+                        // 如果回傳的不是 JSON，使用原始文字或通用錯誤
+                        errorMsg = xhr.responseText || `伺服器錯誤 (Status: ${xhr.status})`;
+                    }
+
+                    // 將錯誤訊息插入到表單頂部
+                    form.prepend('<div class="alert alert-danger" role="alert">❌ **儲存失敗**！訊息: ' + errorMsg + '</div>');
+                },
+                complete: function() {
+                     // 無論成功或失敗，重置按鈕狀態
+                     updateButton.prop('disabled', false).text('更新頻道 (Update Channel)');
+                }
+            });
+        });
     </script>
 </body>
 </html>
+
 
