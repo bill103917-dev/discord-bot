@@ -7,29 +7,49 @@
 <div class="modal-body" style="background-color: #36393f; padding-bottom: 0;">
     <form id="notificationForm" method="POST" action="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}">
         
+        <!-- 頻道網址和狀態 -->
         <div class="row">
             <div class="col-md-6 form-group">
                 <label for="channel_url" class="required-label">頻道網址 (Channel URL)</label>
-                <!-- 修正點 1: 移除 readonly 讓使用者可以編輯 -->
-                <input type="text" id="channel_url" name="channel_url" class="form-control" value="">
+                <input type="text" id="channel_url" name="channel_url" class="form-control" 
+                       value="{{ channel_url_value }}" placeholder="例如: https://youtube.com/@ChannelName">
             </div>
             <div class="col-md-6 form-group">
                 <label for="channel_status">頻道狀態 (Channel Status)</label>
-                <!-- 修正點 2: 移除 disabled 讓這個值能被提交 -->
                 <select id="channel_status" name="channel_status" class="form-control">
-                    <option selected>運行中 (Running)</option>
-                    <option>已暫停 (Paused)</option>
+                    <option value="Running" {% if channel_status_value == '運行中 (Running)' or channel_status_value == 'Running' %}selected{% endif %}>運行中 (Running)</option>
+                    <option value="Paused" {% if channel_status_value == '已暫停 (Paused)' or channel_status_value == 'Paused' %}selected{% endif %}>已暫停 (Paused)</option>
                 </select>
             </div>
         </div>
+        
+        <!-- 🌟 修正點: 重新插入頻道選擇下拉選單 🌟 -->
+        <div class="form-group mb-3">
+            <label for="video_channel_id" class="form-label required-label">選擇影片/直播通知頻道:</label>
+            <select class="form-control" id="video_channel_id" name="video_channel_id">
+                <option value="">(不發送任何通知)</option>
+                {% for channel in channels %}
+                    {% if channel.type.name == 'text' %}
+                        <option value="{{ channel.id }}" {% if channel.id|string == video_channel_id|string %}selected{% endif %}>
+                            #{{ channel.name }}
+                        </option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+            <small class="form-text text-muted">選擇發布 YouTube 影片和直播通知的頻道。</small>
+        </div>
+        <!-- 🌟 結束修正點 🌟 -->
 
-
+        <!-- Ping Role -->
+        <div class="row">
             <div class="col-md-6 form-group">
                 <label for="ping_role">標記身分組 (Ping Role)</label>
-                <input type="text" id="ping_role" name="ping_role" class="form-control" value="@everyone" placeholder="例如 @everyone 或 身分組 ID/名稱">
+                <!-- 假設 ping_role 也是從後端載入的持久化變數 -->
+                <input type="text" id="ping_role" name="ping_role" class="form-control" value="{{ ping_role or '@everyone' }}" placeholder="例如 @everyone 或 身分組 ID/名稱">
             </div>
         </div>
         
+        <!-- Embed and Bot Style -->
         <div class="row">
             <div class="col-md-6 form-group">
                 <label for="embed_style">嵌入樣式 (Embed) ⭐ BASIC</label>
@@ -47,6 +67,7 @@
             </div>
         </div>
 
+        <!-- Content Filter -->
         <div class="form-group mt-3">
             <label>內容類型篩選 (Content Type Filter)</label>
             <div class="btn-group w-100" role="group" aria-label="Content Filter">
@@ -63,6 +84,7 @@
 
         <hr style="border-top: 1px solid #4f545c;">
 
+        <!-- Message Templates -->
         <div class="row">
             <div class="col-md-6 form-group">
                 <label for="video_message" class="required-label">影片訊息 (Video Message) ⓘ</label>
