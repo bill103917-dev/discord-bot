@@ -124,9 +124,9 @@
                     <div>
                         <div class="card-icon">👋</div> 
                         <div class="card-title">歡迎新成員</div>
-                        <div class="card-description">設定新成員加入時的自動訊息、身分組與驗證流程。（請確保 `bot.py` 中有 `module='welcome'` 路由）</div>
+                        <div class="card-description">設定新成員加入時的自動訊息、身分組與驗證流程。</div>
                     </div>
-                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='welcome') }}" class="btn btn-start mt-3">開始設定</a>
+                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='welcome') }}" class="btn btn-start mt-3">目前無法使用</a>
                 </div>
             </div>
 
@@ -135,9 +135,9 @@
                     <div>
                         <div class="card-icon">✨</div> 
                         <div class="card-title">反應身分組</div>
-                        <div class="card-description">讓成員點擊表情符號自動領取對應的身分組。（請確保 `bot.py` 中有 `module='reaction_roles'` 路由）</div>
+                        <div class="card-description">讓成員點擊表情符號自動領取對應的身分組。</div>
                     </div>
-                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='reaction_roles') }}" class="btn btn-start mt-3">開始設定</a>
+                    <a href="{{ url_for('settings', guild_id=guild_obj.id, module='reaction_roles') }}" class="btn btn-start mt-3">目前無法使用</a>
                 </div>
             </div>
             
