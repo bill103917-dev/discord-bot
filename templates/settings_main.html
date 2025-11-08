@@ -111,7 +111,10 @@
                         <div class="card-title">影片與直播通知</div>
                         <div class="card-description">設定 YouTube 或其他平台的影片和直播自動發送通知，包含篩選與訊息客製化。</div>
                     </div>
-                    <button class="btn btn-info" data-url="{{ url_for('notifications_modal', guild_id=guild_obj.id) }}">
+                    <!-- 修正 1: 新增 ID 和 data-guild-id 供 JS 識別 -->
+                    <button id="openNotificationSettings" class="btn btn-info" 
+                        data-url="{{ url_for('notifications_modal', guild_id=guild_obj.id) }}"
+                        data-guild-id="{{ guild_obj.id }}">
                         編輯通知設定
                     </button>
                 </div>
@@ -143,6 +146,7 @@
         <a href="{{ url_for('index') }}" class="btn btn-secondary mt-4">← 返回我的伺服器列表</a>
     </div>
 
+    <!-- 模態容器 -->
     <div class="modal fade" id="notificationModal" tabindex="-1" role="dialog" aria-labelledby="notificationModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg" role="document">
             <div class="modal-content">
@@ -162,6 +166,7 @@
     <script>
         /**
          * 使用 AJAX 載入影片通知設定 (modal_notifications.html) 並彈出
+         * @param {string} guildId - 伺服器 ID
          */
         function loadNotificationModal(guildId) {
             // 清空內容並顯示載入提示
@@ -190,6 +195,22 @@
                 }
             });
         }
+        
+        // 修正 2: 新增點擊監聽器
+        $(document).ready(function() {
+            // 偵測點擊「編輯通知設定」按鈕
+            $('#openNotificationSettings').on('click', function() {
+                // 從按鈕的 data 屬性中獲取 Guild ID
+                const guildId = $(this).data('guild-id');
+                
+                if (guildId) {
+                    loadNotificationModal(guildId);
+                } else {
+                    console.error("無法取得 Guild ID 來載入模態視窗。");
+                }
+            });
+        });
     </script>
 </body>
 </html>
+
