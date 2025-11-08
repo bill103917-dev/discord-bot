@@ -1423,8 +1423,8 @@ USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
 # 權限設定
 ADMINISTRATOR_PERMISSION = 0x8
-SPECIAL_USER_IDS = []  # 你可以放特定管理員ID
-LOG_VIEWER_IDS = []    # 可看日誌的使用者ID
+SPECIAL_USER_IDS = [1238436456041676853]  # 你可以放特定管理員ID
+LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
 
 
 command_logs = []
