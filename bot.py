@@ -753,11 +753,301 @@ class FunCog(commands.Cog):
         embed.set_footer(text=f"決定者：{interaction.user.display_name}")
         await interaction.response.send_message(embed=embed)
 
-# =========================
-# VoiceCog (音樂簡化版)
-# - 提供 /play 基本功能、隊列、簡單控制面板
-# - 為了穩定，將 yt-dlp 抽取與 FFmpeg 播放做 try/except 處理
-# =========================
+# --- 遊戲板常量 ---
+ROWS = 6
+COLS = 6
+MINES = 7
+
+# 定義表情符號
+MINE_EMOJI = "💥"
+FLAG_EMOJI = "🚩"
+COVER_EMOJI = "❓"
+EMPTY_EMOJI = "⬜"
+NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
+# 數字表情符號對應索引 0 到 7
+
+class MinesweeperView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.player_id: Optional[int] = None      # 🎯 追蹤玩家 ID
+        self.board: List[List[str]] = []          # 存儲地雷和數字的實際內容 ("💥", "0", "1"...)
+        self.covered_board: List[List[bool]] = [] # 存儲格子是否被覆蓋
+        self.flagged: List[List[bool]] = []       # 存儲格子是否被插旗
+        self.is_flag_mode = False                 # 玩家是否處於插旗模式
+        self.game_over = False
+        self.message: Optional[discord.Message] = None # 存儲遊戲訊息
+        self.initialize_board()
+
+    def initialize_board(self):
+        """初始化地雷位置和數字"""
+        self.board = [["" for _ in range(COLS)] for _ in range(ROWS)]
+        self.covered_board = [[True for _ in range(COLS)] for _ in range(ROWS)]
+        self.flagged = [[False for _ in range(COLS)] for _ in range(ROWS)]
+        
+        # 隨機佈置地雷
+        mine_positions = random.sample(range(ROWS * COLS), MINES)
+        for idx in mine_positions:
+            r, c = divmod(idx, COLS)
+            self.board[r][c] = MINE_EMOJI
+
+        # 計算周圍地雷數量
+        for r in range(ROWS):
+            for c in range(COLS):
+                if self.board[r][c] == MINE_EMOJI:
+                    continue
+                
+                mine_count = 0
+                for dr in [-1, 0, 1]:
+                    for dc in [-1, 0, 1]:
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = r + dr, c + dc
+                        
+                        if 0 <= nr < ROWS and 0 <= nc < COLS and self.board[nr][nc] == MINE_EMOJI:
+                            mine_count += 1
+                
+                self.board[r][c] = str(mine_count) if mine_count > 0 else "0"
+
+    def get_button_label(self, r: int, c: int) -> str:
+        """根據格子狀態返回按鈕表情符號"""
+        if self.flagged[r][c]:
+            return FLAG_EMOJI
+        
+        if self.covered_board[r][c] and not self.game_over:
+            return COVER_EMOJI
+        
+        # 翻開的格子或遊戲結束
+        content = self.board[r][c]
+        if content == "0":
+            return EMPTY_EMOJI
+        elif content == MINE_EMOJI:
+            # 遊戲結束時顯示地雷
+            return MINE_EMOJI
+        elif content in "12345678":
+            return NUMBER_EMOJIS[int(content) - 1]
+        
+        # 遊戲結束時，標錯旗子顯示叉
+        if self.game_over and self.flagged[r][c] and self.board[r][c] != MINE_EMOJI:
+             return "❌"
+             
+        return COVER_EMOJI # 預防性回傳
+
+    def get_button_style(self, r: int, c: int) -> discord.ButtonStyle:
+        """根據格子狀態返回按鈕樣式"""
+        if self.game_over:
+            if self.board[r][c] == MINE_EMOJI:
+                return discord.ButtonStyle.red # 爆炸點或地雷
+            return discord.ButtonStyle.gray # 翻開的格子
+
+        if self.flagged[r][c]:
+            return discord.ButtonStyle.blurple # 旗子用藍色
+            
+        if not self.covered_board[r][c]:
+            return discord.ButtonStyle.grey # 翻開後變色
+            
+        return discord.ButtonStyle.secondary # 未翻開
+
+    def update_buttons(self):
+        """根據當前遊戲狀態重新繪製按鈕"""
+        self.clear_items()
+        
+        # 1. 繪製地雷板
+        for r in range(ROWS):
+            for c in range(COLS):
+                is_disabled = not self.covered_board[r][c] and not self.game_over
+                
+                button = discord.ui.Button(
+                    style=self.get_button_style(r, c),
+                    label=self.get_button_label(r, c),
+                    custom_id=f"tile_{r}_{c}",
+                    # 遊戲結束時所有按鈕都不能再按
+                    disabled=self.game_over or is_disabled 
+                )
+                button.callback = self.button_callback
+                self.add_item(button)
+        
+        # 2. 繪製模式切換按鈕
+        flag_button = discord.ui.Button(
+            style=discord.ButtonStyle.danger if self.is_flag_mode else discord.ButtonStyle.secondary,
+            label=f"{FLAG_EMOJI} 旗子模式 (ON)" if self.is_flag_mode else f"{FLAG_EMOJI} 旗子模式 (OFF)",
+            custom_id="flag_toggle",
+            row=ROWS,
+            disabled=self.game_over
+        )
+        flag_button.callback = self.flag_toggle_callback
+        self.add_item(flag_button)
+
+    def reveal_tile(self, r: int, c: int):
+        """遞歸翻開格子，如果為 0 則翻開周圍"""
+        if not (0 <= r < ROWS and 0 <= c < COLS) or not self.covered_board[r][c] or self.flagged[r][c]:
+            return
+
+        self.covered_board[r][c] = False
+        
+        if self.board[r][c] == "0":
+            # 遞歸翻開周圍
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    self.reveal_tile(r + dr, c + dc)
+
+    def check_win(self):
+        """檢查是否勝利 (所有非地雷格子都已翻開)"""
+        uncovered_count = 0
+        total_safe_tiles = ROWS * COLS - MINES
+        
+        for r in range(ROWS):
+            for c in range(COLS):
+                # 如果格子不是地雷且已翻開
+                if not self.covered_board[r][c] and self.board[r][c] != MINE_EMOJI:
+                    uncovered_count += 1
+        
+        return uncovered_count == total_safe_tiles
+
+    async def button_callback(self, interaction: Interaction):
+        """處理遊戲板點擊"""
+        if self.game_over:
+            await interaction.response.edit_message(content="遊戲已結束。", view=self)
+            return
+        
+        # 🎯 檢查是否是當前玩家
+        if interaction.user.id != self.player_id:
+            await interaction.response.send_message("這不是您的遊戲。", ephemeral=True)
+            return
+
+        # 解析座標
+        _, r_str, c_str = interaction.data['custom_id'].split('_')
+        r, c = int(r_str), int(c_str)
+        
+        if self.is_flag_mode:
+            # 處理插旗
+            self.flagged[r][c] = not self.flagged[r][c]
+            
+            self.update_buttons()
+            await interaction.response.edit_message(view=self)
+            return
+        
+        else:
+            # 處理翻開
+            if self.flagged[r][c]:
+                await interaction.response.send_message("請先移除旗子再翻開。", ephemeral=True)
+                return
+
+            if self.board[r][c] == MINE_EMOJI:
+                # 爆炸！
+                await self.end_game(interaction, False)
+                return
+            
+            # 翻開格子
+            self.reveal_tile(r, c)
+            
+            # 檢查勝利
+            if self.check_win():
+                await self.end_game(interaction, True)
+                return
+            
+            self.update_buttons()
+            await interaction.response.edit_message(view=self)
+
+    async def flag_toggle_callback(self, interaction: Interaction):
+        """切換旗子模式"""
+        if self.game_over or interaction.user.id != self.player_id:
+            await interaction.response.send_message("這不是您的遊戲或遊戲已結束。", ephemeral=True)
+            return
+
+        self.is_flag_mode = not self.is_flag_mode
+        self.update_buttons()
+        
+        await interaction.response.edit_message(
+            content=f"遊戲進行中... **旗子模式：{'ON' if self.is_flag_mode else 'OFF'}**",
+            view=self
+        )
+
+    async def end_game(self, interaction: Interaction, is_win: bool):
+        """結束遊戲"""
+        self.game_over = True
+        self.update_buttons()
+        
+        if is_win:
+            content = f"恭喜 <@{self.player_id}>！你成功通過了地雷區👍"
+        else:
+            content = f"很遺憾 <@{self.player_id}>！你爆炸了{MINE_EMOJI}！"
+            
+        # 編輯訊息並傳送結果
+        # 使用 interaction.response.edit_message 因為這是 callback 內
+        await interaction.response.edit_message(content=content, view=self) 
+        
+        # 🎯 移除活躍遊戲
+        if self.player_id in self.cog.active_games:
+            del self.cog.active_games[self.player_id]
+            
+        self.stop()
+        
+    async def on_timeout(self):
+        if not self.game_over and self.message:
+            self.game_over = True
+            self.update_buttons()
+            # 使用 self.message.edit 因為這是 timeout 內
+            await self.message.edit(content=f"遊戲超時了，地雷區挑戰失敗。", view=self)
+                
+        # 🎯 移除活躍遊戲
+        if self.player_id in self.cog.active_games:
+            del self.cog.active_games[self.player_id]
+
+
+### 2. 機器人 Cog 類別 (`MinesweeperCog`)
+
+這個類別包含啟動指令和活躍遊戲追蹤。
+
+```python
+class MinesweeperCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # 🎯 活躍遊戲追蹤 {user_id: MinesweeperView instance}
+        self.active_games: Dict[int, MinesweeperView] = {} 
+
+    # 🎯 修正指令名稱為 /踩地雷
+    @app_commands.command(name="踩地雷", description="開始一個踩地雷遊戲！")
+    async def minesweeper_game(self, interaction: Interaction):
+        player_id = interaction.user.id
+        
+        # 🎯 檢查：是否已有活躍遊戲
+        if player_id in self.active_games:
+            current_game = self.active_games[player_id]
+            
+            if not current_game.game_over and not current_game.is_finished():
+                await interaction.response.send_message("❌ **無法同時開啟兩次踩地雷！** 您目前正在進行一個遊戲。", ephemeral=True)
+                return
+            else:
+                # 移除已結束的舊遊戲
+                del self.active_games[player_id] 
+        
+        # 初始化 View
+        view = MinesweeperView(self)
+        view.player_id = player_id 
+        
+        # 🎯 儲存新的活躍遊戲
+        self.active_games[player_id] = view
+        
+        view.update_buttons() # 首次繪製按鈕
+        
+        # 發送遊戲訊息
+        embed = discord.Embed(
+            title="💣 你經過了炸彈區", 
+            description=f"挑戰者：{interaction.user.mention}\n目標：找到全部{ROWS * COLS - MINES}個安全格子，不要踩到 {MINES} 顆炸彈！",
+            color=discord.Color.blue()
+        )
+        
+        await interaction.response.send_message(
+            embed=embed, 
+            content=f"遊戲進行中... **旗子模式：OFF**",
+            view=view
+        )
+        
+        # 儲存訊息物件以便在超時時編輯
+        view.message = await interaction.original_response()
 
 # =========================
 # VoiceCog 與 MusicControlView
@@ -1364,6 +1654,7 @@ async def on_ready():
         await bot.add_cog(PingCog(bot))
         await bot.add_cog(ReactionRoleCog(bot))
         await bot.add_cog(UtilityCog(bot))
+        await bot.add_cog(MinesweeperCog(bot))
         await bot.add_cog(ModerationCog(bot))
         await bot.add_cog(FunCog(bot))
         await bot.add_cog(SupportCog(bot))
