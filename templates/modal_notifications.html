@@ -5,6 +5,7 @@
     </button>
 </div>
 <div class="modal-body" style="background-color: #36393f; padding-bottom: 0;">
+    <!-- 🚨 修正點：將 'update_notifications' 替換為正確的 'settings' 路由 -->
     <form id="notificationForm" method="POST" action="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}">
         
         <div class="row">
@@ -128,3 +129,4 @@
         border-color: #5865f2;
     }
 </style>
+
