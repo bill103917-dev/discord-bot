@@ -1759,17 +1759,6 @@ def logout():
     session.pop("discord_user", None)
     session.pop("discord_guilds", None)
     return redirect(url_for("index"))
-
-
-
-# --------------------------
-# 登出
-# --------------------------
-@app.route("/logout")
-def logout():
-    session.pop("discord_user", None)
-    session.pop("discord_guilds", None)
-    return redirect(url_for("index"))
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
