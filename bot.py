@@ -1405,7 +1405,7 @@ from flask import Flask, render_template, session, redirect, url_for, request, j
 import asyncio
 import requests
 import os
-# ❗ 修正點 1: 匯入自定義配置函數和時間函數
+import discord # 確保 discord 模組已經引入
 # 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
 from utils import load_config, save_config, safe_now 
 
@@ -1423,8 +1423,8 @@ USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
 # 權限設定
 ADMINISTRATOR_PERMISSION = 0x8
-SPECIAL_USER_IDS = [1238436456041676853]  # 你可以放特定管理員ID
-LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
+SPECIAL_USER_IDS = []  # 你可以放特定管理員ID
+LOG_VIEWER_IDS = []    # 可看日誌的使用者ID
 
 
 command_logs = []
@@ -1479,15 +1479,16 @@ def guild_dashboard(guild_id):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503
 
-    if not bot.get_guild(guild_id):
-        return f"❌ 錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
+    # 由於 settings 會執行更嚴格的檢查，這裡保持 redirect
+    if bot.get_guild(guild_id) is None:
+        pass 
 
     return redirect(url_for('settings', guild_id=guild_id))
 
 # --------------------------
-# 伺服器設定
+# 伺服器設定 (修正點 1: 異步備援獲取)
 # --------------------------
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
 @app.route("/guild/<int:guild_id>/settings/<string:module>", methods=['GET', 'POST'])
@@ -1506,14 +1507,26 @@ def settings(guild_id, module=None):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503
 
+    # ❗ 修正點 1.1: 嘗試從緩存獲取
     guild_obj = bot.get_guild(guild_id)
-    if not guild_obj:
-        return "❌ 機器人不在這個伺服器或連線超時。", 404
+    
+    # ❗ 修正點 1.2: 如果緩存失敗，嘗試異步 API 獲取
+    if guild_obj is None:
+        try:
+            future_guild = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop)
+            # 等待 5 秒鐘 API 響應
+            guild_obj = future_guild.result(timeout=5)
+        except Exception as e:
+            # API 獲取失敗 (例如機器人不在伺服器或超時)
+            guild_obj = None 
+            print(f"API Fetch Guild Error: {e}")
 
-    # ❗ load_config, save_config 現在從 utils.py 引入
-    config = load_config(guild_id) 
+    if guild_obj is None:
+        return "❌ 錯誤：找不到該伺服器、機器人不在其中，或連線超時。", 404
+
+    config = load_config(guild_id)  # 你自訂的設定讀取函式
 
     if request.method == 'POST':
         if module == 'notifications':
@@ -1521,7 +1534,7 @@ def settings(guild_id, module=None):
             config['video_notification_channel_id'] = request.form.get('video_channel_id', '')
             config['video_notification_message'] = request.form.get('video_message', '')
             config['live_notification_message'] = request.form.get('live_message', '')
-            save_config(guild_id, config) 
+            save_config(guild_id, config)  # 你自訂的設定存檔函式
             return redirect(url_for('settings', guild_id=guild_id, module=module))
         return redirect(url_for('settings', guild_id=guild_id))
 
@@ -1560,15 +1573,21 @@ def members_page(guild_id):
 
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
+        return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503
 
     try:
+        # ❗ 修正點 2.1: 嘗試從緩存獲取
         guild_obj = bot.get_guild(guild_id)
+        if guild_obj is None:
+            # 如果緩存失敗，嘗試異步 API 獲取
+            future_guild = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop)
+            guild_obj = future_guild.result(timeout=5)
+            
         if not guild_obj:
             return "❌ 找不到這個伺服器", 404
 
-        # 這裡的 limit=None 在大伺服器上可能會導致超時
-        future_members = asyncio.run_coroutine_threadsafe(guild_obj.fetch_members(limit=None), discord_loop) 
+        # 這裡獲取成員需要異步，保留 run_coroutine_threadsafe
+        future_members = asyncio.run_coroutine_threadsafe(guild_obj.fetch_members(limit=None), discord_loop)
         members = future_members.result(timeout=10)
         members_list = [
             {
@@ -1589,49 +1608,50 @@ def members_page(guild_id):
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
 
 # --------------------------
-# 通知模態
+# 通知模態 (修正點 3: 異步備援獲取)
 # --------------------------
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
 def notifications_modal(guild_id):
     global discord_loop
     if discord_loop is None or not discord_loop.is_running():
-        return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 503 # ❗ 修正為 503 Service Unavailable
+        return "❌ 載入設定失敗！錯誤：Discord 機器人事件循環尚未啟動。", 503
 
     try:
-        async def fetch_and_prepare_data():
-            guild_obj = bot.get_guild(guild_id)
-            if guild_obj is None:
-                raise ValueError(f"找不到伺服器 ID {guild_id}。機器人可能已離開或 ID 無效。") 
-            channels = guild_obj.text_channels
-            # ❗ load_config 現在從 utils.py 引入
-            config = load_config(guild_id)
-            video_channel_id = str(config.get('video_notification_channel_id', ''))
-            video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
-            live_message = config.get('live_notification_message', '@everyone {channel} is Live! {title}\n{link}')
-            ping_role = config.get('ping_role', '')
-            content_filter = config.get('content_filter', 'Videos,Livestreams')
-            return {
-                'guild_obj': guild_obj,
-                'channels': channels,
-                'video_channel_id': video_channel_id,
-                'video_message': video_message,
-                'live_message': live_message,
-                'ping_role': ping_role,
-                'content_filter': content_filter
-            }
+        # ❗ 修正點 3.1: 嘗試從緩存獲取
+        guild_obj = bot.get_guild(guild_id)
 
-        future = asyncio.run_coroutine_threadsafe(fetch_and_prepare_data(), discord_loop)
-        data = future.result(timeout=5)
+        # ❗ 修正點 3.2: 如果緩存失敗，異步 API 獲取
+        if guild_obj is None:
+            future_guild = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop)
+            guild_obj = future_guild.result(timeout=5)
+            
+        if guild_obj is None:
+            return f"❌ 找不到伺服器 ID **{guild_id}**。機器人可能已離開或 ID 無效。", 404
+            
+        channels = guild_obj.text_channels # 從緩存讀取
+        config = load_config(guild_id) # 同步工具函數
+        
+        video_channel_id = str(config.get('video_notification_channel_id', ''))
+        video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
+        live_message = config.get('live_notification_message', '@everyone {channel} is Live! {title}\n{link}')
+        ping_role = config.get('ping_role', '')
+        content_filter = config.get('content_filter', 'Videos,Livestreams')
+
+        data = {
+            'guild_obj': guild_obj,
+            'channels': channels,
+            'video_channel_id': video_channel_id,
+            'video_message': video_message,
+            'live_message': live_message,
+            'ping_role': ping_role,
+            'content_filter': content_filter
+        }
+        
         return render_template('modal_notifications.html', **data)
 
-    except ValueError as ve:
-        return f"❌ 載入設定失敗！錯誤：{str(ve)}", 404
-    except discord.NotFound:
-        return f"❌ 載入設定失敗！錯誤：找不到伺服器 ID **{guild_id}**。請確認機器人已加入此伺服器。", 404
-    except TimeoutError:
-        return f"❌ 載入設定失敗！錯誤：與 Discord API 連線超時（>5 秒）。", 500
     except Exception as e:
-        return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。", 500
+        # 捕獲所有同步和異步獲取失敗的錯誤
+        return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。訊息: {e}", 500
 
 # --------------------------
 # 日誌
@@ -1742,6 +1762,14 @@ def logout():
 
 
 
+# --------------------------
+# 登出
+# --------------------------
+@app.route("/logout")
+def logout():
+    session.pop("discord_user", None)
+    session.pop("discord_guilds", None)
+    return redirect(url_for("index"))
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
