@@ -1607,7 +1607,7 @@ def members_page(guild_id):
     except Exception as e:
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
 # --------------------------
-# 通知模態 (修正點 3: 異步備援獲取 & 錯誤處理)
+# 通知模態 (最終修正：詳細錯誤資訊)
 # --------------------------
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
 def notifications_modal(guild_id):
@@ -1621,16 +1621,17 @@ def notifications_modal(guild_id):
 
         # 3.2 如果緩存失敗，異步 API 獲取
         if guild_obj is None:
+            # 使用 fetch_guild
             future_guild = asyncio.run_coroutine_threadsafe(bot.fetch_guild(guild_id), discord_loop)
-            # 等待結果，如果 Bot 不在伺服器，這裡會拋出 discord.NotFound
+            # 等待結果
             guild_obj = future_guild.result(timeout=5)
             
         if guild_obj is None:
-            # 如果 result() 沒有拋出錯誤，但卻返回 None (理論上不會發生在 fetch_guild)
             return f"❌ 找不到伺服器 ID **{guild_id}**。機器人可能已離開或 ID 無效。", 404
             
-        channels = guild_obj.text_channels # 從緩存讀取
-        config = load_config(guild_id) # 同步工具函數
+        # ... (從緩存讀取並處理配置的邏輯) ...
+        channels = guild_obj.text_channels
+        config = load_config(guild_id)
         
         video_channel_id = str(config.get('video_notification_channel_id', ''))
         video_message = config.get('video_notification_message', 'New Video from {channel}: {title}\n{link}')
@@ -1650,15 +1651,15 @@ def notifications_modal(guild_id):
         
         return render_template('modal_notifications.html', **data)
 
-    # ❗ 修正點：精確捕獲 Discord 錯誤
-    except discord.NotFound:
-        # 10004: Unknown Guild 錯誤會被這樣捕獲
-        return f"❌ 載入設定失敗！錯誤：機器人不在該伺服器中 ({guild_id})。", 404
+    # ❗ 修正點：捕獲所有 Discord API 異常
+    except discord.HTTPException as e:
+        # 捕獲所有 API 錯誤 (例如 404, 403)
+        return f"❌ 載入設定失敗！錯誤：Discord API 報告錯誤 ({e.status})。訊息: {e.text}", e.status
     except TimeoutError:
         # 連線超時錯誤
         return f"❌ 載入設定失敗！錯誤：與 Discord API 連線超時（>5 秒）。", 500
     except Exception as e:
-        # 捕獲所有其他錯誤
+        # 捕獲所有其他非預期錯誤
         return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。訊息: {e}", 500
 # --------------------------
 # 日誌
