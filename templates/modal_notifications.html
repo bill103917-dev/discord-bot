@@ -5,17 +5,18 @@
     </button>
 </div>
 <div class="modal-body" style="background-color: #36393f; padding-bottom: 0;">
-    <!-- 🚨 修正點：將 'update_notifications' 替換為正確的 'settings' 路由 -->
     <form id="notificationForm" method="POST" action="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}">
         
         <div class="row">
             <div class="col-md-6 form-group">
                 <label for="channel_url" class="required-label">頻道網址 (Channel URL)</label>
-                <input type="text" id="channel_url" name="channel_url" class="form-control" value="https://youtube.com/@hugop" readonly>
+                <!-- 修正點 1: 移除 readonly 讓使用者可以編輯 -->
+                <input type="text" id="channel_url" name="channel_url" class="form-control" value="https://youtube.com/@hugop">
             </div>
             <div class="col-md-6 form-group">
                 <label for="channel_status">頻道狀態 (Channel Status)</label>
-                <select id="channel_status" name="channel_status" class="form-control" disabled>
+                <!-- 修正點 2: 移除 disabled 讓這個值能被提交 -->
+                <select id="channel_status" name="channel_status" class="form-control">
                     <option selected>運行中 (Running)</option>
                     <option>已暫停 (Paused)</option>
                 </select>
@@ -129,4 +130,3 @@
         border-color: #5865f2;
     }
 </style>
-
