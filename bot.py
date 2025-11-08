@@ -997,11 +997,6 @@ class MinesweeperView(discord.ui.View):
             del self.cog.active_games[self.player_id]
 
 
-### 2. 機器人 Cog 類別 (`MinesweeperCog`)
-
-這個類別包含啟動指令和活躍遊戲追蹤。
-
-```python
 class MinesweeperCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
