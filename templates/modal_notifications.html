@@ -5,7 +5,7 @@
     </button>
 </div>
 <div class="modal-body" style="background-color: #36393f; padding-bottom: 0;">
-    <form id="notificationForm" method="POST" action="{{ url_for('update_notifications', guild_id=guild_obj.id) }}">
+    <form id="notificationForm" method="POST" action="{{ url_for('settings', guild_id=guild_obj.id, module='notifications') }}">
         
         <div class="row">
             <div class="col-md-6 form-group">
