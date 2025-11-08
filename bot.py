@@ -1356,9 +1356,30 @@ async def on_ready():
     except Exception:
         discord_loop = None
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
+    
+    
+    
+    
+    TARGET_GUILD_ID = 1227929105018912839
+    
+    # 使用 Bot 的緩存檢查
+    cached_guild = bot.get_guild(TARGET_GUILD_ID)
+    
+    if cached_guild:
+        print(f"✅ 伺服器狀態：Bot 在緩存中看到伺服器 '{cached_guild.name}'。")
+    else:
+        # 如果緩存中找不到，我們手動再異步獲取一次
+        try:
+            fetched_guild = await bot.fetch_guild(TARGET_GUILD_ID)
+            print(f"⚠️ 伺服器狀態：Bot 通過 API 獲取到伺服器 '{fetched_guild.name}'。緩存可能失效。")
+        except Exception as e:
+            # 如果這裡拋出 Unknown Guild，那麼 Bot 確實不在伺服器中。
+            print(f"❌ 伺服器狀態：Bot 無法找到伺服器 ID {TARGET_GUILD_ID}。錯誤: {e}")
 
-    # add cogs (instantiate and add)
-    # add cogs (instantiate and add)
+
+
+
+            
     try:
         await bot.add_cog(HelpCog(bot))
         await bot.add_cog(LogsCog(bot))
