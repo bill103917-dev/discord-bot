@@ -1688,7 +1688,7 @@ async def on_ready():
         await bot.add_cog(PingCog(bot))
         await bot.add_cog(ReactionRoleCog(bot))
         await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(MinesweeperCog(bot))
+        await bot.add_cog(MinesweeperTextCog(bot))
         await bot.add_cog(ModerationCog(bot))
         await bot.add_cog(FunCog(bot))
         await bot.add_cog(SupportCog(bot))
