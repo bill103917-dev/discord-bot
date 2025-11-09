@@ -1727,12 +1727,6 @@ async def on_ready():
     except Exception:
         pass
 
-    # sync commands once
-    try:
-        await bot.tree.sync()
-        print("✅ Commands synced.")
-    except Exception as e:
-        print("❌ Failed to sync commands:", e)
 
 # =========================
 # ⚡ Flask Web 部分
