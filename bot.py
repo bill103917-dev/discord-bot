@@ -1181,8 +1181,20 @@ import asyncio
 import functools
 from typing import Optional
 from yt_dlp import YoutubeDL
+import os
+import asyncio
+import functools
+import tempfile
+from typing import Optional, List
 
-# Helper：安全取得語音物件
+import discord
+from discord.ext import commands
+from discord import app_commands, Interaction, FFmpegPCMAudio
+from yt_dlp import YoutubeDL
+
+# ------------------------------
+# Helper: 安全取得 VoiceClient
+# ------------------------------
 async def get_voice_client(interaction: Interaction) -> Optional[discord.VoiceClient]:
     if not interaction.guild:
         await interaction.followup.send("❌ 這個指令只能在伺服器中使用。", ephemeral=True)
@@ -1190,7 +1202,7 @@ async def get_voice_client(interaction: Interaction) -> Optional[discord.VoiceCl
     return interaction.guild.voice_client
 
 # ------------------------------
-# MusicControlView
+# MusicControlView: 按鈕介面
 # ------------------------------
 class MusicControlView(discord.ui.View):
     def __init__(self, cog, guild_id):
@@ -1278,98 +1290,102 @@ class MusicControlView(discord.ui.View):
         await interaction.response.send_message(f"🔇 音量已調整為 {int(new_vol*100)}%", ephemeral=True)
         await self.cog.update_control_message(guild_id)
 
-
 # ------------------------------
-# VoiceCog
+# VoiceCog: 音樂指令與播放核心
 # ------------------------------
 class VoiceCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = {}             # {guild_id: [(audio_url, title, duration), ...]}
-        self.now_playing = {}       # {guild_id: (title, duration, start_time)}
-        self.vc_dict = {}           # {guild_id: voice_client}
-        self.current_volume = {}    # {guild_id: float}
-        self.control_messages = {}  # {guild_id: message_id}
+        self.queue = {}             
+        self.now_playing = {}       
+        self.vc_dict = {}           
+        self.current_volume = {}    
+        self.control_messages = {}  
 
     # --------------------
-    # yt-dlp 音訊提取
+    # yt-dlp 音訊提取 (可搜尋 + Cookies)
     # --------------------
-    async def extract_yt_dlp(self, url: str):
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if 'entries' in info:
-                info = info['entries'][0]
-            audio_url = info.get('url')
-            title = info.get('title', '未知曲目')
-            duration = info.get('duration', 0)
-            return audio_url, title, duration
+    async def extract_audio(self, query: str):
+        cookies = os.getenv("YOUTUBE_COOKIES")
+        cookie_file = None
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "noplaylist": True,
+            "default_search": "ytsearch1"
+        }
+        try:
+            if cookies:
+                import tempfile
+                fd, cookie_file = tempfile.mkstemp(prefix="cookie_", suffix=".txt")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(cookies)
+                ydl_opts["cookiefile"] = cookie_file
+
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            return info.get("url"), info.get("title"), info.get("duration", 0)
+        except Exception as e:
+            print(f"❌ YouTube 提取錯誤: {e}")
+            return None, None, None
+        finally:
+            if cookie_file and os.path.exists(cookie_file):
+                os.remove(cookie_file)
 
     # --------------------
-    # 播放控制
+    # 播放器啟動
     # --------------------
-    async def start_playback(self, guild_id):
-        lock = getattr(self, f"_lock_{guild_id}", None)
-        if not lock:
-            lock = asyncio.Lock()
-            setattr(self, f"_lock_{guild_id}", lock)
-        async with lock:
-            q = self.queue.get(guild_id)
-            vc = self.vc_dict.get(guild_id)
-            if not q or not vc or vc.is_playing() or vc.is_paused():
-                await self.update_control_message(guild_id)
-                return
-
-            audio_url, title, duration = q.pop(0)
-            self.now_playing[guild_id] = (title, duration, asyncio.get_event_loop().time())
-            await self.update_control_message(guild_id)
-
-            try:
-                current_vol = self.current_volume.setdefault(guild_id, 0.5)
-                source = FFmpegPCMAudio(
-                    audio_url,
-                    executable='/usr/bin/ffmpeg',
-                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                    options="-vn"
-                )
-                source = discord.PCMVolumeTransformer(source, volume=current_vol)
-                callback = functools.partial(self.player_after_callback, guild_id)
-                vc.play(source, after=callback)
-            except Exception as e:
-                print(f"❌ 嘗試播放 {title} 發生錯誤: {e}")
-                await self.player_after_callback(guild_id, e)
-
-    async def player_after_callback(self, guild_id, error):
+    async def start_playback(self, guild_id: int):
         vc = self.vc_dict.get(guild_id)
-        if error:
-            print(f"播放錯誤: {error}")
-        self.now_playing.pop(guild_id, None)
+        if not vc:
+            return
+        q = self.queue.get(guild_id, [])
+        if not q:
+            return
+        audio_url, title, duration = q.pop(0)
+        self.now_playing[guild_id] = (title, duration, asyncio.get_event_loop().time())
+        volume = self.current_volume.setdefault(guild_id, 0.5)
+        source = FFmpegPCMAudio(
+            audio_url,
+            before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+            options="-vn",
+            executable="/usr/bin/ffmpeg"
+        )
+        transformed = discord.PCMVolumeTransformer(source, volume)
+        def after_callback(err):
+            coro = self.play_next(guild_id)
+            asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
+        vc.play(transformed, after=after_callback)
         await self.update_control_message(guild_id)
+
+    async def play_next(self, guild_id: int):
         if self.queue.get(guild_id):
             await self.start_playback(guild_id)
         else:
+            self.now_playing.pop(guild_id, None)
+            vc = self.vc_dict.get(guild_id)
             if vc and vc.is_connected():
                 await vc.disconnect()
                 self.vc_dict.pop(guild_id, None)
                 self.control_messages.pop(guild_id, None)
                 self.current_volume.pop(guild_id, None)
+            await self.update_control_message(guild_id)
 
     # --------------------
-    # 控制面板訊息更新
+    # 更新控制訊息
     # --------------------
     async def update_control_message(self, guild_id: int, channel: discord.TextChannel = None):
         vc = self.vc_dict.get(guild_id)
         q = self.queue.get(guild_id, [])
         now_playing_info = self.now_playing.get(guild_id)
         view = MusicControlView(self, guild_id)
-
         target_channel = channel
         if not target_channel and vc and vc.channel.guild.text_channels:
             target_channel = vc.channel.guild.text_channels[0]
-
         if not target_channel:
             return
-
         embed = discord.Embed(title="🎶 音樂播放器", color=discord.Color.blue())
         status_text = "目前無播放"
         if vc and vc.is_playing():
@@ -1379,24 +1395,17 @@ class VoiceCog(commands.Cog):
         elif vc and not vc.is_playing() and q:
             status_text = "🔃 即將播放"
         embed.add_field(name="狀態", value=status_text, inline=False)
-
         if now_playing_info:
             title, total_duration, _ = now_playing_info
             vol_percent = int(self.current_volume.get(guild_id, 0.5) * 100)
-            embed.add_field(
-                name="現在播放",
-                value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%",
-                inline=False
-            )
+            embed.add_field(name="現在播放", value=f"**{title}** (`{total_duration}s`) 音量: {vol_percent}%", inline=False)
         else:
             embed.add_field(name="現在播放", value="無", inline=False)
-
         if q:
             queue_text = "\n".join([f"{i+1}. {info[1]} (`{info[2]}s`)" for i, info in enumerate(q[:10])])
             embed.add_field(name=f"即將播放 ({len(q)} 首)", value=queue_text, inline=False)
         else:
             embed.add_field(name="隊列", value="隊列是空的", inline=False)
-
         try:
             msg_id = self.control_messages.get(guild_id)
             if msg_id:
@@ -1412,7 +1421,7 @@ class VoiceCog(commands.Cog):
             print(f"更新控制訊息失敗: {e}")
 
     # --------------------
-    # /play 指令
+    # 指令 /play
     # --------------------
     @app_commands.command(name="play", description="播放 YouTube 音樂或搜尋歌曲")
     @app_commands.describe(query="歌曲連結或關鍵字")
@@ -1421,37 +1430,23 @@ class VoiceCog(commands.Cog):
         if not interaction.user.voice or not interaction.user.voice.channel:
             await interaction.followup.send("❌ 你必須先加入語音頻道", ephemeral=True)
             return
-
         channel = interaction.user.voice.channel
         guild_id = interaction.guild.id
-
         vc = interaction.guild.voice_client
         if not vc:
             vc = await channel.connect()
         elif vc.channel != channel:
             await vc.move_to(channel)
         self.vc_dict[guild_id] = vc
-
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True, 'default_search': 'ytsearch1'}
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(query, download=False)
-                if 'entries' in info:
-                    info = info['entries'][0]
-                audio_url = info['url']
-                title = info.get('title', '未知曲目')
-                duration = info.get('duration', 0)
-        except Exception as e:
-            await interaction.followup.send(f"❌ 取得音訊失敗: {e}", ephemeral=True)
+        audio_url, title, duration = await self.extract_audio(query)
+        if not audio_url:
+            await interaction.followup.send("❌ 取得音訊失敗", ephemeral=True)
             return
-
         q = self.queue.setdefault(guild_id, [])
         q.append((audio_url, title, duration))
         await self.update_control_message(guild_id, interaction.channel)
-
         if not vc.is_playing() and not vc.is_paused():
             asyncio.create_task(self.start_playback(guild_id))
-
         await interaction.followup.send(f"✅ **{title}** 已加入隊列！", ephemeral=True)
 # =========================
 # SupportCog: 私訊轉發管理（包含 ServerSelectView）
