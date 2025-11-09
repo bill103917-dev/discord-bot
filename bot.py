@@ -7,7 +7,7 @@ import random
 import threading
 import asyncio
 import traceback
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Literal 
 from utils import load_config, save_config 
 from utils import safe_now
 import discord
