@@ -2265,7 +2265,7 @@ import random
 
 
 # 確保圖片上傳目錄存在
-if not os.path.exists(UPLOAD_FOLDER):
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(UPLOAD_FOLDER)
 
 def allowed_file(filename):
