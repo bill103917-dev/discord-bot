@@ -2258,13 +2258,11 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- 路由 1: 圖片上傳 (供使用者上傳) ---
-from flask import Flask, request, jsonify, send_from_directory, render_template # 確保有 render_template
-import os
-import random
-import uuid # 確保有 uuid
-
-# ... (其他程式碼) ...
+@app.route('/upload')
+def upload():
+    # 這裡可能需要驗證使用者登入狀態
+    user_info = session.get('user') # 假設你有用 session 存使用者
+    return render_template('upload.html', user=user_info)
 
 # --- 路由 1: 圖片上傳 (使用 templates/upload.html) ---
 @app.route('/upload', methods=['GET', 'POST'])
