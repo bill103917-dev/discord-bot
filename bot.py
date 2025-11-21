@@ -1990,8 +1990,6 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 UPLOAD_FOLDER = 'static/uploads'
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
-upload_path = os.path.join(basedir, 'static', 'uploads')
-app.config['UPLOAD_FOLDER'] = upload_path
 # Discord OAuth2 設定
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
@@ -2010,7 +2008,16 @@ LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 
+import os  # 確保最上面有這行
+
+# --- ⬇️ 請補上這一行 (定義 basedir) ⬇️ ---
 basedir = os.path.abspath(os.path.dirname(__file__))
+# ----------------------------------------
+
+# 這是你原本報錯的那一行
+upload_path = os.path.join(basedir, 'static', 'uploads')
+
+app.config['UPLOAD_FOLDER'] = upload_path
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     try:
