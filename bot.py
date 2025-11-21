@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 import tempfile
+import uuid  # <--- 請新增這一行在最上面
 
 # Optional imports
 try:
@@ -430,28 +431,19 @@ class LogsCog(commands.Cog):
                 await interaction.followup.send(logs_text, ephemeral=True)
             except Exception:
                 print("Logs: cannot respond")
-import discord
-from discord.ext import commands
-from discord import app_commands, Interaction
-import requests
-import json
+
 
 class RandomImageCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 🚨 替換成您的 Flask 服務運行地址！
-        # 🚨 如果 Flask 運行在與 Bot 相同的伺服器，且 Port 為 5000
+        # 🚨 請確認這裡是您的 Render 網址
         self.RANDOM_IMAGE_API = "https://disecord-bot2.onrender.com/random_image" 
-        
-        # 💡 如果您將 Flask 部署到 Render, Heroku 或其他地方，請替換為該公開域名
-        # self.RANDOM_IMAGE_API = "https://your-server-domain.com/random_image"
         
     @app_commands.command(name="圖庫抽圖", description="從使用者上傳的圖庫中隨機選取一張圖片。")
     async def random_image_command(self, interaction: Interaction):
-        await interaction.response.defer() # 延遲響應
+        await interaction.response.defer()
 
         try:
-            # 1. 調用 Flask 隨機圖片 API
             response = requests.get(self.RANDOM_IMAGE_API)
             response.raise_for_status() 
             data = response.json()
@@ -461,26 +453,24 @@ class RandomImageCog(commands.Cog):
                 await interaction.followup.send(f"❌ 圖庫錯誤：{message}", ephemeral=True)
                 return
 
-            # 2. 提取圖片連結和編號
             image_url = data["url"]
-            image_id = data["id"]
+            # 由於使用了 UUID，ID 會很長，我們只顯示前 8 碼或是隱藏
+            filename = data['filename']
             
-            # 3. 創建並發送 Embed 訊息
             embed = discord.Embed(
                 title="🖼️ 隨機圖庫圖片",
-                description=f"這是隨機選取的圖片，編號為 **#{image_id}**。",
+                description=f"這是從雲端圖庫中隨機挑選的精彩照片！",
                 color=discord.Color.gold()
             )
             embed.set_image(url=image_url)
-            embed.set_footer(text=f"圖片檔名: {data['filename']}")
+            embed.set_footer(text=f"檔案名稱: {filename}")
 
             await interaction.followup.send(embed=embed)
 
         except requests.exceptions.RequestException as e:
-            await interaction.followup.send(f"❌ 連線錯誤：無法連接到圖庫服務。請確認 Flask 服務正在運行。錯誤訊息: `{e}`", ephemeral=True)
+            await interaction.followup.send(f"❌ 連線錯誤：無法連接到圖庫服務 (Flask)。\n請確認 Render 服務是否正在運行。\n錯誤: `{e}`", ephemeral=True)
         except json.JSONDecodeError:
             await interaction.followup.send("❌ API 錯誤：圖庫服務返回了無效的數據格式。", ephemeral=True)
-
 
 # ---- PingCog (/ping) ----
 class PingCog(commands.Cog):
@@ -2269,59 +2259,49 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # --- 路由 1: 圖片上傳 (供使用者上傳) ---
+from flask import Flask, request, jsonify, send_from_directory, render_template # 確保有 render_template
+import os
+import random
+import uuid # 確保有 uuid
+
+# ... (其他程式碼) ...
+
+# --- 路由 1: 圖片上傳 (使用 templates/upload.html) ---
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        # 檢查是否有檔案在請求中
+        # 檢查請求中是否有檔案
         if 'file' not in request.files:
-            return jsonify({'success': False, 'message': 'No file part'}), 400
+            return render_template('upload.html', message="❌ 未偵測到檔案", status="error")
+        
         file = request.files['file']
         
-        # 檢查檔名是否為空
         if file.filename == '':
-            return jsonify({'success': False, 'message': 'No selected file'}), 400
+            return render_template('upload.html', message="❌ 未選擇檔案", status="error")
             
-        # 檢查檔案類型並保存
         if file and allowed_file(file.filename):
-            # 使用一個簡單的遞增編號作為檔名
             try:
-                # 找到當前最大的圖片編號
-                existing_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) if allowed_file(f)]
-                max_id = 0
-                for f in existing_files:
-                    try:
-                        max_id = max(max_id, int(f.split('.')[0]))
-                    except ValueError:
-                        pass # 忽略非數字開頭的檔案
-                
-                new_id = max_id + 1
-                # 保持原擴展名
+                # 使用 UUID 生成雜湊檔名
                 extension = file.filename.rsplit('.', 1)[1].lower()
-                new_filename = f"{new_id}.{extension}"
+                # 檔名範例: a1b2c3d4.jpg
+                random_filename = f"{uuid.uuid4().hex[:8]}.{extension}"
                 
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], new_filename))
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], random_filename))
                 
-                return jsonify({
-                    'success': True, 
-                    'message': 'Upload successful',
-                    'id': new_id,
-                    'filename': new_filename
-                })
+                return render_template(
+                    'upload.html', 
+                    message="✅ 上傳成功！您的圖片已加入圖庫。", 
+                    status="success",
+                    filename=random_filename
+                )
                 
             except Exception as e:
-                return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
-                
+                return render_template('upload.html', message=f"❌ 伺服器錯誤: {str(e)}", status="error")
         else:
-            return jsonify({'success': False, 'message': 'File type not allowed'}), 400
+            return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
 
-    # GET 請求顯示簡單的說明
-    return '''
-    <!doctype html>
-    <title>上傳圖片到圖庫</title>
-    <h1>上傳圖片</h1>
-    <p>請使用 POST 請求並將檔案命名為 'file' 上傳</p>
-    <p>您可以將此網址提供給群組成員上傳圖片。</p>
-    '''
+    # GET 請求：直接渲染 HTML 檔案
+    return render_template('upload.html')
 
 # --- 路由 2: 提供儲存的圖片 (供 Discord 顯示) ---
 @app.route('/uploads/<filename>')
