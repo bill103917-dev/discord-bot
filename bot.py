@@ -1978,18 +1978,39 @@ async def on_ready():
 # =========================
 # ⚡ Flask Web 部分
 # =========================
-from flask import Flask, render_template, session, redirect, url_for, request, jsonify
+import os
 import asyncio
 import requests
-import os
-import discord # 確保 discord 模組已經引入
+import discord
+from flask import Flask, render_template, session, redirect, url_for, request, jsonify, flash
+from werkzeug.utils import secure_filename
+
 # 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
 from utils import load_config, save_config, safe_now 
-# 允許的圖片擴展名
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-UPLOAD_FOLDER = 'static/uploads'
+
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
+
+# --- 📂 圖片上傳路徑設定 (修正 Render 報錯) ---
+# 1. 獲取當前程式碼所在的「絕對路徑」
+basedir = os.path.abspath(os.path.dirname(__file__))
+
+# 2. 設定上傳路徑為專案下的 static/uploads
+# 這樣 Render 就能正確找到路徑了
+upload_path = os.path.join(basedir, 'static', 'uploads')
+app.config['UPLOAD_FOLDER'] = upload_path
+
+# 3. 建立資料夾 (如果不存在)
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    try:
+        os.makedirs(app.config['UPLOAD_FOLDER'])
+        print(f"✅ 已建立資料夾: {app.config['UPLOAD_FOLDER']}")
+    except OSError as e:
+        print(f"❌ 建立資料夾失敗: {e}")
+
+# 允許的圖片擴展名
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
 # Discord OAuth2 設定
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
@@ -2002,29 +2023,6 @@ USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 ADMINISTRATOR_PERMISSION = 0x8
 SPECIAL_USER_IDS = [1238436456041676853]  # 你可以放特定管理員ID
 LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
-
-
-  # <--- 1. 確保這行在檔案最上面！
-from flask import Flask, request, render_template, redirect, url_for, flash
-from werkzeug.utils import secure_filename
-
-import os  # 確保最上面有這行
-
-# --- ⬇️ 請補上這一行 (定義 basedir) ⬇️ ---
-basedir = os.path.abspath(os.path.dirname(__file__))
-# ----------------------------------------
-
-# 這是你原本報錯的那一行
-upload_path = os.path.join(basedir, 'static', 'uploads')
-
-app.config['UPLOAD_FOLDER'] = upload_path
-
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    try:
-        os.makedirs(app.config['UPLOAD_FOLDER'])
-        print(f"✅ 已建立資料夾: {app.config['UPLOAD_FOLDER']}")
-    except OSError as e:
-        print(f"❌ 建立資料夾失敗: {e}")
 # --------------------------
 # OAuth2 登入頁面
 # --------------------------
