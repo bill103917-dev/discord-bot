@@ -1985,14 +1985,13 @@ import os
 import discord # 確保 discord 模組已經引入
 # 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
 from utils import load_config, save_config, safe_now 
-UPLOAD_FOLDER = 'uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # 允許的圖片擴展名
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-
+UPLOAD_FOLDER = 'static/uploads'
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
-
+upload_path = os.path.join(basedir, 'static', 'uploads')
+app.config['UPLOAD_FOLDER'] = upload_path
 # Discord OAuth2 設定
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
@@ -2007,8 +2006,38 @@ SPECIAL_USER_IDS = [1238436456041676853]  # 你可以放特定管理員ID
 LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
 
 
-command_logs = []
+  # <--- 1. 確保這行在檔案最上面！
+from flask import Flask, request, render_template, redirect, url_for, flash
+from werkzeug.utils import secure_filename
 
+app = Flask(__name__)
+
+# --- ⬇️ 把這段加在 app = Flask(__name__) 下面 ⬇️ ---
+
+# 設定圖片要存哪裡 (這裡設為 static/uploads 資料夾)
+
+
+import os
+
+app = Flask(__name__)
+
+# --- 針對 Render 的修正設定 ---
+
+# 1. 獲取當前程式碼所在的「絕對路徑」
+basedir = os.path.abspath(os.path.dirname(__file__))
+
+# 2. 設定上傳路徑為專案下的 static/uploads
+# 使用 os.path.join 確保路徑格式正確
+
+
+# 3. 重要：每次啟動時，檢查資料夾是否存在，不存在就建立
+# 這一步在 Render 上非常重要，因為原本的資料夾可能不存在
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    try:
+        os.makedirs(app.config['UPLOAD_FOLDER'])
+        print(f"✅ 已建立資料夾: {app.config['UPLOAD_FOLDER']}")
+    except OSError as e:
+        print(f"❌ 建立資料夾失敗: {e}")
 # --------------------------
 # OAuth2 登入頁面
 # --------------------------
