@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
+import tempfile
 
 # Optional imports
 try:
