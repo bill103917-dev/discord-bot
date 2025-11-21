@@ -429,6 +429,57 @@ class LogsCog(commands.Cog):
                 await interaction.followup.send(logs_text, ephemeral=True)
             except Exception:
                 print("Logs: cannot respond")
+import discord
+from discord.ext import commands
+from discord import app_commands, Interaction
+import requests
+import json
+
+class RandomImageCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # 🚨 替換成您的 Flask 服務運行地址！
+        # 🚨 如果 Flask 運行在與 Bot 相同的伺服器，且 Port 為 5000
+        self.RANDOM_IMAGE_API = "https://disecord-bot2.onrender.com/random_image" 
+        
+        # 💡 如果您將 Flask 部署到 Render, Heroku 或其他地方，請替換為該公開域名
+        # self.RANDOM_IMAGE_API = "https://your-server-domain.com/random_image"
+        
+    @app_commands.command(name="圖庫抽圖", description="從使用者上傳的圖庫中隨機選取一張圖片。")
+    async def random_image_command(self, interaction: Interaction):
+        await interaction.response.defer() # 延遲響應
+
+        try:
+            # 1. 調用 Flask 隨機圖片 API
+            response = requests.get(self.RANDOM_IMAGE_API)
+            response.raise_for_status() 
+            data = response.json()
+
+            if not data.get("success"):
+                message = data.get("message", "未能成功從圖庫 API 獲取圖片。")
+                await interaction.followup.send(f"❌ 圖庫錯誤：{message}", ephemeral=True)
+                return
+
+            # 2. 提取圖片連結和編號
+            image_url = data["url"]
+            image_id = data["id"]
+            
+            # 3. 創建並發送 Embed 訊息
+            embed = discord.Embed(
+                title="🖼️ 隨機圖庫圖片",
+                description=f"這是隨機選取的圖片，編號為 **#{image_id}**。",
+                color=discord.Color.gold()
+            )
+            embed.set_image(url=image_url)
+            embed.set_footer(text=f"圖片檔名: {data['filename']}")
+
+            await interaction.followup.send(embed=embed)
+
+        except requests.exceptions.RequestException as e:
+            await interaction.followup.send(f"❌ 連線錯誤：無法連接到圖庫服務。請確認 Flask 服務正在運行。錯誤訊息: `{e}`", ephemeral=True)
+        except json.JSONDecodeError:
+            await interaction.followup.send("❌ API 錯誤：圖庫服務返回了無效的數據格式。", ephemeral=True)
+
 
 # ---- PingCog (/ping) ----
 class PingCog(commands.Cog):
@@ -1908,6 +1959,7 @@ async def on_ready():
         await bot.add_cog(ModerationCog(bot))
         await bot.add_cog(FunCog(bot))
         await bot.add_cog(SupportCog(bot))
+        await bot.add_cog(RandomImageCog(bot))
         await bot.add_cog(VoiceCog(bot))
         print("✅ All Cogs loaded.")
     except Exception as e:
@@ -1942,7 +1994,10 @@ import os
 import discord # 確保 discord 模組已經引入
 # 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
 from utils import load_config, save_config, safe_now 
-
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# 允許的圖片擴展名
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
@@ -2195,6 +2250,117 @@ def notifications_modal(guild_id):
     except Exception as e:
         # 捕獲所有其他非預期錯誤
         return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。訊息: {e}", 500
+# image_server.py
+
+from flask import Flask, request, jsonify, send_from_directory
+import os
+import random
+
+# --- 配置 ---
+
+
+# 確保圖片上傳目錄存在
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- 路由 1: 圖片上傳 (供使用者上傳) ---
+@app.route('/upload', methods=['GET', 'POST'])
+def upload_file():
+    if request.method == 'POST':
+        # 檢查是否有檔案在請求中
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'message': 'No file part'}), 400
+        file = request.files['file']
+        
+        # 檢查檔名是否為空
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No selected file'}), 400
+            
+        # 檢查檔案類型並保存
+        if file and allowed_file(file.filename):
+            # 使用一個簡單的遞增編號作為檔名
+            try:
+                # 找到當前最大的圖片編號
+                existing_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) if allowed_file(f)]
+                max_id = 0
+                for f in existing_files:
+                    try:
+                        max_id = max(max_id, int(f.split('.')[0]))
+                    except ValueError:
+                        pass # 忽略非數字開頭的檔案
+                
+                new_id = max_id + 1
+                # 保持原擴展名
+                extension = file.filename.rsplit('.', 1)[1].lower()
+                new_filename = f"{new_id}.{extension}"
+                
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], new_filename))
+                
+                return jsonify({
+                    'success': True, 
+                    'message': 'Upload successful',
+                    'id': new_id,
+                    'filename': new_filename
+                })
+                
+            except Exception as e:
+                return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+                
+        else:
+            return jsonify({'success': False, 'message': 'File type not allowed'}), 400
+
+    # GET 請求顯示簡單的說明
+    return '''
+    <!doctype html>
+    <title>上傳圖片到圖庫</title>
+    <h1>上傳圖片</h1>
+    <p>請使用 POST 請求並將檔案命名為 'file' 上傳</p>
+    <p>您可以將此網址提供給群組成員上傳圖片。</p>
+    '''
+
+# --- 路由 2: 提供儲存的圖片 (供 Discord 顯示) ---
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    # 確保圖片來源於 'uploads' 資料夾
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
+# --- 路由 3: 隨機圖片 API (供 Discord Bot 調用) ---
+@app.route('/random_image', methods=['GET'])
+def get_random_image():
+    # 獲取所有符合條件的圖片檔案
+    files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) if allowed_file(f)]
+    
+    if not files:
+        return jsonify({'success': False, 'message': 'No images available'}), 404
+
+    # 隨機選取一個檔案
+    selected_file = random.choice(files)
+    
+    # 從檔名中提取編號 (假設檔名格式為 ID.ext)
+    try:
+        image_id = int(selected_file.split('.')[0])
+    except ValueError:
+        image_id = selected_file # 如果檔名不是純數字，使用完整檔名作為 ID
+
+    # 構造圖片的完整 URL 
+    # 🚨 這裡必須使用您的伺服器/機器人的外部 IP 或域名！
+    # 🚨 為了測試，我們假設服務運行在 localhost:5000
+    base_url = request.host_url.rstrip('/') # 獲取當前訪問的基 URL
+    image_url = f"{base_url}/uploads/{selected_file}"
+    
+    return jsonify({
+        'success': True,
+        'id': image_id,
+        'url': image_url,
+        'filename': selected_file
+    })
+
+
 # --------------------------
 # 日誌
 # --------------------------
@@ -2214,7 +2380,7 @@ def all_guild_logs():
     if not can_view_logs:
         return "❌ 您沒有權限訪問這個頁面。", 403
 
-    return render_template('all_logs.html', logs=command_logs)
+    return render_template('all_logs.html', logs=COMMAND_LOGS)
 
 @app.route("/logs/data")
 def logs_data():
