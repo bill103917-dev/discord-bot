@@ -276,6 +276,7 @@
             <nav class="sidebar-nav">
                 <ul>
                     <li><a href="#" class="active"><span class="icon">🏠</span> 選擇伺服器</a></li>
+                    <li><a href="{{ url_for('upload') }}"><span class="icon">📤</span> 上傳隨機圖片</a></li>
                     <li><a href="https://discord.com/oauth2/authorize?client_id={{ DISCORD_CLIENT_ID }}&permissions=8&scope=bot" target="_blank"><span class="icon">➕</span> 邀請機器人</a></li>
                     {% if is_special_user %}
                     <li><a href="{{ url_for('all_guild_logs') }}"><span class="icon">📜</span> 全域日誌</a></li>
