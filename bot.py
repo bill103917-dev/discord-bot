@@ -2010,28 +2010,8 @@ LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
-
-# --- ⬇️ 把這段加在 app = Flask(__name__) 下面 ⬇️ ---
-
-# 設定圖片要存哪裡 (這裡設為 static/uploads 資料夾)
-
-
-import os
-
-app = Flask(__name__)
-
-# --- 針對 Render 的修正設定 ---
-
-# 1. 獲取當前程式碼所在的「絕對路徑」
 basedir = os.path.abspath(os.path.dirname(__file__))
 
-# 2. 設定上傳路徑為專案下的 static/uploads
-# 使用 os.path.join 確保路徑格式正確
-
-
-# 3. 重要：每次啟動時，檢查資料夾是否存在，不存在就建立
-# 這一步在 Render 上非常重要，因為原本的資料夾可能不存在
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     try:
         os.makedirs(app.config['UPLOAD_FOLDER'])
