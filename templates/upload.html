@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖片上傳中心</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #2c2f33;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background-color: #23272a;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 { margin-bottom: 1.5rem; color: #7289da; }
+        
+        /* 隱藏原始檔案輸入框，用 Label 美化 */
+        input[type="file"] {
+            display: none;
+        }
+        
+        .custom-file-upload {
+            border: 2px dashed #7289da;
+            display: inline-block;
+            padding: 12px 24px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            margin-bottom: 1rem;
+            width: 80%;
+        }
+        .custom-file-upload:hover {
+            background-color: #7289da;
+            color: white;
+        }
+        
+        /* 預覽圖片區域 */
+        #preview-container {
+            margin: 15px 0;
+            display: none;
+        }
+        #preview-image {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+            border: 2px solid #7289da;
+        }
+
+        .btn-submit {
+            background-color: #43b581;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .btn-submit:hover { background-color: #3ca374; }
+        .btn-submit:disabled { background-color: #555; cursor: not-allowed; }
+
+        .message { margin-top: 15px; font-size: 0.9rem; }
+        .success { color: #43b581; }
+        .error { color: #f04747; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>📤 上傳圖片到圖庫</h1>
+        
+        <form method="POST" enctype="multipart/form-data" id="uploadForm">
+            <label for="file-upload" class="custom-file-upload">
+                📷 選擇圖片或拍照
+            </label>
+            <input id="file-upload" type="file" name="file" accept="image/*">
+            
+            <div id="preview-container">
+                <img id="preview-image" src="#" alt="圖片預覽">
+            </div>
+
+            <button type="submit" class="btn-submit" id="submitBtn" disabled>確認上傳</button>
+        </form>
+
+        {% if message %}
+            <p class="message {{ status }}">{{ message }}</p>
+            {% if filename %}
+                <p style="font-size: 0.8rem; color: #99aab5;">ID: {{ filename }}</p>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-upload');
+        const previewContainer = document.getElementById('preview-container');
+        const previewImage = document.getElementById('preview-image');
+        const submitBtn = document.getElementById('submitBtn');
+        const label = document.querySelector('.custom-file-upload');
+
+        fileInput.onchange = evt => {
+            const [file] = fileInput.files;
+            if (file) {
+                previewImage.src = URL.createObjectURL(file);
+                previewContainer.style.display = 'block';
+                submitBtn.disabled = false;
+                label.textContent = "🔄 更換圖片";
+                label.style.borderColor = "#43b581";
+            }
+        }
+    </script>
+</body>
+</html>
