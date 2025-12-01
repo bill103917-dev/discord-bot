@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timezone, timedelta
 
-# 假設您的設定檔統一放在專門的資料夾中
+
 CONFIG_DIR = "configs" 
 SUPPORT_CONFIG_FILE = "support_config.json" # SupportCog 用的配置檔名
 
