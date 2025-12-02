@@ -16,6 +16,17 @@ from discord import app_commands, ui, Interaction, TextChannel
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
 import tempfile
 import uuid  # <--- 請新增這一行在最上面
+import traceback
+import tempfile
+ 
+
+from discord import app_commands, Interaction, ui
+from discord.ext.commands import Context
+from discord import FFmpegPCMAudio 
+
+from youtube_dl import YoutubeDL 
+
+from typing import Optional, Dict, List, Tuple, Literal
 
 # Optional imports
 try:
@@ -1183,14 +1194,21 @@ class MusicControlView(discord.ui.View):
         self.cog = cog
         self.guild_id = guild_id
 
+# ===============================================
+# 📌 修改 2：MusicControlView 的 interaction_check
+# (位於第二段程式碼中 MusicControlView 類別內部)
+# ===============================================
     async def interaction_check(self, interaction: Interaction) -> bool:
-        vc = await get_voice_client(interaction)
-        if not vc:
+        vc = self.cog.vc_dict.get(self.guild_id)
+        
+        if not vc or not vc.is_connected():
             return interaction.user.guild_permissions.administrator
+        
         if interaction.user.voice and interaction.user.voice.channel == vc.channel:
             return True
+            
         return interaction.user.guild_permissions.administrator
-
+        
     @discord.ui.button(label="⏯️", style=discord.ButtonStyle.primary)
     async def btn_pause_resume(self, interaction: Interaction, button: discord.ui.Button):
         vc = self.cog.vc_dict.get(self.guild_id)
@@ -2278,11 +2296,10 @@ def upload():
     user_info = session.get('user') # 假設你有用 session 存使用者
     return render_template('upload.html', user=user_info)
 
-# --- 路由 1: 圖片上傳 (使用 templates/upload.html) ---
+
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        # 檢查請求中是否有檔案
         if 'file' not in request.files:
             return render_template('upload.html', message="❌ 未偵測到檔案", status="error")
         
@@ -2293,9 +2310,7 @@ def upload_file():
             
         if file and allowed_file(file.filename):
             try:
-                # 使用 UUID 生成雜湊檔名
                 extension = file.filename.rsplit('.', 1)[1].lower()
-                # 檔名範例: a1b2c3d4.jpg
                 random_filename = f"{uuid.uuid4().hex[:8]}.{extension}"
                 
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], random_filename))
@@ -2312,8 +2327,8 @@ def upload_file():
         else:
             return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
 
-    # GET 請求：直接渲染 HTML 檔案
     return render_template('upload.html')
+
 
 # --- 路由 2: 提供儲存的圖片 (供 Discord 顯示) ---
 @app.route('/uploads/<filename>')
@@ -2375,6 +2390,10 @@ def all_guild_logs():
 
     return render_template('all_logs.html', logs=COMMAND_LOGS)
 
+# ===============================================
+# 📌 修改 4：Flask logs_data 路由的變數名稱
+# (位於第四段程式碼中)
+# ===============================================
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
@@ -2391,7 +2410,8 @@ def logs_data():
     if not can_view_logs:
         return jsonify({"error": "您沒有權限訪問此資料"}), 403
 
-    return jsonify(command_logs)
+    return jsonify(COMMAND_LOGS)
+
 
 # --------------------------
 # 服務條款與隱私
