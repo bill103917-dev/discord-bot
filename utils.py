@@ -42,3 +42,25 @@ def save_config(guild_id: int, config: dict):
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 
+
+
+def get_support_config_path():
+    """建構全域支援配置檔案路徑"""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    return os.path.join(CONFIG_DIR, SUPPORT_CONFIG_FILE)
+
+def load_support_config() -> dict:
+    """載入全域支援設定 (用於 SupportCog)"""
+    path = get_support_config_path()
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # 如果檔案不存在或損壞，返回空字典
+        return {}
+
+def save_support_config(config: dict):
+    """儲存全域支援設定 (用於 SupportCog)"""
+    path = get_support_config_path()
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
