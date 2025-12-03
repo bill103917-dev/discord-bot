@@ -1945,52 +1945,64 @@ async def on_app_command_error(interaction: Interaction, error):
 # =========================
 # on_ready: load cogs and sync once
 # =========================
-
 @bot.event
 async def on_ready():
-    global discord_loop
+    # 確保 on_ready 邏輯只運行一次（特別是針對載入 Cogs）
     if getattr(bot, "_has_ready_run", False):
-        return
-    bot._has_ready_run = True
-    try:
-        discord_loop = asyncio.get_running_loop()
-    except Exception:
-        discord_loop = None
-    print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
+        # 如果已經運行過，只同步指令和設定狀態，避免重複載入 Cog
+        # ⚠️ 注意：這裡省略了 return，讓指令同步和狀態設定能再次運行
+        pass 
+    else:
+        # 第一次運行
+        bot._has_ready_run = True
 
-    if not self.bot.get_view("support_reply"):
-        self.bot.add_view(ReplyView())
+        global discord_loop
+        try:
+            discord_loop = asyncio.get_running_loop()
+        except Exception:
+            discord_loop = None
 
-    
+        print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
+
+        # --- 1. 載入 Cogs (僅在 Bot 啟動時執行一次) ---
+        try:
+            # 這是您原來的 Cog 列表
+            await bot.add_cog(HelpCog(bot))
+            await bot.add_cog(LogsCog(bot))
+            await bot.add_cog(PingCog(bot))
+            await bot.add_cog(ReactionRoleCog(bot))
+            await bot.add_cog(UtilityCog(bot))
+            await bot.add_cog(MinesweeperTextCog(bot))
+            await bot.add_cog(ModerationCog(bot))
+            await bot.add_cog(FunCog(bot))
+            await bot.add_cog(SupportCog(bot))
+            await bot.add_cog(RandomImageCog(bot))
+            await bot.add_cog(VoiceCog(bot))
+            print("✅ All Cogs loaded.")
+        except Exception as e:
+            print("❌ Cog add error:", e)
+            traceback.print_exc()
+
+        # --- 2. 註冊持久化 View ---
+        try:
+            # 使用 bot.add_view(ReplyView()) 來註冊持久化類別
+            # 必須使用無參數的 __init__ 實例化
+            if not bot.get_view("support_reply"): 
+                bot.add_view(ReplyView())
+                print("✅ ReplyView persistent class registered.")
+        except Exception as e:
+            print(f"❌ 持久化 View 註冊錯誤: {e}")
+            traceback.print_exc()
+
+
+    # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
     try:
-        await bot.add_cog(HelpCog(bot))
-        await bot.add_cog(LogsCog(bot))
-        await bot.add_cog(PingCog(bot))
-        await bot.add_cog(ReactionRoleCog(bot))
-        await bot.add_cog(UtilityCog(bot))
-        await bot.add_cog(MinesweeperTextCog(bot))
-        await bot.add_cog(ModerationCog(bot))
-        await bot.add_cog(FunCog(bot))
-        await bot.add_cog(SupportCog(bot))
-        await bot.add_cog(RandomImageCog(bot))
-        await bot.add_cog(VoiceCog(bot))
-        print("✅ All Cogs loaded.")
+        await bot.tree.sync() 
+        print("✅ 斜線指令已同步完成。")
     except Exception as e:
-        print("❌ Cog add error:", e)
-        traceback.print_exc()
+        print(f"❌ 同步指令時發生錯誤: {e}")
 
-
-    # register persistent views if needed
-    try:
-        # Support views
-        support_cog = bot.get_cog("SupportCog")
-        if support_cog:
-            bot.add_view(ReplyView(0, "", support_cog))
-            # ServerSelectView needs user-specific instances, we don't add global one here
-    except Exception:
-        pass
-
-    # set presence
+    # --- 4. 設定 Bot 狀態 (每次 on_ready 都應該運行) ---
     try:
         await bot.change_presence(status=discord.Status.online, activity=discord.Game(name="服務中 | /help"))
     except Exception:
