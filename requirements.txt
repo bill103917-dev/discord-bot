@@ -9,3 +9,4 @@ yt-dlp>=2024.01.24
 spotipy
 authlib 
 requests-oauthlib
+youtube-dl
