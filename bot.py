@@ -1957,7 +1957,10 @@ async def on_ready():
     except Exception:
         discord_loop = None
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
-    
+
+        if not self.bot.get_view("support_reply"):
+             self.bot.add_view(ReplyView())
+
     
     try:
         await bot.add_cog(HelpCog(bot))
