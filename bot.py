@@ -2337,6 +2337,7 @@ async def on_ready():
             await bot.add_cog(RandomImageCog(bot))
             await bot.add_cog(giveawayCog(bot))
             await bot.add_cog(VoiceCog(bot))
+            await bot.add_view(giveawayView())
             print("✅ All Cogs loaded.")
         except Exception as e:
             print("❌ Cog add error:", e)
@@ -2350,8 +2351,7 @@ async def on_ready():
         except Exception as e:
             print(f"❌ 持久化 View 註冊錯誤: {e}")
             traceback.print_exc()
-        try:
-            bot.add_view(giveawayView())
+
 
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
     try:
