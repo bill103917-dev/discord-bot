@@ -20,6 +20,7 @@ import uuid  # <--- 請新增這一行在最上面
 import traceback
 import tempfile
  
+from giveaway_cog import 抽獎系統, 抽獎視圖 
 
 from discord import app_commands, Interaction, ui
 from discord.ext.commands import Context
@@ -1977,6 +1978,7 @@ async def on_ready():
             await bot.add_cog(FunCog(bot))
             await bot.add_cog(SupportCog(bot))
             await bot.add_cog(RandomImageCog(bot))
+            await bot.add_cog(抽獎系統(bot, db_manager_instance, bot_config_dict))
             await bot.add_cog(VoiceCog(bot))
             print("✅ All Cogs loaded.")
         except Exception as e:
