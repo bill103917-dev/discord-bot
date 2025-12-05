@@ -554,17 +554,8 @@ class ReactionRoleCog(commands.Cog):
         msg_roles[emoji] = role.id
         await interaction.followup.send(f"✅ 已設定 {emoji} -> {role.name}", ephemeral=True)
 
-from utils.embeds import EmbedFactory, EmbedColor
-from utils.permissions import is_admin
-from utils.converters import TimeConverter
-from database.db_manager import DatabaseManager
 
-# 僅用於類型提示，防止循環引入錯誤
-if TYPE_CHECKING:
-    from utils.embeds import EmbedFactory, EmbedColor
-    from utils.permissions import is_admin
-    from utils.converters import TimeConverter
-    from database.db_manager import DatabaseManager
+
 
 
 logger = logging.getLogger(__name__)
