@@ -2344,7 +2344,7 @@ async def on_ready():
 
         # --- 2. 註冊持久化 View ---
         try:
-            if not bot.add_view("support_reply"): 
+            if not bot.add_view("ReplyView"): 
                 bot.add_view(ReplyView())
                 print("✅ ReplyView persistent class registered.")
         except Exception as e:
