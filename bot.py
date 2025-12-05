@@ -2351,7 +2351,7 @@ async def on_ready():
             print(f"❌ 持久化 View 註冊錯誤: {e}")
             traceback.print_exc()
         try:
-            if not bot.add_view("giveawayView")
+            if not bot.add_view("giveawayView"):
             bot.add_view(giveawayView())
 
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
