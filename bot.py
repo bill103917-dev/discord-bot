@@ -2337,7 +2337,6 @@ async def on_ready():
             await bot.add_cog(RandomImageCog(bot))
             await bot.add_cog(giveawayCog(bot))
             await bot.add_cog(VoiceCog(bot))
-            await bot.add_view(giveawayView())
             print("✅ All Cogs loaded.")
         except Exception as e:
             print("❌ Cog add error:", e)
