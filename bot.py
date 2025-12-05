@@ -1989,7 +1989,7 @@ async def on_ready():
         try:
             # 使用 bot.add_view(ReplyView()) 來註冊持久化類別
             # 必須使用無參數的 __init__ 實例化
-            if not bot.get_view("support_reply"): 
+            if not bot.add_view("support_reply"): 
                 bot.add_view(ReplyView())
                 print("✅ ReplyView persistent class registered.")
         except Exception as e:
