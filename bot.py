@@ -495,9 +495,12 @@ class 備份系統(commands.Cog):
     # 內部工具函式
     # -----------------------------------------------------------
 
+    # /opt/render/project/src/bot.py - 替換 _get_server_data 函式
+
     def _get_server_data(self, guild: discord.Guild) -> dict:
         """從伺服器物件提取所有可備份的資料"""
         
+        # 建立身份組 ID 到名稱的映射
         role_name_map = {role.id: role.name for role in guild.roles}
         
         data = {
@@ -510,27 +513,27 @@ class 備份系統(commands.Cog):
                 "hoist": role.hoist,
                 "mentionable": role.mentionable,
                 "is_everyone": role.is_default()
-            } for role in guild.roles if not role.is_default()], 
+            } for role in guild.roles if not role.is_default()], # 忽略 @everyone
             
             # 2. 頻道備份
             "channels": [{
                 "name": channel.name,
                 "type": channel.type.value,
                 "category_name": channel.category.name if channel.category else None,
+                "position": channel.position, # 👈 **新增：備份頻道位置**
                 "topic": getattr(channel, 'topic', None),
-                "user_limit": getattr(channel, 'user_limit', None), 
+                "user_limit": getattr(channel, 'user_limit', None), # 語音頻道限制
                 # 權限覆蓋 (Overwrites)
                 "overwrites": [{
                     "name": role_name_map.get(target.id, None), 
-                    "type": 0, 
+                    "type": 0, # 僅備份身份組 (Role)
                     "allow": overwrite.allow.value,
                     "deny": overwrite.deny.value
                 } for target, overwrite in channel.overwrites.items() if isinstance(target, discord.Role)]
                 
-            } for channel in sorted(guild.channels, key=lambda c: (c.position, c.name))] 
+            } for channel in sorted(guild.channels, key=lambda c: (c.position, c.name))] # 按位置排序
         }
         return data
-
 
 
     async def _delete_all_existing_data(self, guild: discord.Guild, safe_channel_id: int): 
@@ -568,12 +571,14 @@ class 備份系統(commands.Cog):
 
     # /opt/render/project/src/bot.py - 替換 _execute_restore 函式
 
+    # /opt/render/project/src/bot.py - 替換 _execute_restore 函式
+
     async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
         """核心還原邏輯：解密、將原頻道設為安全區、清理舊資料、創建新資料，並提供刪除確認按鈕。"""
         guild = interaction.guild
         safe_channel = interaction.channel # 執行指令的頻道成為安全區
         
-        # 1. 解密資料
+        # 1. 解密資料 (保持不變)
         server_data = {}
         try:
             key_bytes = key.encode()
@@ -584,35 +589,27 @@ class 備份系統(commands.Cog):
             server_data = json.loads(decrypted_data_bytes.decode('utf-8'))
             
         except Exception:
-            # 由於原始互動回應可能已過期，我們直接在頻道發送非臨時訊息
             await safe_channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
             return
         
-        # 2. 清理伺服器現有資料 (新流程)
+        # 2. 清理伺服器現有資料 (保持不變)
         original_channel_name = safe_channel.name
         safe_name = "伺服器-還原安全區"
         
         try:
-            # 2.1. 將安全頻道改名
             await safe_channel.edit(name=safe_name, reason="設為還原安全區")
-            
-            # 2.2. 發送狀態並執行清理
             status_message = await safe_channel.send("🧹 **開始清理伺服器**：刪除所有現有頻道和身份組...")
-            
-            # 傳遞安全頻道 ID 給刪除函式
             await self._delete_all_existing_data(guild, safe_channel.id) 
-            
             await status_message.edit(content="✅ **清理完成**。開始重建伺服器結構...")
             
         except Exception as e:
-            # 如果清理失敗，嘗試將頻道名稱改回並報告
             await safe_channel.edit(name=original_channel_name, reason="還原失敗，改回原名")
             await safe_channel.send(f"{interaction.user.mention} ❌ **清理失敗！** 請確認 Bot 權限是否正確 (管理員權限)。錯誤: {e}")
             return
 
         # 3. 執行還原操作
         
-        # 3.1. 還原身份組
+        # 3.1. 還原身份組 (保持不變)
         role_map = {} 
         for role_data in server_data["roles"]:
             try:
@@ -627,7 +624,7 @@ class 備份系統(commands.Cog):
                 role_map[role_data["name"]] = new_role
                 await asyncio.sleep(0.1)
             except Exception as e:
-                logging.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
+                logger.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
         
         # 3.2. 還原頻道和權限
         category_map = {} 
@@ -637,7 +634,7 @@ class 備份系統(commands.Cog):
             
             for ow in channel_data["overwrites"]:
                 target_role_name = ow["name"]
-                
+                # 處理權限覆蓋目標 (保持不變)
                 if target_role_name == "@everyone":
                     target = guild.default_role
                 elif target_role_name in role_map: 
@@ -659,6 +656,7 @@ class 備份系統(commands.Cog):
                     new_category = await guild.create_category(
                         channel_data["name"], 
                         overwrites=overwrites,
+                        position=channel_data["position"], # 👈 **使用備份的位置**
                         reason="伺服器備份還原"
                     )
                     category_map[channel_data["name"]] = new_category
@@ -670,6 +668,7 @@ class 備份系統(commands.Cog):
                 "name": channel_data["name"],
                 "overwrites": overwrites,
                 "category": category, 
+                "position": channel_data["position"], # 👈 **使用備份的位置**
                 "reason": "伺服器備份還原"
             }
             
@@ -686,9 +685,9 @@ class 備份系統(commands.Cog):
                     )
                 await asyncio.sleep(0.1)
             except Exception as e:
-                logging.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
+                logger.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
 
-        # 4. 報告完成並提供刪除選項
+        # 4. 報告完成並提供刪除選項 (保持不變)
         view = DeleteSafeChannelView(self, safe_channel, original_channel_name)
         
         await safe_channel.send(
@@ -696,8 +695,6 @@ class 備份系統(commands.Cog):
             f"**您希望刪除這個安全頻道嗎？** (原名: {original_channel_name})",
             view=view
         )
-
-
     # -----------------------------------------------------------
     # 指令：備份伺服器 (/備份伺服器)
     # -----------------------------------------------------------
