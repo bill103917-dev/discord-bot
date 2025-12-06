@@ -2223,7 +2223,8 @@ async def on_ready():
         try:
             bot.add_view(ReplyView())
             print("✅ ReplyView persistent class registered.")
-
+        except Exception as e:
+            print("持久話伺服器設定設定失敗: {e}")
 
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
     try:
