@@ -7,6 +7,8 @@ import random
 import threading
 import asyncio
 import traceback
+import discord
+import logging # 用於記錄錯誤
 from typing import Optional, List, Dict, Tuple, Literal 
 from utils import load_config, save_config 
 from utils import safe_now
