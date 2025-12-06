@@ -19,9 +19,6 @@ import tempfile
 import uuid  # <--- 請新增這一行在最上面
 import traceback
 import tempfile
- import discord
-from discord.ext import commands
-from discord import app_commands
 from cryptography.fernet import Fernet # 新增
 import json # 新增
 import io # 新增
