@@ -571,6 +571,8 @@ class 備份系統(commands.Cog):
 
 # /opt/render/project/src/bot.py - 替換 _execute_restore 函式
 
+# /opt/render/project/src/bot.py - 替換 _execute_restore 函式
+
     async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
         """核心還原邏輯：解密、將原頻道設為安全區、清理舊資料、創建新資料，並提供刪除確認按鈕。"""
         guild = interaction.guild
@@ -580,7 +582,7 @@ class 備份系統(commands.Cog):
         # 結構: { 'category_name': [ (new_channel_obj, original_position), ... ] }
         channels_by_category = {}
         
-        # 1. 解密資料 (保持不變)
+        # 1. 解密資料
         server_data = {}
         try:
             key_bytes = key.encode()
@@ -594,7 +596,7 @@ class 備份系統(commands.Cog):
             await safe_channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
             return
         
-        # 2. 清理伺服器現有資料 (保持不變)
+        # 2. 清理伺服器現有資料
         original_channel_name = safe_channel.name
         safe_name = "伺服器-還原安全區"
         
@@ -611,7 +613,7 @@ class 備份系統(commands.Cog):
 
         # 3. 執行還原操作
         
-        # 3.1. 還原身份組 (保持不變)
+        # 3.1. 還原身份組
         role_map = {} 
         for role_data in server_data["roles"]:
             try:
@@ -714,7 +716,6 @@ class 備份系統(commands.Cog):
             category_id = category_obj.id if category_obj else None
             
             # 3. 創建批次調整列表
-            # position index (0, 1, 2...) 即為分類內的相對位置
             for index, (channel, _) in enumerate(channel_list):
                 all_channel_positions.append({
                     'id': channel.id,
@@ -722,16 +723,31 @@ class 備份系統(commands.Cog):
                     'parent_id': category_id # 必須指定父分類 ID
                 })
         
-        # 4. 執行批次調整
+        # 4. 執行批次調整 (加強錯誤捕獲)
         if all_channel_positions:
             try:
                 await guild.edit_channel_positions(all_channel_positions)
                 await asyncio.sleep(1) 
+                
+                await safe_channel.send("✅ **頻道順序調整完成！**", delete_after=10)
+                
+            except discord.Forbidden:
+                await safe_channel.send(
+                    f"{interaction.user.mention} ❌ **頻道順序調整失敗：權限不足 (Forbidden)。**\n"
+                    "請確認 Bot 是否擁有 **管理頻道** 權限，且其身份組位於所有頻道和分類之上。",
+                    delete_after=30
+                )
+                logger.error("頻道批次調整失敗：權限不足", exc_info=True)
             except Exception as e:
-                logger.error(f"批次調整頻道順序失敗: {e}")
+                await safe_channel.send(
+                    f"{interaction.user.mention} ❌ **頻道順序調整失敗：未知錯誤。**\n"
+                    f"錯誤資訊: `{type(e).__name__}: {str(e)}`",
+                    delete_after=30
+                )
+                logger.error("頻道批次調整失敗：未知錯誤", exc_info=True)
 
 
-        # 4. 報告完成並提供刪除選項 (保持不變)
+        # 4. 報告完成並提供刪除選項
         view = DeleteSafeChannelView(self, safe_channel, original_channel_name)
         
         await safe_channel.send(
@@ -739,6 +755,7 @@ class 備份系統(commands.Cog):
             f"**您希望刪除這個安全頻道嗎？** (原名: {original_channel_name})",
             view=view
         )
+
 
     # -----------------------------------------------------------
     # 指令：備份伺服器 (/備份伺服器)
@@ -777,7 +794,7 @@ class 備份系統(commands.Cog):
                 "📥 **伺服器備份已完成！**\n\n"
                 f"伺服器名稱：**{guild.name}**\n\n"
                 "請妥善保管以下**密鑰**，還原時需要用到：\n"
-                f"\n`{key_str}`\n", 
+                f"\n `{key_str}` \n", 
                 file=backup_file
             )
             
