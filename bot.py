@@ -917,39 +917,45 @@ class RandomImageCog(commands.Cog):
         self.bot = bot
         # 🚨 請確認這裡是您的 Render 網址
         self.RANDOM_IMAGE_API = "https://disecord-bot2.onrender.com/random_image" 
+        self.TARGET_CHANNEL_ID = 1446781237422198855 
         
-    @app_commands.command(name="圖庫抽圖", description="從使用者上傳的圖庫中隨機選取一張圖片。")
-    async def random_image_command(self, interaction: Interaction):
+    @app_commands.command(name="抽圖", description="從圖庫頻道中隨機抽取一張圖片發送。")
+    async def draw_image(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        
+        channel = self.bot.get_channel(self.TARGET_CHANNEL_ID)
+        if not channel:
+            return await interaction.followup.send("❌ 錯誤：找不到指定的圖庫頻道。", ephemeral=True)
 
         try:
-            response = requests.get(self.RANDOM_IMAGE_API)
-            response.raise_for_status() 
-            data = response.json()
-
-            if not data.get("success"):
-                message = data.get("message", "未能成功從圖庫 API 獲取圖片。")
-                await interaction.followup.send(f"❌ 圖庫錯誤：{message}", ephemeral=True)
-                return
-
-            image_url = data["url"]
-            # 由於使用了 UUID，ID 會很長，我們只顯示前 8 碼或是隱藏
-            filename = data['filename']
+            # 1. 獲取頻道中包含圖片附件的訊息 (掃描最新的 500 條)
+            messages = [
+                msg async for msg in channel.history(limit=500)
+                # 必須是圖片檔案 (content_type 以 'image/' 開頭)
+                if msg.attachments and msg.attachments[0].content_type.startswith('image/')
+            ]
             
+            if not messages:
+                return await interaction.followup.send("❌ 圖庫中找不到任何圖片。", ephemeral=True)
+
+            # 2. 隨機選取一條訊息
+            random_message = random.choice(messages)
+            
+            # 3. 獲取第一個附件（即圖片）的 URL
+            image_url = random_message.attachments[0].url
+
             embed = discord.Embed(
-                title="🖼️ 隨機圖庫圖片",
-                description=f"這是從雲端圖庫中隨機挑選的精彩照片！",
-                color=discord.Color.gold()
+                title="🎲 隨機圖庫圖片",
+                description=f"這是從 {channel.mention} 中隨機抽取的圖片！",
+                color=discord.Color.blue()
             )
             embed.set_image(url=image_url)
-            embed.set_footer(text=f"檔案名稱: {filename}")
+            embed.set_footer(text=f"圖片原始上傳者: {random_message.author.display_name} | 原始訊息ID: {random_message.id}")
 
             await interaction.followup.send(embed=embed)
 
-        except requests.exceptions.RequestException as e:
-            await interaction.followup.send(f"❌ 連線錯誤：無法連接到圖庫服務 (Flask)。\n請確認 Render 服務是否正在運行。\n錯誤: `{e}`", ephemeral=True)
-        except json.JSONDecodeError:
-            await interaction.followup.send("❌ API 錯誤：圖庫服務返回了無效的數據格式。", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ 發生錯誤：無法讀取頻道歷史或發送訊息。\n錯誤: `{e}`", ephemeral=True)
 
 # ---- PingCog (/ping) ----
 class PingCog(commands.Cog):
@@ -2777,35 +2783,72 @@ def upload():
     return render_template('upload.html', user=user_info)
 
 
-@app.route('/upload', methods=['GET', 'POST'])
-def upload_file():
+# Flask 應用程式碼 (例如 app.py)
+
+
+# 🚨 配置區塊 - 請務必替換
+UPLOAD_FOLDER = 'static/temp_uploads' # 暫存區，Bot發送後會刪除
+# 💡 注意: 如果 Flask 和 Bot 在同一個 Render 服務中，通常使用 localhost 或服務名稱
+BOT_API_URL = "http://localhost:8080/api/upload_proxy" 
+# 🚨 替換成您希望圖片發送到的 Discord 頻道 ID
+TARGET_CHANNEL_ID = "YOUR_TARGET_CHANNEL_ID" 
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# 允許的圖片擴展名
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+# 建立暫存資料夾
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- 路由 1: 網頁上傳處理 ---
+@app.route('/upload_web', methods=['GET', 'POST'])
+def upload_file_from_web():
     if request.method == 'POST':
-        if 'file' not in request.files:
-            return render_template('upload.html', message="❌ 未偵測到檔案", status="error")
+        if 'file' not in request.files or request.files['file'].filename == '':
+            return render_template('upload.html', message="❌ 請選擇檔案", status="error")
         
         file = request.files['file']
         
-        if file.filename == '':
-            return render_template('upload.html', message="❌ 未選擇檔案", status="error")
-            
         if file and allowed_file(file.filename):
             try:
                 extension = file.filename.rsplit('.', 1)[1].lower()
                 random_filename = f"{uuid.uuid4().hex[:8]}.{extension}"
+                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
                 
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], random_filename))
+                # 1. 暫時儲存圖片到本地
+                file.save(temp_path)
                 
-                return render_template(
-                    'upload.html', 
-                    message="✅ 上傳成功！您的圖片已加入圖庫。", 
-                    status="success",
-                    filename=random_filename
-                )
+                # 2. 【核心】將圖片發送給 Discord Bot 代理
+                with open(temp_path, 'rb') as f:
+                    files = {'file': (random_filename, f, file.content_type)}
+                    data = {'channel_id': TARGET_CHANNEL_ID} 
+                    
+                    bot_response = requests.post(BOT_API_URL, files=files, data=data)
+                    bot_response.raise_for_status() 
                 
+                # 3. 刪除本地暫存檔案
+                os.remove(temp_path)
+
+                if bot_response.json().get("success"):
+                    return render_template('upload.html', message="✅ 上傳成功！Bot 已將圖片發送到指定頻道。", status="success")
+                else:
+                    return render_template('upload.html', message=f"❌ Bot 處理失敗: {bot_response.json().get('error', '未知錯誤')}", status="error")
+                
+            except requests.exceptions.RequestException as e:
+                 # 連線 Bot 失敗或 Bot 返回錯誤狀態碼 (4xx/5xx)
+                if os.path.exists(temp_path):
+                     os.remove(temp_path) # 確保失敗時也清理暫存檔案
+                return render_template('upload.html', message=f"❌ Bot 連線錯誤: 請確認 Bot API 服務運行正常。錯誤: {e}", status="error")
             except Exception as e:
                 return render_template('upload.html', message=f"❌ 伺服器錯誤: {str(e)}", status="error")
         else:
             return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
+
 
     return render_template('upload.html')
 
