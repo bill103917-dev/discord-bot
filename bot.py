@@ -393,18 +393,73 @@ active_games: Dict[int, RPSView] = {}
 # COGS (單檔案實作) — 每個 Cog 都以 class 定義並在 on_ready 加入
 # 一些只含一個指令的 Cog（Help, Logs, Ping, ReactionRole）照你要求給完整 Cog
 # =========================
+# --- 1. 定義還原確認的 Discord 介面 (Modal) ---
+
+class RestoreConfirmModal(discord.ui.Modal, title="🚨 最終確認：還原伺服器配置 🚨"):
+    """彈出文字輸入框，要求用戶輸入特定文字進行二次確認。"""
+    
+    def __init__(self, cog, key: str, backup_file: discord.Attachment):
+        super().__init__()
+        # 傳入 Cog 實例、密鑰和檔案，以便在確認後執行還原
+        self.cog = cog
+        self.key = key
+        self.backup_file = backup_file
+        
+    confirmation_input = discord.ui.TextInput(
+        label="請輸入以下文字進行確認:",
+        placeholder="我要用備份還原伺服器",
+        required=True,
+        style=discord.TextStyle.short
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        required_phrase = "我要用備份還原伺服器"
+        
+        if self.confirmation_input.value.strip() == required_phrase:
+            # 二次確認成功，執行核心還原邏輯
+            await interaction.response.send_message("✅ **二次確認成功。** 伺服器還原程序將在背景開始執行，這會刪除**所有**現有頻道和身份組！", ephemeral=True)
+            
+            # 將耗時的還原操作交給 Bot 的 Event Loop 執行，避免指令超時 (這是關鍵)
+            self.cog.bot.loop.create_task(
+                self.cog._execute_restore(interaction, self.key, self.backup_file)
+            )
+
+        else:
+            await interaction.response.send_message("❌ **二次確認失敗。** 輸入的文字不符，還原操作已取消。", ephemeral=True)
+
+
+# --- 2. 定義還原確認的 Discord 介面 (View) ---
+
+class RestoreConfirmView(discord.ui.View):
+    """包含一個按鈕，用於觸發二次確認 Modal。"""
+    def __init__(self, cog, key: str, backup_file: discord.Attachment):
+        super().__init__(timeout=300) # 5分鐘超時
+        self.cog = cog
+        self.key = key
+        self.backup_file = backup_file
+
+    @discord.ui.button(label="點擊此處開始還原", style=discord.ButtonStyle.red)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 點擊按鈕後，彈出 Modal 進行文字確認
+        modal = RestoreConfirmModal(self.cog, self.key, self.backup_file)
+        await interaction.response.send_modal(modal)
+
+
+# --- 3. 備份系統 Cog ---
+
 class 備份系統(commands.Cog):
-    """伺服器備份與還原系統：使用密鑰加密 JSON 配置，並透過私訊傳輸檔案。"""
+    """伺服器備份與還原系統：新增了刪除清理和二次確認機制。"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
     
-    # --- 內部工具函式：擷取伺服器資料 ---
+    # -----------------------------------------------------------
+    # 內部工具函式
+    # -----------------------------------------------------------
 
     def _get_server_data(self, guild: discord.Guild) -> dict:
         """從伺服器物件提取所有可備份的資料"""
         
-        # 建立身份組 ID 到名稱的映射，用於頻道權限覆蓋查找
         role_name_map = {role.id: role.name for role in guild.roles}
         
         data = {
@@ -417,7 +472,7 @@ class 備份系統(commands.Cog):
                 "hoist": role.hoist,
                 "mentionable": role.mentionable,
                 "is_everyone": role.is_default()
-            } for role in guild.roles if not role.is_default()], # 忽略 @everyone
+            } for role in guild.roles if not role.is_default()], 
             
             # 2. 頻道備份
             "channels": [{
@@ -425,101 +480,57 @@ class 備份系統(commands.Cog):
                 "type": channel.type.value,
                 "category_name": channel.category.name if channel.category else None,
                 "topic": getattr(channel, 'topic', None),
-                "user_limit": getattr(channel, 'user_limit', None), # 語音頻道限制
+                "user_limit": getattr(channel, 'user_limit', None), 
                 # 權限覆蓋 (Overwrites)
                 "overwrites": [{
-                    # ⚠️ 注意：這裡使用名稱而不是 ID，還原時再用名稱查找
                     "name": role_name_map.get(target.id, None), 
-                    "type": 0, # 僅備份身份組 (Role)
+                    "type": 0, 
                     "allow": overwrite.allow.value,
                     "deny": overwrite.deny.value
                 } for target, overwrite in channel.overwrites.items() if isinstance(target, discord.Role)]
                 
-            } for channel in sorted(guild.channels, key=lambda c: (c.position, c.name))] # 按位置排序
+            } for channel in sorted(guild.channels, key=lambda c: (c.position, c.name))] 
         }
         return data
 
-    # --- 指令：備份伺服器 (/備份伺服器) ---
+    async def _delete_all_existing_data(self, guild: discord.Guild):
+        """【新增】刪除所有現有的頻道、分類和身份組。"""
+        
+        # 1. 刪除頻道和分類
+        # 必須按位置降序排序，確保先刪除頻道再刪除類別
+        for channel in sorted(guild.channels, key=lambda c: c.position, reverse=True):
+            try:
+                # 確保 Bot 不刪除自己正在運行的語音/文字頻道 (如果Bot在頻道中)
+                await channel.delete(reason="伺服器還原前清理")
+                await asyncio.sleep(0.1) # 避免速率限制
+            except Exception as e:
+                logging.warning(f"刪除頻道/分類 {channel.name} 失敗: {e}")
+        
+        # 2. 刪除身份組
+        bot_member = guild.get_member(self.bot.user.id)
+        if not bot_member:
+            raise Exception("Bot 不在伺服器中，無法繼續還原操作。")
+        bot_highest_role = bot_member.top_role
 
-    @app_commands.command(name="備份伺服器", description="生成伺服器配置的加密備份，透過私訊發送")
-    @app_commands.default_permissions(administrator=True) # 確保只有管理員能用
-    # @is_admin() 
-    async def backup_server(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        # 按位置降序排序，避免刪除 Bot 權限之上的身份組
+        for role in sorted(guild.roles, key=lambda r: r.position, reverse=True):
+            if role.is_default() or role.managed:
+                continue # 跳過 @everyone 和託管身份組
+            if role >= bot_highest_role:
+                continue # 跳過 Bot 無法刪除的身份組
+            
+            try:
+                await role.delete(reason="伺服器還原前清理")
+                await asyncio.sleep(0.1) # 避免速率限制
+            except Exception as e:
+                logging.warning(f"刪除身份組 {role.name} 失敗: {e}")
+
+
+    async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
+        """【新增】核心還原邏輯：解密、清理舊資料、創建新資料。"""
         guild = interaction.guild
         
-        # 1. 提取伺服器資料並加密
-        try:
-            server_data = self._get_server_data(guild)
-            json_data = json.dumps(server_data).encode('utf-8')
-
-            key = Fernet.generate_key()
-            f = Fernet(key)
-            encrypted_data = f.encrypt(json_data)
-        except Exception as e:
-            logger.error(f"備份資料生成或加密失敗: {e}", exc_info=True)
-            await interaction.followup.send("❌ **備份失敗！** 內部資料處理發生錯誤。", ephemeral=True)
-            return
-
-        # 2. 創建備份檔案 (模擬 .bin 檔案)
-        backup_file = discord.File(
-            io.BytesIO(encrypted_data), 
-            filename=f"server_backup_{guild.id}.bin"
-        )
-        
-        # 3. 私訊使用者
-        try:
-            key_str = key.decode()
-            
-            await interaction.user.send(
-                "📥 **伺服器備份已完成！**\n\n"
-                f"伺服器名稱：**{guild.name}**\n\n"
-                "請妥善保管以下**密鑰**，還原時需要用到：\n"
-                f"```\n{key_str}\n```", 
-                file=backup_file
-            )
-            
-            await interaction.followup.send(
-                f"✅ **備份成功！** 加密檔案和密鑰已私訊給您。請檢查您的私訊。", 
-                ephemeral=True
-            )
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "❌ **備份失敗！** 我無法私訊您。請檢查您的隱私設定，確保允許伺服器成員私訊您。",
-                ephemeral=True
-            )
-        except Exception as e:
-             logger.error(f"備份私訊傳輸失敗: {e}", exc_info=True)
-             await interaction.followup.send(
-                f"❌ **備份失敗！** 傳輸時發生未知錯誤。",
-                ephemeral=True
-            )
-
-
-    # --- 指令：還原備份 (/還原備份) ---
-
-    @app_commands.command(name="還原備份", description="使用備份檔案和密鑰來還原伺服器配置")
-    @app_commands.describe(
-        key="備份時收到的密鑰",
-        backup_file="從私訊下載的 .bin 備份檔案"
-    )
-    @app_commands.default_permissions(administrator=True)
-    # @is_admin()
-    async def restore_backup(
-        self, 
-        interaction: discord.Interaction, 
-        key: str, 
-        backup_file: discord.Attachment
-    ):
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        
-        # 1. 檢查檔案類型
-        if not backup_file.filename.endswith(".bin"):
-            await interaction.followup.send("❌ **還原失敗！** 請上傳正確的 `.bin` 備份檔案。", ephemeral=True)
-            return
-
-        # 2. 下載並解密資料
+        # 1. 解密資料
         server_data = {}
         try:
             key_bytes = key.encode()
@@ -529,19 +540,24 @@ class 備份系統(commands.Cog):
             decrypted_data_bytes = f.decrypt(encrypted_data)
             server_data = json.loads(decrypted_data_bytes.decode('utf-8'))
             
-        except base64.b64decodeerr:
-            await interaction.followup.send("❌ **還原失敗！** 密鑰格式不正確，無法解密。", ephemeral=True)
-            return
         except Exception:
-            await interaction.followup.send("❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", ephemeral=True)
+            await interaction.channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
+            return
+        
+        # 2. 清理伺服器現有資料
+        try:
+            # 編輯原先的臨時回應，讓所有人看到清理步驟
+            await interaction.edit_original_response(content="🧹 **開始清理伺服器**：刪除所有現有頻道和身份組...", view=None)
+            await self._delete_all_existing_data(guild)
+            await interaction.edit_original_response(content="✅ **清理完成**。開始重建伺服器結構...")
+        except Exception as e:
+            await interaction.channel.send(f"{interaction.user.mention} ❌ **清理失敗！** 請確認 Bot 權限是否正確 (管理員權限)。錯誤: {e}", delete_after=30)
             return
 
         # 3. 執行還原操作
-        await interaction.followup.send("⏳ **開始還原...** 身份組和頻道正在重建中。這可能需要幾秒鐘。", ephemeral=True)
-
+        
         # 3.1. 還原身份組
         role_map = {} 
-        
         for role_data in server_data["roles"]:
             try:
                 new_role = await guild.create_role(
@@ -553,25 +569,24 @@ class 備份系統(commands.Cog):
                     reason="伺服器備份還原"
                 )
                 role_map[role_data["name"]] = new_role
+                await asyncio.sleep(0.1)
             except Exception as e:
-                logger.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
+                logging.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
         
         # 3.2. 還原頻道和權限
-        category_map = {} # 映射舊類別名稱到新類別物件
+        category_map = {} 
 
         for channel_data in server_data["channels"]:
             overwrites = {}
             
-            # 轉換權限覆蓋
             for ow in channel_data["overwrites"]:
                 target_role_name = ow["name"]
                 
                 if target_role_name == "@everyone":
                     target = guild.default_role
-                elif target_role_name in role_map:
+                elif target_role_name in role_map: 
                     target = role_map[target_role_name]
                 else:
-                    # 找不到身份組，跳過該權限覆蓋
                     continue 
 
                 overwrites[target] = discord.PermissionOverwrite.from_pair(
@@ -580,6 +595,7 @@ class 備份系統(commands.Cog):
                 )
 
             channel_type = discord.ChannelType(channel_data["type"])
+            category = category_map.get(channel_data["category_name"])
             
             # 處理類別頻道 (Category)
             if channel_type == discord.ChannelType.category:
@@ -590,15 +606,14 @@ class 備份系統(commands.Cog):
                         reason="伺服器備份還原"
                     )
                     category_map[channel_data["name"]] = new_category
+                    await asyncio.sleep(0.1)
                 continue
             
-            # 獲取類別物件
-            category = category_map.get(channel_data["category_name"])
-            
+            # 處理其他頻道並將其放在對應類別下
             create_params = {
                 "name": channel_data["name"],
                 "overwrites": overwrites,
-                "category": category,
+                "category": category, 
                 "reason": "伺服器備份還原"
             }
             
@@ -613,14 +628,101 @@ class 備份系統(commands.Cog):
                         user_limit=channel_data["user_limit"],
                         **create_params
                     )
-                # 其他頻道類型（階段、論壇等）在此處添加
+                await asyncio.sleep(0.1)
             except Exception as e:
-                logger.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
+                logging.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
 
-        await interaction.followup.send(
-            f"🎉 **還原完成！** 伺服器配置已還原到備份狀態。請檢查新創建的身份組和頻道。",
+        await interaction.channel.send(
+            f"{interaction.user.mention} 🎉 **還原完成！** 伺服器配置已還原到備份狀態。",
+            ephemeral=False
+        )
+
+
+    # -----------------------------------------------------------
+    # 指令：備份伺服器 (/備份伺服器)
+    # -----------------------------------------------------------
+
+    @app_commands.command(name="備份伺服器", description="生成伺服器配置的加密備份，透過私訊發送")
+    @app_commands.default_permissions(administrator=True) 
+    async def backup_server(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        
+        try:
+            server_data = self._get_server_data(guild)
+            json_data = json.dumps(server_data).encode('utf-8')
+
+            key = Fernet.generate_key()
+            f = Fernet(key)
+            encrypted_data = f.encrypt(json_data)
+        except Exception as e:
+            logging.error(f"備份資料生成或加密失敗: {e}", exc_info=True)
+            return await interaction.followup.send("❌ **備份失敗！** 內部資料處理發生錯誤。", ephemeral=True)
+
+        backup_file = discord.File(
+            io.BytesIO(encrypted_data), 
+            filename=f"server_backup_{guild.id}.bin"
+        )
+        
+        try:
+            key_str = key.decode()
+            
+            await interaction.user.send(
+                "📥 **伺服器備份已完成！**\n\n"
+                f"伺服器名稱：**{guild.name}**\n\n"
+                "請妥善保管以下**密鑰**，還原時需要用到：\n"
+                f"`\n{key_str}\n`", 
+                file=backup_file
+            )
+            
+            await interaction.followup.send(
+                f"✅ **備份成功！** 加密檔案和密鑰已私訊給您。請檢查您的私訊。", 
+                ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ **備份失敗！** 我無法私訊您。請檢查您的隱私設定，確保允許伺服器成員私訊您。",
+                ephemeral=True
+            )
+        except Exception as e:
+             logging.error(f"備份私訊傳輸失敗: {e}", exc_info=True)
+             await interaction.followup.send(
+                f"❌ **備份失敗！** 傳輸時發生未知錯誤。",
+                ephemeral=True
+            )
+
+
+    # -----------------------------------------------------------
+    # 指令：還原備份 (/還原備份) - 帶有二次確認
+    # -----------------------------------------------------------
+
+    @app_commands.command(name="還原備份", description="使用備份檔案和密鑰來還原伺服器配置 (需二次確認)")
+    @app_commands.describe(
+        key="備份時收到的密鑰",
+        backup_file="從私訊下載的 .bin 備份檔案"
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def restore_backup(
+        self, 
+        interaction: discord.Interaction, 
+        key: str, 
+        backup_file: discord.Attachment
+    ):
+        
+        # 1. 檢查檔案類型
+        if not backup_file.filename.endswith(".bin"):
+            return await interaction.response.send_message("❌ **還原失敗！** 請上傳正確的 `.bin` 備份檔案。", ephemeral=True)
+
+        # 2. 呈現二次確認介面
+        view = RestoreConfirmView(self, key, backup_file)
+        
+        await interaction.response.send_message(
+            "⚠️ **嚴重警告：伺服器還原操作將會刪除此伺服器中** **所有** **現有的頻道、分類和身份組** **（除了 @everyone 和 Bot 身份組）。**\n\n"
+            "您確定要繼續嗎？請點擊按鈕進行**文字確認**。",
+            view=view,
             ephemeral=True
         )
+
 
 # ---- HelpCog (/help) ----
 class HelpCog(commands.Cog):
