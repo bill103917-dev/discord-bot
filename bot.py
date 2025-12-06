@@ -432,6 +432,42 @@ class RestoreConfirmModal(discord.ui.Modal, title="🚨 最終確認：還原伺
 
 # --- 2. 定義還原確認的 Discord 介面 (View) ---
 
+
+class DeleteSafeChannelView(discord.ui.View):
+    """還原完成後，提供使用者刪除/保留安全頻道的選項。"""
+    def __init__(self, cog, channel: discord.TextChannel, original_name: str):
+        super().__init__(timeout=180) # 3分鐘超時
+        self.cog = cog
+        self.channel = channel
+        self.original_name = original_name
+
+    @discord.ui.button(label="刪除此安全頻道", style=discord.ButtonStyle.red)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 停用所有按鈕，避免二次點擊
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="🔄 正在刪除頻道...", view=self) 
+
+        try:
+            # 必須使用 self.channel.delete()
+            await self.channel.delete(reason="還原完成，使用者要求刪除安全頻道")
+        except Exception as e:
+            logging.error(f"刪除安全頻道 {self.channel.name} 失敗: {e}")
+            
+    @discord.ui.button(label="保留並改回原名", style=discord.ButtonStyle.gray)
+    async def keep_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 停用所有按鈕
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content=f"✅ 已保留此頻道，並將其名稱改回 `{self.original_name}`。", view=self) 
+
+        try:
+            await self.channel.edit(name=self.original_name, reason="使用者選擇保留安全頻道並恢復原名")
+        except Exception as e:
+             logging.error(f"恢復安全頻道名稱 {self.channel.name} 失敗: {e}")
+
 class RestoreConfirmView(discord.ui.View):
     """包含一個按鈕，用於觸發二次確認 Modal。"""
     def __init__(self, cog, key: str, backup_file: discord.Attachment):
@@ -495,14 +531,17 @@ class 備份系統(commands.Cog):
         }
         return data
 
-    async def _delete_all_existing_data(self, guild: discord.Guild):
-        """【新增】刪除所有現有的頻道、分類和身份組。"""
+
+
+    async def _delete_all_existing_data(self, guild: discord.Guild, safe_channel_id: int): 
+        """刪除所有現有的頻道、分類和身份組，但會跳過指定的安全頻道。"""
         
         # 1. 刪除頻道和分類
-        # 必須按位置降序排序，確保先刪除頻道再刪除類別
         for channel in sorted(guild.channels, key=lambda c: c.position, reverse=True):
+            if channel.id == safe_channel_id: 
+                continue # 跳過安全頻道
+            
             try:
-                # 確保 Bot 不刪除自己正在運行的語音/文字頻道 (如果Bot在頻道中)
                 await channel.delete(reason="伺服器還原前清理")
                 await asyncio.sleep(0.1) # 避免速率限制
             except Exception as e:
@@ -514,23 +553,25 @@ class 備份系統(commands.Cog):
             raise Exception("Bot 不在伺服器中，無法繼續還原操作。")
         bot_highest_role = bot_member.top_role
 
-        # 按位置降序排序，避免刪除 Bot 權限之上的身份組
         for role in sorted(guild.roles, key=lambda r: r.position, reverse=True):
             if role.is_default() or role.managed:
-                continue # 跳過 @everyone 和託管身份組
+                continue 
             if role >= bot_highest_role:
-                continue # 跳過 Bot 無法刪除的身份組
+                continue 
             
             try:
                 await role.delete(reason="伺服器還原前清理")
-                await asyncio.sleep(0.1) # 避免速率限制
+                await asyncio.sleep(0.1)
             except Exception as e:
                 logging.warning(f"刪除身份組 {role.name} 失敗: {e}")
 
 
+    # /opt/render/project/src/bot.py - 替換 _execute_restore 函式
+
     async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
-        """【新增】核心還原邏輯：解密、清理舊資料、創建新資料。"""
+        """核心還原邏輯：解密、將原頻道設為安全區、清理舊資料、創建新資料，並提供刪除確認按鈕。"""
         guild = interaction.guild
+        safe_channel = interaction.channel # 執行指令的頻道成為安全區
         
         # 1. 解密資料
         server_data = {}
@@ -543,17 +584,30 @@ class 備份系統(commands.Cog):
             server_data = json.loads(decrypted_data_bytes.decode('utf-8'))
             
         except Exception:
-            await interaction.channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
+            # 由於原始互動回應可能已過期，我們直接在頻道發送非臨時訊息
+            await safe_channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
             return
         
-        # 2. 清理伺服器現有資料
+        # 2. 清理伺服器現有資料 (新流程)
+        original_channel_name = safe_channel.name
+        safe_name = "伺服器-還原安全區"
+        
         try:
-            # 編輯原先的臨時回應，讓所有人看到清理步驟
-            await interaction.edit_original_response(content="🧹 **開始清理伺服器**：刪除所有現有頻道和身份組...", view=None)
-            await self._delete_all_existing_data(guild)
-            await interaction.edit_original_response(content="✅ **清理完成**。開始重建伺服器結構...")
+            # 2.1. 將安全頻道改名
+            await safe_channel.edit(name=safe_name, reason="設為還原安全區")
+            
+            # 2.2. 發送狀態並執行清理
+            status_message = await safe_channel.send("🧹 **開始清理伺服器**：刪除所有現有頻道和身份組...")
+            
+            # 傳遞安全頻道 ID 給刪除函式
+            await self._delete_all_existing_data(guild, safe_channel.id) 
+            
+            await status_message.edit(content="✅ **清理完成**。開始重建伺服器結構...")
+            
         except Exception as e:
-            await interaction.channel.send(f"{interaction.user.mention} ❌ **清理失敗！** 請確認 Bot 權限是否正確 (管理員權限)。錯誤: {e}", delete_after=30)
+            # 如果清理失敗，嘗試將頻道名稱改回並報告
+            await safe_channel.edit(name=original_channel_name, reason="還原失敗，改回原名")
+            await safe_channel.send(f"{interaction.user.mention} ❌ **清理失敗！** 請確認 Bot 權限是否正確 (管理員權限)。錯誤: {e}")
             return
 
         # 3. 執行還原操作
@@ -634,9 +688,13 @@ class 備份系統(commands.Cog):
             except Exception as e:
                 logging.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
 
-        await interaction.channel.send(
-            f"{interaction.user.mention} 🎉 **還原完成！** 伺服器配置已還原到備份狀態。",
-            ephemeral=False
+        # 4. 報告完成並提供刪除選項
+        view = DeleteSafeChannelView(self, safe_channel, original_channel_name)
+        
+        await safe_channel.send(
+            f"{interaction.user.mention} 🎉 **還原完成！** 伺服器配置已還原到備份狀態。\n\n"
+            f"**您希望刪除這個安全頻道嗎？** (原名: {original_channel_name})",
+            view=view
         )
 
 
@@ -661,11 +719,15 @@ class 備份系統(commands.Cog):
             logging.error(f"備份資料生成或加密失敗: {e}", exc_info=True)
             return await interaction.followup.send("❌ **備份失敗！** 內部資料處理發生錯誤。", ephemeral=True)
 
+
+        safe_guild_name = "".join(c for c in guild.name if c.isalnum() or c in (' ', '_')).rstrip()
+
         backup_file = discord.File(
             io.BytesIO(encrypted_data), 
-            filename=f"server_backup_{guild.id}.bin"
+            # 💡 修改這裡：將伺服器名稱包含在檔案名中
+            filename=f"{safe_guild_name}的備份資料.bin" 
         )
-        
+    
         try:
             key_str = key.decode()
             
