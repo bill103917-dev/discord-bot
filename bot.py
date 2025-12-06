@@ -777,7 +777,7 @@ class 備份系統(commands.Cog):
                 "📥 **伺服器備份已完成！**\n\n"
                 f"伺服器名稱：**{guild.name}**\n\n"
                 "請妥善保管以下**密鑰**，還原時需要用到：\n"
-                f"`\n{key_str}\n`", 
+                f"\n`{key_str}`\n", 
                 file=backup_file
             )
             
@@ -802,10 +802,12 @@ class 備份系統(commands.Cog):
     # 指令：還原備份 (/還原備份) - 帶有二次確認
     # -----------------------------------------------------------
 
+# /opt/render/project/src/bot.py - 修改 restore_backup 函式
+
     @app_commands.command(name="還原備份", description="使用備份檔案和密鑰來還原伺服器配置 (需二次確認)")
     @app_commands.describe(
-        key="備份時收到的密鑰",
-        backup_file="從私訊下載的 .bin 備份檔案"
+        backup_file="從私訊下載的 .bin 備份檔案",
+        key="備份時收到的密鑰"
     )
     @app_commands.default_permissions(administrator=True)
     async def restore_backup(
@@ -815,19 +817,25 @@ class 備份系統(commands.Cog):
         backup_file: discord.Attachment
     ):
         
-        # 1. 檢查檔案類型
-        if not backup_file.filename.endswith(".bin"):
-            return await interaction.response.send_message("❌ **還原失敗！** 請上傳正確的 `.bin` 備份檔案。", ephemeral=True)
+        # 💡 【新增】立即使用 defer 延遲回應，確認互動已接收 
+        # ephemeral=True 確保延遲訊息只對使用者可見
+        await interaction.response.defer(ephemeral=True) 
 
-        # 2. 呈現二次確認介面
+        if not backup_file.filename.endswith(".bin"):
+            # 由於已 defer，需使用 followup.send
+            return await interaction.followup.send("❌ **還原失敗！** 請上傳正確的 `.bin` 備份檔案。", ephemeral=True)
+
+        # 呈現二次確認介面
         view = RestoreConfirmView(self, key, backup_file)
         
-        await interaction.response.send_message(
+        # 由於已 defer，後續所有回應都必須使用 followup.send
+        await interaction.followup.send(
             "⚠️ **嚴重警告：伺服器還原操作將會刪除此伺服器中** **所有** **現有的頻道、分類和身份組** **（除了 @everyone 和 Bot 身份組）。**\n\n"
             "您確定要繼續嗎？請點擊按鈕進行**文字確認**。",
             view=view,
             ephemeral=True
         )
+
 
 
 # ---- HelpCog (/help) ----
