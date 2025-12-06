@@ -1986,12 +1986,8 @@ async def on_ready():
 
         # --- 2. 註冊持久化 View ---
         try:
-            if not bot.add_view("ReplyView"): 
-                bot.add_view(ReplyView())
-                print("✅ ReplyView persistent class registered.")
-        except Exception as e:
-            print(f"❌ 持久化 View 註冊錯誤: {e}")
-            traceback.print_exc()
+            bot.add_view(ReplyView())
+            print("✅ ReplyView persistent class registered.")
 
 
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
