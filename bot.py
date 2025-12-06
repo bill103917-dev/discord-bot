@@ -576,8 +576,9 @@ class 備份系統(commands.Cog):
         guild = interaction.guild
         safe_channel = interaction.channel
         
-        # 用於記錄需要調整位置的 Text/Voice 頻道
-        channels_to_position = [] 
+        # 用於收集所有 Text/Voice 頻道，以便稍後批次調整位置
+        # 結構: { 'category_name': [ (new_channel_obj, original_position), ... ] }
+        channels_by_category = {}
         
         # 1. 解密資料 (保持不變)
         server_data = {}
@@ -627,7 +628,7 @@ class 備份系統(commands.Cog):
             except Exception as e:
                 logger.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
         
-        # 3.2. 階段一：還原頻道和權限 (Category 使用 position, Text/Voice 暫不使用 position)
+        # 3.2. 階段一：創建頻道和分類（收集位置資訊）
         category_map = {} 
 
         for channel_data in server_data["channels"]:
@@ -651,20 +652,20 @@ class 備份系統(commands.Cog):
             channel_type = discord.ChannelType(channel_data["type"])
             category = category_map.get(channel_data["category_name"])
             
-            # 處理類別頻道 (Category) - 必須在創建時設定位置
+            # 處理類別頻道 (Category)
             if channel_type == discord.ChannelType.category:
                 if channel_data["name"] not in category_map:
                     new_category = await guild.create_category(
                         channel_data["name"], 
                         overwrites=overwrites,
-                        position=channel_data["position"], 
+                        position=channel_data["position"], # Category 仍使用絕對位置
                         reason="伺服器備份還原"
                     )
                     category_map[channel_data["name"]] = new_category
                     await asyncio.sleep(0.1)
                 continue
             
-            # 處理其他頻道：不使用 position，但將新創建的頻道及其所需位置儲存
+            # 處理 Text/Voice 頻道：創建但不設定位置
             create_params = {
                 "name": channel_data["name"],
                 "overwrites": overwrites,
@@ -685,28 +686,49 @@ class 備份系統(commands.Cog):
                         **create_params
                     )
                 
-                # 儲存新頻道物件和它在備份中的位置
+                # 收集頻道物件、其所屬分類名稱及其原始絕對位置
                 if new_channel:
-                    channels_to_position.append((new_channel, channel_data["position"]))
+                    category_name = channel_data.get("category_name")
+                    if category_name not in channels_by_category:
+                        channels_by_category[category_name] = []
+                    
+                    channels_by_category[category_name].append((new_channel, channel_data["position"]))
                 
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logger.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
 
         
-        # 3.3. 階段二：精確調整 Text/Voice 頻道位置 (NEW)
-        await safe_channel.send("⏳ **調整頻道順序中...**", delete_after=10)
+        # 3.3. 階段二：批次調整頻道位置（確保分類內順序正確）
+        await safe_channel.send("⏳ **調整頻道順序中...** (使用批次調整)", delete_after=10)
         
-        # 根據備份中的位置從小到大排序，以確保調整順序正確
-        channels_to_position.sort(key=lambda x: x[1])
+        all_channel_positions = []
 
-        for new_channel, desired_position in channels_to_position:
+        for category_name, channel_list in channels_by_category.items():
+            
+            # 1. 根據備份的絕對位置排序，確定分類內部的相對順序
+            channel_list.sort(key=lambda x: x[1])
+
+            # 2. 確定分類 ID
+            category_obj = category_map.get(category_name)
+            category_id = category_obj.id if category_obj else None
+            
+            # 3. 創建批次調整列表
+            # position index (0, 1, 2...) 即為分類內的相對位置
+            for index, (channel, _) in enumerate(channel_list):
+                all_channel_positions.append({
+                    'id': channel.id,
+                    'position': index, # 👈 這裡的 position 是分類內的相對位置
+                    'parent_id': category_id # 必須指定父分類 ID
+                })
+        
+        # 4. 執行批次調整
+        if all_channel_positions:
             try:
-                # 顯式編輯頻道的位置
-                await new_channel.edit(position=desired_position, reason="還原頻道位置")
-                await asyncio.sleep(0.1)
+                await guild.edit_channel_positions(all_channel_positions)
+                await asyncio.sleep(1) 
             except Exception as e:
-                logger.warning(f"調整頻道 {new_channel.name} 位置失敗: {e}")
+                logger.error(f"批次調整頻道順序失敗: {e}")
 
 
         # 4. 報告完成並提供刪除選項 (保持不變)
