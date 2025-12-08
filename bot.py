@@ -942,15 +942,14 @@ class ImageDrawCog(commands.Cog):
             # 限制掃描 500 條訊息
             async for msg in channel.history(limit=500):
                 if msg.attachments and msg.attachments[0].content_type.startswith('image/'):
-                    # 將 Discord 圖片 URL 以元組 (URL, 'DISCORD', 作者名稱) 形式加入列表
+                    # 將 Discord 圖片 URL 以元組 (URL, 'DISCORD', 檔案名稱) 形式加入列表
                     image_sources.append((
                         msg.attachments[0].url, 
                         'DISCORD', 
-                        msg.author.display_name
+                        msg.attachments[0].filename # 使用 Discord 提供的檔案名稱
                     ))
             
         except Exception as e:
-            # 如果讀取歷史記錄失敗，至少可以使用本地檔案
             print(f"❌ 讀取 Discord 頻道歷史記錄失敗: {e}")
 
         # 2. 檢查總圖庫是否為空
@@ -959,47 +958,49 @@ class ImageDrawCog(commands.Cog):
 
         # 3. 從整體圖庫中隨機抽取一張圖片
         random_source = random.choice(image_sources)
-        source_data, source_type, *author_info = random_source # 使用 *author_info 處理不同長度的元組
+        source_data, source_type, *extra_info = random_source 
 
         # 4. 構造統一的 Embed 介面
         embed = discord.Embed(
-            title="🎲 隨機圖庫圖片",
+            # 統一標題
+            title="🖼️ 隨機圖庫圖片",
             color=discord.Color.blue()
         )
+        # 統一描述
+        embed.description = "這是從雲端圖庫中隨機挑選的精彩照片！"
         
         file_to_send = None # 用於存放 discord.File 物件（如果來自本地）
         
         if source_type == 'LOCAL':
             # 來自本地暫存區 (需上傳檔案)
             file_path = source_data
+            file_name = os.path.basename(file_path) # 獲取本地 UUID 檔名
             
             # 將檔案轉為 discord.File 準備發送
             try:
-                file_to_send = discord.File(file_path, filename=os.path.basename(file_path))
+                file_to_send = discord.File(file_path, filename=file_name)
                 
-                # Embed 描述和圖片設定 (圖片 URL 將由 Discord 發送後提供，這裡留空)
-                embed.description = "這張圖來自排程上傳前的**暫存區**！"
-                embed.set_footer(text="圖片來源: 本地暫存區")
+                # 圖片 URL 留空，Discord 會自動處理附件。
+                # Footer 設置為本地檔名
+                embed.set_footer(text=f"檔案名稱: {file_name}")
                 
             except Exception as e:
-                # 即使本地檔案損壞，也不要讓指令崩潰，而是發送錯誤訊息
                 print(f"❌ 構造本地檔案 {file_path} 失敗: {e}")
                 return await interaction.followup.send(f"❌ 發生錯誤：無法讀取暫存圖片。\n錯誤: `{e}`", ephemeral=True)
                 
         else:
             # 來自 Discord 頻道 (使用 URL)
             image_url = source_data
-            author_name = author_info[0] if author_info else "未知上傳者"
+            file_name = extra_info[0] if extra_info else "未知檔案" # 檔案名稱從 extra_info 獲取
             
-            # Embed 描述和圖片設定
-            embed.description = f"這是從 {channel.mention} 中隨機抽取的圖片！"
+            # Embed 圖片設定 (使用 URL)
             embed.set_image(url=image_url)
-            embed.set_footer(text=f"圖片原始上傳者: {author_name}")
+            # Footer 設置為 Discord 檔名
+            embed.set_footer(text=f"檔案名稱: {file_name}")
 
         # 5. 發送最終結果
         # 如果 file_to_send 不為 None (來自本地)，則作為檔案發送；否則只發送 Embed (來自 Discord URL)
         await interaction.followup.send(embed=embed, file=file_to_send)
-
 
 class ScheduledUploadCog(commands.Cog):
     def __init__(self, bot):
@@ -1057,7 +1058,7 @@ class ScheduledUploadCog(commands.Cog):
 
 
     # 🚨 每小時執行一次
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=30)
     async def upload_scheduler(self):
         """定時執行上傳任務"""
         await self.bot.wait_until_ready() 
@@ -2658,35 +2659,60 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- 路由: 網頁上傳處理 (替換您的 /upload_web 函式) ---
+# --- 路由: 網頁上傳處理 (完整替換) ---
 @app.route('/upload_web', methods=['GET', 'POST'])
 def upload_file_from_web():
     if request.method == 'POST':
-        if 'file' not in request.files or request.files['file'].filename == '':
+        # 1. 檢查是否有檔案上傳
+        if 'file' not in request.files:
+            # 如果使用者提交表單但沒有選擇檔案
             return render_template('upload.html', message="❌ 請選擇檔案", status="error")
         
-        file = request.files['file']
+        # 2. 使用 getlist('input_name') 獲取所有檔案 (支援多檔案)
+        uploaded_files = request.files.getlist('file')
         
-        if file and allowed_file(file.filename):
-            try:
-                extension = file.filename.rsplit('.', 1)[1].lower()
-                # 使用 UUID 作為檔名，確保唯一性
-                random_filename = f"{uuid.uuid4().hex}.{extension}"
-                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
+        saved_count = 0
+        error_count = 0
+        
+        for file in uploaded_files:
+            # 檢查檔案是否有效且檔名不為空
+            if file.filename == '':
+                continue
                 
-                # 1. 直接儲存到本地暫存資料夾
-                file.save(temp_path)
-                
-                # 2. 返回成功訊息
-                return render_template('upload.html', 
-                                       message="✅ 上傳成功！圖片已暫存，將於下一排程時間由 Bot 轉發至 Discord。", 
-                                       status="success")
-                
-            except Exception as e:
-                # 捕獲其他上傳/存檔錯誤
-                return render_template('upload.html', message=f"❌ 伺服器儲存錯誤: {str(e)}", status="error")
+            if file and allowed_file(file.filename):
+                try:
+                    extension = file.filename.rsplit('.', 1)[1].lower()
+                    # 使用 UUID 作為檔名，確保唯一性
+                    random_filename = f"{uuid.uuid4().hex}.{extension}"
+                    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
+                    
+                    # 儲存到本地暫存資料夾
+                    file.save(temp_path)
+                    saved_count += 1
+                    
+                except Exception as e:
+                    # 儲存時發生錯誤
+                    print(f"儲存檔案時發生錯誤: {e}")
+                    error_count += 1
+            else:
+                # 檔案格式不支援
+                error_count += 1
+
+        # 3. 根據結果返回訊息
+        if saved_count > 0:
+            # 成功儲存至少一個檔案
+            message = f"✅ 成功上傳 {saved_count} 張圖片！圖片已暫存，將於下一排程時間由 Bot 轉發至 Discord。"
+            status = "success"
+        elif error_count > 0 and saved_count == 0:
+            # 雖然選擇了檔案，但所有檔案都不符合要求
+            message = "❌ 所有選擇的檔案都無效或格式不支援 (僅限 png, jpg, jpeg, gif)。"
+            status = "error"
         else:
-            return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
+            # 理論上不應該發生，但作為 fallback
+            message = "❌ 請選擇檔案"
+            status = "error"
+            
+        return render_template('upload.html', message=message, status=status)
 
     # GET 請求：顯示上傳頁面
     return render_template('upload.html')
