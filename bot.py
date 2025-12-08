@@ -2533,8 +2533,8 @@ async def on_ready():
             await bot.add_cog(SupportCog(bot))
             await bot.add_cog(備份系統(bot))
             await bot.add_cog(VoiceCog(bot))
-            await client.add_cog(ImageDrawCog(client))
-            await client.add_cog(ScheduledUploadCog(client)) 
+            await bot.add_cog(ImageDrawCog(client))
+            await bot.add_cog(ScheduledUploadCog(client)) 
             print("✅ All Cogs loaded.")
         except Exception as e:
             print("❌ Cog add error:", e)
