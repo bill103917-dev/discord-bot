@@ -2951,40 +2951,59 @@ def logout():
 # ⚡ 執行區塊 (修正版)
 # =========================
 def run_web():
-    port = os.getenv("PORT", 8080)
-    # Render 或其他平台不適合 debug=True, use_reloader=True
-    app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
+    """在單獨的執行緒中運行 Flask 應用程式。"""
+    
+    # 🚨 Render 預設提供 $PORT (約 10000)。
+    # 確保備用端口與 Bot API 端口 8080 衝突。
+    port = os.getenv("PORT", 8081)  # 使用 8081 作為備用端口
+    
+    print(f"Flask Web 正在嘗試啟動於端口: {port}")
+    
+    # 使用 Flask 內建的開發伺服器啟動 (生產環境建議使用 Waitress)
+    try:
+        # 如果您使用 Waitress: serve(app, host="0.0.0.0", port=int(port))
+        app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"❌ Flask Web 啟動失敗: {e}")
+
 
 def keep_web_alive():
-    """在背景執行 Flask"""
+    """在背景執行緒中啟動 Flask 服務。"""
     t = threading.Thread(target=run_web)
-    t.daemon = True
+    t.daemon = True # 設置為守護線程，當主程序退出時它也會退出
     t.start()
+    print("Flask Web 已啟動於背景線程。")
+
 
 async def start_bot():
-    """啟動 Discord bot"""
+    """啟動 Discord Bot 的 asyncio 主循環。"""
     global discord_loop
     discord_loop = asyncio.get_running_loop()
     print("啟動 Discord Bot...")
     try:
-        await bot.start(TOKEN)
+        # 這是 Discord.py 啟動的主循環
+        await bot.start(TOKEN) 
     except KeyboardInterrupt:
         print("機器人已手動關閉。")
     except Exception as e:
         print(f"Discord Bot 啟動錯誤: {e}")
         traceback.print_exc()
 
-if __name__ == "__main__":
-    # 1️⃣ 啟動 Flask Web 服務 (背景線程)
-    keep_web_alive()
-    print("Flask Web 已啟動於背景線程。")
 
-    # 2️⃣ 啟動 Discord Bot
-    # 使用 asyncio.run 確保全局 event loop
+# ===============================================
+# 執行入口
+# ===============================================
+
+if __name__ == "__main__":
+    # 1️⃣ 在背景執行緒中啟動 Flask Web 服務 (綁定 10000)
+    keep_web_alive()
+
+    # 2️⃣ 在主線程中啟動 Discord Bot (Bot 的 on_ready 會啟動 8080 服務)
     try:
+        # asyncio.run 會運行 start_bot，直到它完成（Bot 運行時不會完成）
         asyncio.run(start_bot())
     except RuntimeError as e:
-        # 常見錯誤處理
+        # 處理常見的 Event Loop 關閉錯誤
         if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
             print("⚠️ Event loop 已關閉或不可從當前線程啟動。")
         else:
