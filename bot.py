@@ -926,53 +926,80 @@ class ImageDrawCog(commands.Cog):
         if not channel:
             return await interaction.followup.send("❌ 錯誤：找不到指定的圖庫頻道。", ephemeral=True)
 
-        # 1. 優先從本地暫存區抽取圖片
+        # 1. 收集所有可用的圖片來源
+        image_sources = []
+        
+        # --- 步驟 1.1: 從本地暫存區收集檔案路徑 ---
         search_path = os.path.join(self.TEMP_UPLOAD_FOLDER, '*')
         local_files = glob.glob(search_path)
         
-        if local_files:
-            # 隨機選擇一個本地檔案
-            random_file_path = random.choice(local_files)
-            
-            embed = discord.Embed(
-                title="🎲 隨機圖庫圖片 (來自暫存區)",
-                description="這張圖來自排程上傳前的暫存區！",
-                color=discord.Color.orange()
-            )
-            
-            # 使用 discord.File 從本地發送
-            try:
-                discord_file = discord.File(random_file_path, filename=os.path.basename(random_file_path))
-                return await interaction.followup.send(embed=embed, file=discord_file)
-            except Exception as e:
-                print(f"❌ 本地抽圖失敗: {e}")
-                pass # 繼續嘗試從 Discord 頻道抽圖
-
-        # 2. 如果本地暫存區沒有，則從 Discord 頻道歷史中抽取
+        # 將本地檔案路徑以元組 (路徑, 'LOCAL') 形式加入列表
+        for file_path in local_files:
+            image_sources.append((file_path, 'LOCAL'))
+        
+        # --- 步驟 1.2: 從 Discord 頻道歷史中收集圖片 URL ---
         try:
-            messages = [
-                msg async for msg in channel.history(limit=500)
-                if msg.attachments and msg.attachments[0].content_type.startswith('image/')
-            ]
+            # 限制掃描 500 條訊息
+            async for msg in channel.history(limit=500):
+                if msg.attachments and msg.attachments[0].content_type.startswith('image/'):
+                    # 將 Discord 圖片 URL 以元組 (URL, 'DISCORD', 作者名稱) 形式加入列表
+                    image_sources.append((
+                        msg.attachments[0].url, 
+                        'DISCORD', 
+                        msg.author.display_name
+                    ))
             
-            if not messages:
-                return await interaction.followup.send("❌ 圖庫和暫存區中都找不到圖片。", ephemeral=True)
-
-            random_message = random.choice(messages)
-            image_url = random_message.attachments[0].url
-
-            embed = discord.Embed(
-                title="🎲 隨機圖庫圖片 (來自 Discord)",
-                description=f"這是從 {channel.mention} 中隨機抽取的圖片！",
-                color=discord.Color.blue()
-            )
-            embed.set_image(url=image_url)
-            embed.set_footer(text=f"圖片原始上傳者: {random_message.author.display_name}")
-
-            await interaction.followup.send(embed=embed)
-
         except Exception as e:
-            await interaction.followup.send(f"❌ 發生錯誤：無法讀取頻道歷史或發送訊息。\n錯誤: `{e}`", ephemeral=True)
+            # 如果讀取歷史記錄失敗，至少可以使用本地檔案
+            print(f"❌ 讀取 Discord 頻道歷史記錄失敗: {e}")
+
+        # 2. 檢查總圖庫是否為空
+        if not image_sources:
+            return await interaction.followup.send("❌ 圖庫和暫存區中都找不到圖片。", ephemeral=True)
+
+        # 3. 從整體圖庫中隨機抽取一張圖片
+        random_source = random.choice(image_sources)
+        source_data, source_type, *author_info = random_source # 使用 *author_info 處理不同長度的元組
+
+        # 4. 構造統一的 Embed 介面
+        embed = discord.Embed(
+            title="🎲 隨機圖庫圖片",
+            color=discord.Color.blue()
+        )
+        
+        file_to_send = None # 用於存放 discord.File 物件（如果來自本地）
+        
+        if source_type == 'LOCAL':
+            # 來自本地暫存區 (需上傳檔案)
+            file_path = source_data
+            
+            # 將檔案轉為 discord.File 準備發送
+            try:
+                file_to_send = discord.File(file_path, filename=os.path.basename(file_path))
+                
+                # Embed 描述和圖片設定 (圖片 URL 將由 Discord 發送後提供，這裡留空)
+                embed.description = "這張圖來自排程上傳前的**暫存區**！"
+                embed.set_footer(text="圖片來源: 本地暫存區")
+                
+            except Exception as e:
+                # 即使本地檔案損壞，也不要讓指令崩潰，而是發送錯誤訊息
+                print(f"❌ 構造本地檔案 {file_path} 失敗: {e}")
+                return await interaction.followup.send(f"❌ 發生錯誤：無法讀取暫存圖片。\n錯誤: `{e}`", ephemeral=True)
+                
+        else:
+            # 來自 Discord 頻道 (使用 URL)
+            image_url = source_data
+            author_name = author_info[0] if author_info else "未知上傳者"
+            
+            # Embed 描述和圖片設定
+            embed.description = f"這是從 {channel.mention} 中隨機抽取的圖片！"
+            embed.set_image(url=image_url)
+            embed.set_footer(text=f"圖片原始上傳者: {author_name}")
+
+        # 5. 發送最終結果
+        # 如果 file_to_send 不為 None (來自本地)，則作為檔案發送；否則只發送 Embed (來自 Discord URL)
+        await interaction.followup.send(embed=embed, file=file_to_send)
+
 
 class ScheduledUploadCog(commands.Cog):
     def __init__(self, bot):
