@@ -912,9 +912,19 @@ class LogsCog(commands.Cog):
             except Exception:
                 print("Logs: cannot respond")
 
+import os
+import discord
+from discord.ext import commands
+from discord import app_commands
+import glob 
+import random
+
+# 假設 TARGET_CHANNEL_ID 和 TEMP_UPLOAD_FOLDER 已經在檔案中定義
+
 class ImageDrawCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # 確保在初始化時可以讀取這些全局變數
         self.TARGET_CHANNEL_ID = TARGET_CHANNEL_ID
         self.TEMP_UPLOAD_FOLDER = TEMP_UPLOAD_FOLDER
         
@@ -937,20 +947,30 @@ class ImageDrawCog(commands.Cog):
         for file_path in local_files:
             image_sources.append((file_path, 'LOCAL'))
         
-        # --- 步驟 1.2: 從 Discord 頻道歷史中收集圖片 URL ---
+        # --- 步驟 1.2: 從 Discord 頻道歷史中收集圖片 URL (新增 NoneType 防護) ---
         try:
             # 限制掃描 500 條訊息
             async for msg in channel.history(limit=500):
-                if msg.attachments and msg.attachments[0].content_type.startswith('image/'):
-                    # 將 Discord 圖片 URL 以元組 (URL, 'DISCORD', 檔案名稱) 形式加入列表
+                if not msg.attachments:
+                    continue # 跳過沒有附件的訊息
+                
+                attachment = msg.attachments[0] # 獲取第一個附件
+                
+                # 確保附件物件本身存在且是圖片類型
+                if attachment and attachment.content_type and attachment.content_type.startswith('image/'):
                     image_sources.append((
-                        msg.attachments[0].url, 
+                        attachment.url, 
                         'DISCORD', 
-                        msg.attachments[0].filename
+                        attachment.filename # 儲存檔案名稱用於 Footer
                     ))
             
+        except discord.errors.Forbidden:
+            # Bot 沒有權限讀取歷史記錄
+            print(f"❌ Bot 無法讀取頻道 {channel.id} 的歷史記錄。請檢查權限。")
+            
         except Exception as e:
-            print(f"❌ 讀取 Discord 頻道歷史記錄失敗: {e}")
+            # 捕獲其他錯誤
+            print(f"❌ 讀取 Discord 頻道歷史記錄時發生錯誤: {e}")
 
         # 2. 檢查總圖庫是否為空
         if not image_sources:
@@ -962,25 +982,23 @@ class ImageDrawCog(commands.Cog):
 
         # 4. 構造統一的 Embed 介面
         embed = discord.Embed(
-            # 統一標題
             title="🖼️ 隨機圖庫圖片",
+            description="這是從雲端圖庫中隨機挑選的精彩照片！",
             color=discord.Color.blue()
         )
-        # 統一描述
-        embed.description = "這是從雲端圖庫中隨機挑選的精彩照片！"
         
         file_to_send = None # 用於存放 discord.File 物件（如果來自本地）
         
         if source_type == 'LOCAL':
             # 來自本地暫存區 (需上傳檔案)
             file_path = source_data
-            file_name = os.path.basename(file_path)
+            file_name = os.path.basename(file_path) # 獲取本地 UUID 檔名
             
             try:
                 # 1. 構造 discord.File
                 file_to_send = discord.File(file_path, filename=file_name)
                 
-                # 2. 🚨 關鍵步驟：設定 Embed 圖片 URL，指向將要發送的附件 (attachment://檔名)
+                # 2. 關鍵步驟：設定 Embed 圖片 URL，指向將要發送的附件 (attachment://檔名)
                 embed.set_image(url=f"attachment://{file_name}")
                 
                 # Footer 設置為本地檔名
@@ -993,7 +1011,7 @@ class ImageDrawCog(commands.Cog):
         else:
             # 來自 Discord 頻道 (使用 URL)
             image_url = source_data
-            file_name = extra_info[0] if extra_info else "未知檔案"
+            file_name = extra_info[0] if extra_info else "未知檔案" # 檔案名稱從 extra_info 獲取
             
             # Embed 圖片設定 (使用 URL)
             embed.set_image(url=image_url)
@@ -1001,9 +1019,9 @@ class ImageDrawCog(commands.Cog):
             embed.set_footer(text=f"檔案名稱: {file_name}")
 
         # 5. 發送最終結果
-        # 如果 file_to_send 不為 None (來自本地)，則同時發送 Embed 和附件；否則只發送 Embed (因為圖片 URL 已在 Embed 內)
+        # 如果 file_to_send 不為 None (來自本地)，則同時發送 Embed 和附件；否則只發送 Embed
         await interaction.followup.send(embed=embed, file=file_to_send)
-        
+
 class ScheduledUploadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1044,7 +1062,6 @@ class ScheduledUploadCog(commands.Cog):
                 # 2. 上傳到 Discord
                 discord_file = discord.File(file_path, filename=os.path.basename(file_path))
                 await channel.send(
-                    f"📂 排程上傳：新圖片已加入圖庫！", 
                     file=discord_file
                 )
                 
