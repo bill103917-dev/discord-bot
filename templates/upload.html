@@ -71,7 +71,17 @@
             transition: background 0.3s;
         }
         .btn-submit:hover { background-color: #3ca374; }
-        .btn-submit:disabled { background-color: #555; cursor: not-allowed; }
+        /* 💡 新增：上傳中/禁用狀態的樣式 */
+        .btn-submit:disabled { 
+            background-color: #555; 
+            cursor: not-allowed; 
+            position: relative;
+        }
+        .btn-submit.loading::after {
+            content: ' 🔄 上傳中...';
+            animation: spin 1s linear infinite;
+        }
+        /* (這裡我們使用純文字代替轉圈動畫，確保簡單可靠) */
 
         .message { margin-top: 15px; font-size: 0.9rem; }
         .success { color: #43b581; }
@@ -81,6 +91,9 @@
 <body>
     <div class="card">
         <h1>📤 上傳圖片到圖庫</h1>
+        <p style="font-size: 0.85rem; color: #b9bbbe; margin-bottom: 20px;">
+            圖片將會透過 Bot 永久儲存在 Discord 圖庫頻道中。
+        </p>
         
         <form method="POST" enctype="multipart/form-data" id="uploadForm">
             <label for="file-upload" class="custom-file-upload">
@@ -97,10 +110,9 @@
 
         {% if message %}
             <p class="message {{ status }}">{{ message }}</p>
-            {% if filename %}
-                <p style="font-size: 0.8rem; color: #99aab5;">ID: {{ filename }}</p>
-            {% endif %}
         {% endif %}
+        
+        <p class="message" id="statusMessage" style="display:none;"></p>
     </div>
 
     <script>
@@ -109,7 +121,10 @@
         const previewImage = document.getElementById('preview-image');
         const submitBtn = document.getElementById('submitBtn');
         const label = document.querySelector('.custom-file-upload');
+        const uploadForm = document.getElementById('uploadForm');
+        const statusMessage = document.getElementById('statusMessage');
 
+        // 函式：更新檔案選擇狀態
         fileInput.onchange = evt => {
             const [file] = fileInput.files;
             if (file) {
@@ -118,8 +133,35 @@
                 submitBtn.disabled = false;
                 label.textContent = "🔄 更換圖片";
                 label.style.borderColor = "#43b581";
+                statusMessage.style.display = 'none';
+            } else {
+                previewContainer.style.display = 'none';
+                submitBtn.disabled = true;
+                label.textContent = "📷 選擇圖片或拍照";
+                label.style.borderColor = "#7289da";
             }
         }
+        
+        // 函式：處理表單提交
+        uploadForm.addEventListener('submit', function(event) {
+            // 由於 Bot 轉發到 Discord 需要時間，我們需要禁用按鈕並顯示等待訊息
+            
+            // 1. 阻止表單的預設提交行為
+            // 💡 只有在您打算使用 AJAX/Fetch 提交時才需要阻止
+            // 由於您使用的是 Flask 模板渲染的傳統 POST 方式，這裡不應阻止，
+            // 而是確保在伺服器響應前，使用者不能重複點擊。
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ 正在上傳與轉發...';
+            submitBtn.classList.add('loading');
+            
+            statusMessage.textContent = '正在處理中，請稍候...';
+            statusMessage.className = 'message success';
+            statusMessage.style.display = 'block';
+            
+            // 💡 由於我們使用傳統 POST，不需要額外的 JS 提交邏輯，瀏覽器會處理。
+            // Flask 處理完畢後，會重新渲染頁面並顯示結果。
+        });
     </script>
 </body>
 </html>
