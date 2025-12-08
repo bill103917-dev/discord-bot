@@ -918,7 +918,7 @@ class ImageDrawCog(commands.Cog):
         self.TARGET_CHANNEL_ID = TARGET_CHANNEL_ID
         self.TEMP_UPLOAD_FOLDER = TEMP_UPLOAD_FOLDER
         
-    @app_commands.command(name="抽圖", description="從圖庫頻道或暫存區中隨機抽取一張圖片發送。")
+    @app_commands.command(name="隨機抽圖", description="從用戶上傳的圖片隨機抽取一張圖片發送。")
     async def draw_image(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
