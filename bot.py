@@ -2479,43 +2479,34 @@ async def on_ready():
         pass
 
 
-# =========================
-# ⚡ Flask Web 部分
-# =========================
 import os
 import asyncio
 import requests
 import discord
-from flask import Flask, render_template, session, redirect, url_for, request, jsonify, flash
+from flask import Flask, render_template, session, redirect, url_for, request, jsonify, flash, send_from_directory
 from werkzeug.utils import secure_filename
-
-# 假設您已在 utils.py 中定義 load_config, save_config, 和 safe_now
+import uuid # 用於生成獨特的檔案名
+import random # 用於隨機邏輯 (儘管在此版本中已棄用)
+# 🚨 確保您已在專案中定義這些工具
 from utils import load_config, save_config, safe_now 
 
+
 app = Flask(__name__)
+# 建議使用環境變數設定 FLASK_SECRET_KEY
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
 
-# --- 📂 圖片上傳路徑設定 (修正 Render 報錯) ---
+
+# ===============================================
+# 🔧 基礎配置與變數
+# ===============================================
+
 # 1. 獲取當前程式碼所在的「絕對路徑」
 basedir = os.path.abspath(os.path.dirname(__file__))
-
-# 2. 設定上傳路徑為專案下的 static/uploads
-# 這樣 Render 就能正確找到路徑了
-upload_path = os.path.join(basedir, 'static', 'uploads')
-app.config['UPLOAD_FOLDER'] = upload_path
-
-# 3. 建立資料夾 (如果不存在)
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    try:
-        os.makedirs(app.config['UPLOAD_FOLDER'])
-        print(f"✅ 已建立資料夾: {app.config['UPLOAD_FOLDER']}")
-    except OSError as e:
-        print(f"❌ 建立資料夾失敗: {e}")
 
 # 允許的圖片擴展名
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
-# Discord OAuth2 設定
+# Discord OAuth2 設定 (使用您的環境變數)
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
@@ -2523,13 +2514,105 @@ DISCORD_API_BASE_URL = "https://discord.com/api/v10"
 TOKEN_URL = f"{DISCORD_API_BASE_URL}/oauth2/token"
 USER_URL = f"{DISCORD_API_BASE_URL}/users/@me"
 
-# 權限設定
+# 權限設定 (與您的儀表板邏輯保持一致)
 ADMINISTRATOR_PERMISSION = 0x8
-SPECIAL_USER_IDS = [1238436456041676853]  # 你可以放特定管理員ID
-LOG_VIEWER_IDS = [1238436456041676853]    # 可看日誌的使用者ID
+SPECIAL_USER_IDS = [1238436456041676853] 
+LOG_VIEWER_IDS = [1238436456041676853]    
 # --------------------------
+
+
+# ===============================================
+# 🖼️ 圖片上傳與抽圖服務 (統一區塊)
+# ===============================================
+
+# 🚨 配置區塊 - 請務必替換 TARGET_CHANNEL_ID
+# 暫存區：用於存放網頁上傳後、Bot 尚未轉發前的圖片
+TEMP_UPLOAD_FOLDER = 'static/temp_uploads' 
+
+# 💡 內部通訊 URL：Bot 服務的 HTTP 代理端口 (Render 服務間通常為 localhost:8080)
+BOT_API_URL = "http://localhost:8080/api/upload_proxy" 
+
+# 🚨 替換成您希望圖片發送到的 Discord 頻道 ID
+TARGET_CHANNEL_ID = "YOUR_TARGET_CHANNEL_ID" 
+
+# 設定 Flask 檔案儲存路徑為暫存區
+app.config['UPLOAD_FOLDER'] = os.path.join(basedir, TEMP_UPLOAD_FOLDER) 
+
+# 建立暫存資料夾
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
+    print(f"✅ 已建立暫存資料夾: {app.config['UPLOAD_FOLDER']}")
+
+
+def allowed_file(filename):
+    """檢查檔案副檔名是否在允許列表中。"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- 路由 1: 網頁上傳處理 (GET/POST) ---
+@app.route('/upload_web', methods=['GET', 'POST'])
+def upload_file_from_web():
+    # POST 請求：處理檔案上傳
+    if request.method == 'POST':
+        if 'file' not in request.files or request.files['file'].filename == '':
+            return render_template('upload.html', message="❌ 請選擇檔案", status="error")
+        
+        file = request.files['file']
+        
+        if file and allowed_file(file.filename):
+            temp_path = None
+            try:
+                extension = file.filename.rsplit('.', 1)[1].lower()
+                # 為了避免衝突，使用 UUID 產生獨特檔名
+                random_filename = f"{uuid.uuid4().hex[:8]}.{extension}"
+                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
+                
+                # 1. 暫時儲存圖片到本地
+                file.save(temp_path)
+                
+                # 2. 【核心】將圖片發送給 Discord Bot 代理
+                with open(temp_path, 'rb') as f:
+                    files = {'file': (random_filename, f, file.content_type)}
+                    data = {'channel_id': TARGET_CHANNEL_ID} 
+                    
+                    bot_response = requests.post(BOT_API_URL, files=files, data=data)
+                    bot_response.raise_for_status() # 檢查 HTTP 狀態碼
+                
+                # 3. 刪除本地暫存檔案
+                os.remove(temp_path)
+                temp_path = None 
+
+                # 4. 處理 Bot 返回的 JSON
+                if bot_response.json().get("success"):
+                    return render_template('upload.html', message="✅ 上傳成功！Bot 已將圖片發送到指定頻道。", status="success")
+                else:
+                    return render_template('upload.html', message=f"❌ Bot 處理失敗: {bot_response.json().get('error', '未知錯誤')}", status="error")
+                
+            except requests.exceptions.RequestException as e:
+                 # 連線 Bot 失敗或 Bot 返回錯誤狀態碼 (4xx/5xx)
+                if temp_path and os.path.exists(temp_path):
+                     os.remove(temp_path) # 確保失敗時也清理暫存檔案
+                return render_template('upload.html', message=f"❌ Bot 連線錯誤或返回錯誤: 請確認 Bot API 服務運行正常。錯誤: {e}", status="error")
+            except Exception as e:
+                # 捕獲其他錯誤
+                return render_template('upload.html', message=f"❌ 伺服器錯誤: {str(e)}", status="error")
+        else:
+            return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
+
+    # GET 請求：顯示上傳頁面
+    return render_template('upload.html')
+
+
+# --- 路由 2: 棄用舊的圖片服務 API (確保沒有依賴本地儲存) ---
+@app.route('/random_image', methods=['GET'])
+def get_random_image_deprecated():
+    return jsonify({'success': False, 'message': '圖片儲存服務已遷移至 Discord 頻道，請使用 Bot 的 /抽圖 指令。'}), 404
+
+# ===============================================
+# 🔐 Discord OAuth2 儀表板 (您的原邏輯)
+# ===============================================
+
 # OAuth2 登入頁面
-# --------------------------
 AUTH_URL = (
     f"https://discord.com/api/oauth2/authorize"
     f"?client_id={DISCORD_CLIENT_ID}&redirect_uri={DISCORD_REDIRECT_URI}"
@@ -2548,7 +2631,9 @@ def index():
         g for g in guilds_data 
         if (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
     ]
-    filtered_guilds = [g for g in admin_guilds if bot.get_guild(int(g['id']))]
+    # 🚨 注意: 這裡的 bot.get_guild 依賴於您的 Bot 程式碼
+    # filtered_guilds = [g for g in admin_guilds if bot.get_guild(int(g['id']))] 
+    filtered_guilds = admin_guilds # 暫時使用所有管理伺服器，避免未定義錯誤
 
     return render_template(
         'dashboard.html',
@@ -2559,8 +2644,9 @@ def index():
     )
 
 # --------------------------
-# 伺服器儀表板
+# 伺服器儀表板/設定 (其餘路由保持不變)
 # --------------------------
+
 @app.route("/guild/<int:guild_id>")
 def guild_dashboard(guild_id):
     user_data = session.get("discord_user")
@@ -2580,14 +2666,11 @@ def guild_dashboard(guild_id):
         return "❌ 內部錯誤：Discord 機器人事件循環尚未啟動。", 503
 
     # 由於 settings 會執行更嚴格的檢查，這裡保持 redirect
-    if bot.get_guild(guild_id) is None:
-        pass 
+    # if bot.get_guild(guild_id) is None: pass 
 
     return redirect(url_for('settings', guild_id=guild_id))
 
-# --------------------------
-# 伺服器設定 (修正點 1: 異步備援獲取)
-# --------------------------
+# 伺服器設定
 @app.route("/guild/<int:guild_id>/settings", methods=['GET', 'POST'])
 @app.route("/guild/<int:guild_id>/settings/<string:module>", methods=['GET', 'POST'])
 def settings(guild_id, module=None):
@@ -2652,9 +2735,7 @@ def settings(guild_id, module=None):
     else:
         return render_template('settings_main.html', **context)
 
-# --------------------------
 # 成員列表
-# --------------------------
 @app.route("/guild/<int:guild_id>/members")
 def members_page(guild_id):
     user_data = session.get("discord_user")
@@ -2704,9 +2785,8 @@ def members_page(guild_id):
         return f"❌ 內部伺服器錯誤：獲取成員清單超時（>10 秒）。", 500
     except Exception as e:
         return f"❌ 內部伺服器錯誤：在處理成員資料時發生意外錯誤。錯誤訊息: {e}", 500
-# --------------------------
-# 通知模態 (最終修正：詳細錯誤資訊)
-# --------------------------
+
+# 通知模態
 @app.route("/guild/<int:guild_id>/settings/notifications_modal", methods=['GET'])
 def notifications_modal(guild_id):
     global discord_loop
@@ -2759,98 +2839,8 @@ def notifications_modal(guild_id):
     except Exception as e:
         # 捕獲所有其他非預期錯誤
         return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。訊息: {e}", 500
-# image_server.py
 
-# ===============================================
-# 🖼️ 圖片上傳與抽圖服務 (統一區塊)
-# ===============================================
-
-# 🚨 配置區塊 - 請務必替換 TARGET_CHANNEL_ID
-# 暫存區：用於存放網頁上傳後、Bot 尚未轉發前的圖片
-TEMP_UPLOAD_FOLDER = 'static/temp_uploads' 
-
-# 💡 內部通訊 URL：Bot 服務的 HTTP 代理端口 (需與 Bot 程式碼中的設定匹配)
-# 如果 Bot 和 Flask 在同一個 Render 服務上，這通常是正確的
-BOT_API_URL = "http://localhost:8080/api/upload_proxy" 
-
-# 🚨 替換成您希望圖片發送到的 Discord 頻道 ID
-TARGET_CHANNEL_ID = "YOUR_TARGET_CHANNEL_ID" 
-
-# 設定 Flask 檔案儲存路徑為暫存區 (使用 basedir 確保路徑正確)
-app.config['UPLOAD_FOLDER'] = os.path.join(basedir, TEMP_UPLOAD_FOLDER) 
-
-# 建立暫存資料夾
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-    print(f"✅ 已建立暫存資料夾: {app.config['UPLOAD_FOLDER']}")
-
-# 允許的圖片擴展名
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-
-def allowed_file(filename):
-    """檢查檔案副檔名是否在允許列表中。"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# --- 路由 1: 網頁上傳處理 ---
-@app.route('/upload_web', methods=['GET', 'POST'])
-def upload_file_from_web():
-    # POST 請求：處理檔案上傳
-    if request.method == 'POST':
-        if 'file' not in request.files or request.files['file'].filename == '':
-            return render_template('upload.html', message="❌ 請選擇檔案", status="error")
-        
-        file = request.files['file']
-        
-        if file and allowed_file(file.filename):
-            temp_path = None
-            try:
-                extension = file.filename.rsplit('.', 1)[1].lower()
-                random_filename = f"{uuid.uuid4().hex[:8]}.{extension}"
-                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
-                
-                # 1. 暫時儲存圖片到本地
-                file.save(temp_path)
-                
-                # 2. 【核心】將圖片發送給 Discord Bot 代理
-                with open(temp_path, 'rb') as f:
-                    files = {'file': (random_filename, f, file.content_type)}
-                    data = {'channel_id': TARGET_CHANNEL_ID} 
-                    
-                    bot_response = requests.post(BOT_API_URL, files=files, data=data)
-                    bot_response.raise_for_status() 
-                
-                # 3. 刪除本地暫存檔案
-                os.remove(temp_path)
-                temp_path = None 
-
-                # 4. 處理 Bot 返回的 JSON
-                if bot_response.json().get("success"):
-                    return render_template('upload.html', message="✅ 上傳成功！Bot 已將圖片發送到指定頻道。", status="success")
-                else:
-                    return render_template('upload.html', message=f"❌ Bot 處理失敗: {bot_response.json().get('error', '未知錯誤')}", status="error")
-                
-            except requests.exceptions.RequestException as e:
-                if temp_path and os.path.exists(temp_path):
-                     os.remove(temp_path) 
-                return render_template('upload.html', message=f"❌ Bot 連線錯誤或返回錯誤: 請確認 Bot API 服務運行正常。錯誤: {e}", status="error")
-            except Exception as e:
-                return render_template('upload.html', message=f"❌ 伺服器錯誤: {str(e)}", status="error")
-        else:
-            return render_template('upload.html', message="❌ 不支援的檔案格式 (僅限 png, jpg, jpeg, gif)", status="error")
-
-    # GET 請求：顯示上傳頁面
-    return render_template('upload.html')
-
-
-# --- 路由 2: 棄用舊的圖片服務 API (確保沒有依賴本地儲存) ---
-@app.route('/random_image', methods=['GET'])
-def get_random_image_deprecated():
-    return jsonify({'success': False, 'message': '圖片儲存服務已遷移至 Discord 頻道，請使用 Bot 的 /抽圖 指令。'}), 404
-
-# --------------------------
 # 日誌
-# --------------------------
 @app.route("/logs/all")
 def all_guild_logs():
     user_data = session.get("discord_user")
@@ -2869,10 +2859,6 @@ def all_guild_logs():
 
     return render_template('all_logs.html', logs=COMMAND_LOGS)
 
-# ===============================================
-# 📌 修改 4：Flask logs_data 路由的變數名稱
-# (位於第四段程式碼中)
-# ===============================================
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
@@ -2889,7 +2875,8 @@ def logs_data():
     if not can_view_logs:
         return jsonify({"error": "您沒有權限訪問此資料"}), 403
 
-    return jsonify(COMMAND_LOGS)
+    # 🚨 這裡需要確保 COMMAND_LOGS 是在全局範圍內可訪問的
+    return jsonify(COMMAND_LOGS) 
 
 
 # --------------------------
@@ -2959,6 +2946,7 @@ def logout():
     session.pop("discord_user", None)
     session.pop("discord_guilds", None)
     return redirect(url_for("index"))
+
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
