@@ -946,7 +946,7 @@ class ImageDrawCog(commands.Cog):
                     image_sources.append((
                         msg.attachments[0].url, 
                         'DISCORD', 
-                        msg.attachments[0].filename # 使用 Discord 提供的檔案名稱
+                        msg.attachments[0].filename
                     ))
             
         except Exception as e:
@@ -974,13 +974,15 @@ class ImageDrawCog(commands.Cog):
         if source_type == 'LOCAL':
             # 來自本地暫存區 (需上傳檔案)
             file_path = source_data
-            file_name = os.path.basename(file_path) # 獲取本地 UUID 檔名
+            file_name = os.path.basename(file_path)
             
-            # 將檔案轉為 discord.File 準備發送
             try:
+                # 1. 構造 discord.File
                 file_to_send = discord.File(file_path, filename=file_name)
                 
-                # 圖片 URL 留空，Discord 會自動處理附件。
+                # 2. 🚨 關鍵步驟：設定 Embed 圖片 URL，指向將要發送的附件 (attachment://檔名)
+                embed.set_image(url=f"attachment://{file_name}")
+                
                 # Footer 設置為本地檔名
                 embed.set_footer(text=f"檔案名稱: {file_name}")
                 
@@ -991,7 +993,7 @@ class ImageDrawCog(commands.Cog):
         else:
             # 來自 Discord 頻道 (使用 URL)
             image_url = source_data
-            file_name = extra_info[0] if extra_info else "未知檔案" # 檔案名稱從 extra_info 獲取
+            file_name = extra_info[0] if extra_info else "未知檔案"
             
             # Embed 圖片設定 (使用 URL)
             embed.set_image(url=image_url)
@@ -999,9 +1001,9 @@ class ImageDrawCog(commands.Cog):
             embed.set_footer(text=f"檔案名稱: {file_name}")
 
         # 5. 發送最終結果
-        # 如果 file_to_send 不為 None (來自本地)，則作為檔案發送；否則只發送 Embed (來自 Discord URL)
+        # 如果 file_to_send 不為 None (來自本地)，則同時發送 Embed 和附件；否則只發送 Embed (因為圖片 URL 已在 Embed 內)
         await interaction.followup.send(embed=embed, file=file_to_send)
-
+        
 class ScheduledUploadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -1057,8 +1059,8 @@ class ScheduledUploadCog(commands.Cog):
         print(f"✅ 排程任務完成，成功上傳 {uploaded_count} 個檔案。")
 
 
-    # 🚨 每小時執行一次
-    @tasks.loop(minutes=30)
+    # 🚨 每10分鐘執行一次
+    @tasks.loop(minutes=10)
     async def upload_scheduler(self):
         """定時執行上傳任務"""
         await self.bot.wait_until_ready() 
