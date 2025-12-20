@@ -928,73 +928,100 @@ class ImageDrawCog(commands.Cog):
         self.TARGET_CHANNEL_ID = TARGET_CHANNEL_ID
         self.TEMP_UPLOAD_FOLDER = TEMP_UPLOAD_FOLDER
         
-    @app_commands.command(name="隨機抽圖", description="從用戶上傳的圖片隨機抽取一張圖片發送。")
+    @app_commands.command(name="隨機抽圖", description="從圖庫中隨機抽取一張圖片發送。")
     async def draw_image(self, interaction: discord.Interaction):
+        # 0. 先告訴 Discord 我們收到指令了 (避免超時)
         await interaction.response.defer()
         
+        # 1. 檢查頻道設定
         channel = self.bot.get_channel(int(self.TARGET_CHANNEL_ID))
         if not channel:
-            return await interaction.followup.send("❌ 錯誤：找不到指定的圖庫頻道。", ephemeral=True)
+            return await interaction.followup.send("❌ 錯誤：找不到指定的圖庫頻道 ID。", ephemeral=True)
 
-        # 1. 收集所有可用的圖片來源
+        # 2. 收集所有圖片來源
         image_sources = []
         
-        # --- 步驟 1.1: 從本地暫存區收集 ---
-        search_path = os.path.join(self.TEMP_UPLOAD_FOLDER, '*')
-        local_files = [f for f in glob.glob(search_path) if os.path.isfile(f)]
-        for file_path in local_files:
-            image_sources.append({'type': 'LOCAL', 'data': file_path, 'name': os.path.basename(file_path)})
+        # --- 來源 A: 本地暫存資料夾 ---
+        # 確保資料夾存在
+        if os.path.exists(self.TEMP_UPLOAD_FOLDER):
+            search_path = os.path.join(self.TEMP_UPLOAD_FOLDER, '*')
+            # 過濾出真正的檔案，排除資料夾
+            local_files = [f for f in glob.glob(search_path) if os.path.isfile(f)]
+            
+            for f in local_files:
+                image_sources.append({
+                    'type': 'LOCAL',
+                    'path': f,
+                    'name': os.path.basename(f)
+                })
         
-        # --- 步驟 1.2: 從 Discord 頻道收集 (強化防錯) ---
+        # --- 來源 B: Discord 頻道歷史 ---
         try:
-            async for msg in channel.history(limit=500):
+            # 讀取最近 200 條訊息 (數量少一點比較快)
+            async for msg in channel.history(limit=200):
                 if msg.attachments:
                     att = msg.attachments[0]
+                    # 嚴格檢查：必須有 content_type 且是圖片
                     if att.content_type and att.content_type.startswith('image/'):
                         image_sources.append({
-                            'type': 'DISCORD', 
-                            'data': att.url, 
-                            'name': att.filename
+                            'type': 'DISCORD',
+                            'url': att.url,
+                            'name': att.filename or "unknown.png" # 防止檔名為 None
                         })
         except Exception as e:
-            print(f"❌ 讀取頻道歷史錯誤: {e}")
+            print(f"⚠️ 讀取歷史錯誤 (非致命): {e}")
 
-        # 2. 檢查總圖庫
+        # 3. 如果完全沒圖
         if not image_sources:
-            return await interaction.followup.send("❌ 圖庫中找不到任何圖片。", ephemeral=True)
+            return await interaction.followup.send("❌ 圖庫目前空空如也 (暫存區與頻道皆無圖片)。", ephemeral=True)
 
-        # 3. 隨機抽取
+        # 4. 隨機抽一張
         pick = random.choice(image_sources)
 
-        # 4. 構造 Embed
-        embed = discord.Embed(
-            title="🖼️ 隨機圖庫圖片",
-            description="這是從雲端圖庫中隨機挑選的精彩照片！",
-            color=discord.Color.blue()
-        )
-        
-        file_payload = None
-        
-        if pick['type'] == 'LOCAL':
-            # 本地檔案：必須使用 attachment:// 協議
-            file_name = pick['name']
-            file_payload = discord.File(pick['data'], filename=file_name)
-            embed.set_image(url=f"attachment://{file_name}")
-            embed.set_footer(text=f"檔案名稱: {file_name} (暫存)")
-        else:
-            # Discord 連結：直接使用 URL
-            embed.set_image(url=pick['data'])
-            embed.set_footer(text=f"檔案名稱: {pick['name']}")
-
-        # 5. 發送 (確保 file 參數只在有本地檔案時帶入)
+        # 5. 構建 Embed 與發送 (關鍵修正：邏輯完全分離)
         try:
-            if file_payload:
-                await interaction.followup.send(embed=embed, file=file_payload)
+            # --- 情況一：抽到本地圖片 ---
+            if pick['type'] == 'LOCAL':
+                file_name = pick['name']
+                file_path = pick['path']
+                
+                # 建立 Embed
+                embed = discord.Embed(
+                    title="🖼️ 隨機圖庫圖片",
+                    description="這是從雲端圖庫中隨機挑選的精彩照片！",
+                    color=discord.Color.orange() # 用不同顏色區分本地
+                )
+                # 本地圖片必須用 attachment:// 語法
+                embed.set_image(url=f"attachment://{file_name}")
+                embed.set_footer(text=f"來源: 暫存區 | 檔名: {file_name}")
+                
+                # 建立檔案物件
+                discord_file = discord.File(file_path, filename=file_name)
+                
+                # 發送 (帶上 file)
+                await interaction.followup.send(embed=embed, file=discord_file)
+
+            # --- 情況二：抽到 Discord 圖片 ---
             else:
+                image_url = pick['url']
+                image_name = pick['name']
+                
+                # 建立 Embed
+                embed = discord.Embed(
+                    title="🖼️ 隨機圖庫圖片",
+                    description="這是從雲端圖庫中隨機挑選的精彩照片！",
+                    color=discord.Color.blue()
+                )
+                # 雲端圖片直接用 URL
+                embed.set_image(url=image_url)
+                embed.set_footer(text=f"來源: 頻道歷史 | 檔名: {image_name}")
+                
+                # 發送 (絕對不要傳 file 參數)
                 await interaction.followup.send(embed=embed)
+
         except Exception as e:
-            print(f"❌ 發送指令時發生錯誤: {e}")
-            await interaction.followup.send("❌ 發送圖片時出錯，請檢查日誌。", ephemeral=True)
+            print(f"❌ 發送圖片時發生嚴重錯誤: {e}")
+            await interaction.followup.send(f"❌ 發生未預期的錯誤: {e}", ephemeral=True)
 
 
 class ScheduledUploadCog(commands.Cog):
