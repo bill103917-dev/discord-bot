@@ -3103,6 +3103,13 @@ def run_web():
     except Exception as e:
         print(f"❌ Flask Web 啟動失敗: {e}")
 
+def keep_web_alive():
+    """在背景執行緒中啟動 Flask 服務。"""
+    t = threading.Thread(target=run_web)
+    t.daemon = True # 設置為守護線程，當主程序退出時它也會退出
+    t.start()
+    print("Flask Web 已啟動於背景線程。")
+
 
 
 async def start_bot():
