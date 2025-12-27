@@ -3125,23 +3125,3 @@ async def start_bot():
     except Exception as e:
         print(f"Discord Bot 啟動錯誤: {e}")
         traceback.print_exc()
-
-
-# ===============================================
-# 執行入口
-# ===============================================
-
-if __name__ == "__main__":
-    # 1️⃣ 在背景執行緒中啟動 Flask Web 服務 (綁定 10000)
-    keep_web_alive()
-
-    # 2️⃣ 在主線程中啟動 Discord Bot (Bot 的 on_ready 會啟動 8080 服務)
-    try:
-        # asyncio.run 會運行 start_bot，直到它完成（Bot 運行時不會完成）
-        asyncio.run(start_bot())
-    except RuntimeError as e:
-        # 處理常見的 Event Loop 關閉錯誤
-        if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
-            print("⚠️ Event loop 已關閉或不可從當前線程啟動。")
-        else:
-            raise
