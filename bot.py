@@ -95,6 +95,7 @@ COMMAND_LOGS: List[Dict] = []
 SPECIAL_USER_IDS = [1238436456041676853]
 LOG_VIEWER_IDS = [1238436456041676853]
 HUNDRED_PERCENT_IDS = [1343900739407319070]
+SIXTY_NINE_IDS = [1358791121697898548] 
 ADMINISTRATOR_PERMISSION = 0x00000008  # administrator bit
 # =========================
 # Bot + Intents
@@ -1326,9 +1327,8 @@ class ModerationCog(commands.Cog):
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
     @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
-    async def gay_probability(self, interaction: Interaction, user: Optional[discord.User] = None):
+    async def gay_probability(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         # 紀錄指令使用
         await log_command(interaction, "/gay")
         
@@ -1340,11 +1340,14 @@ class FunCog(commands.Cog):
         elif target_user.id in SPECIAL_USER_IDS:
             probability = 0
             
-        # 其他使用者則隨機抽取 1% 到 100% 之間的數字
+        elif target_user.id in SIXTY_NINE_IDS:
+            probability = 69
+            
+
         else:
             probability = random.randint(1, 100)
             
-        # 建立並發送 Embed
+
         embed = discord.Embed(
             title="🏳️‍🌈 隨機同性戀機率 (/gay)", 
             color=discord.Color.random()
@@ -1354,6 +1357,7 @@ class FunCog(commands.Cog):
         embed.set_footer(text=f"由 {interaction.user.display_name} 執行")
         
         await interaction.response.send_message(embed=embed)
+
 
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
