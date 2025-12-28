@@ -1334,30 +1334,34 @@ class FunCog(commands.Cog):
         
         target_user = user if user else interaction.user
         
+        # 1. 計算機率
         if target_user.id in HUNDRED_PERCENT_IDS:
             probability = 100
-            
         elif target_user.id in SPECIAL_USER_IDS:
             probability = 0
-            
         elif target_user.id in SIXTY_NINE_IDS:
             probability = 69
-            
-
         else:
             probability = random.randint(1, 100)
             
-
+        # 2. 準備顯示文字
+        display_text = f"**{probability}%**"
+        
+        # 如果是 69，加上你的自訂表情符號
+        if probability == 69:
+            custom_emoji = "<:emoji_19:1383777359508803594>"
+            display_text += f" {custom_emoji}"
+            
+        # 3. 建立並發送 Embed
         embed = discord.Embed(
             title="🏳️‍🌈 隨機同性戀機率 (/gay)", 
             color=discord.Color.random()
         )
         embed.add_field(name="測試者", value=target_user.mention, inline=False)
-        embed.add_field(name="機率為", value=f"**{probability}%**", inline=False)
+        embed.add_field(name="機率為", value=display_text, inline=False)
         embed.set_footer(text=f"由 {interaction.user.display_name} 執行")
         
         await interaction.response.send_message(embed=embed)
-
 
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
