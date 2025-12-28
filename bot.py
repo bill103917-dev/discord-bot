@@ -1347,10 +1347,9 @@ class FunCog(commands.Cog):
         # 2. 準備顯示文字
         display_text = f"**{probability}%**"
         
-        # 如果是 69，加上你的自訂表情符號
+        # 如果是 69，直接加上 ♋️
         if probability == 69:
-            custom_emoji = "<:emoji_19:1383777359508803594>"
-            display_text += f" {custom_emoji}"
+            display_text += " ♋️"
             
         # 3. 建立並發送 Embed
         embed = discord.Embed(
@@ -1362,6 +1361,7 @@ class FunCog(commands.Cog):
         embed.set_footer(text=f"由 {interaction.user.display_name} 執行")
         
         await interaction.response.send_message(embed=embed)
+
 
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
