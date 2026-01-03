@@ -568,30 +568,34 @@ class BackupSystem(commands.Cog):
         safe_channel = interaction.channel
         original_name = safe_channel.name
 
+        # 0. 解密資料
         try:
             f = Fernet(key.encode())
             encrypted_data = await backup_file.read()
             server_data = json.loads(f.decrypt(encrypted_data).decode())
         except Exception as e:
-            await safe_channel.send(f"❌ **解密失敗**：密鑰錯誤或檔案損毀。\n詳細: `{e}`")
+            await safe_channel.send(f"❌ **解密失敗**：密鑰錯誤或檔案損毀。")
             return
 
+        # 1. 鎖定安全頻道並清理
         try:
             await safe_channel.edit(name="🔒-還原安全區", reason="還原鎖定")
             status_msg = await safe_channel.send("⏳ **準備開始還原程序...**")
             
             await status_msg.edit(content="🧹 **步驟 1/4: 清理伺服器舊資料...**")
             await self._delete_all_existing_data(guild, safe_channel.id, status_msg)
-            
         except Exception as e:
             await safe_channel.send(f"❌ **清理失敗**：`{e}`")
             return
 
-        await status_msg.edit(content="👥 **步驟 2/4: 重建身份組...**")
+        # 2. 重建身份組
+        roles_to_create = server_data["roles"]
+        total_roles = len(roles_to_create)
         role_map = {}
         roles_to_reorder = {}
 
-        for r_data in server_data["roles"]:
+        for idx, r_data in enumerate(roles_to_create, 1):
+            await status_msg.edit(content=f"👥 **步驟 2/4: 重建身份組... ({idx}/{total_roles})**")
             try:
                 new_role = await guild.create_role(
                     name=r_data["name"],
@@ -603,89 +607,82 @@ class BackupSystem(commands.Cog):
                 )
                 role_map[r_data["name"]] = new_role
                 roles_to_reorder[new_role] = r_data.get("position", 0)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.4)
             except Exception as e:
                 logger.error(f"身份組 {r_data['name']} 建立失敗: {e}")
 
-        try:
-            await status_msg.edit(content="📊 **步驟 2.5: 調整身份組層級...**")
-            sorted_roles = sorted(roles_to_reorder.items(), key=lambda x: x[1])
-            position_mapping = {role: idx + 1 for idx, (role, _) in enumerate(sorted_roles)}
-            await guild.edit_role_positions(position_mapping)
-        except Exception as e:
-            logger.warning(f"身份組順序調整失敗: {e}")
-
-        await status_msg.edit(content="📂 **步驟 3/4: 重建頻道結構...**")
+        # 3. 重建頻道結構 (兩階段建立法)
         category_map = {}
-        created_channels = []
+        all_channels = server_data["channels"]
+        
+        # 分離分類與一般頻道
+        categories_data = [c for c in all_channels if c["type"] == discord.ChannelType.category.value]
+        other_channels_data = [c for c in all_channels if c["type"] != discord.ChannelType.category.value]
+        
+        total_cats = len(categories_data)
+        total_others = len(other_channels_data)
 
-        total_channels = len(server_data["channels"])
-        for idx, c_data in enumerate(server_data["channels"], 1):
-            if idx % 5 == 0:
-                await status_msg.edit(content=f"📂 **重建頻道中... ({idx}/{total_channels})**")
+        # --- 階段 3.1: 先建立所有分類 ---
+        for idx, c_data in enumerate(categories_data, 1):
+            await status_msg.edit(content=f"📂 **步驟 3/4: 重建分類中... ({idx}/{total_cats})**")
             
             overwrites = {}
             for ow in c_data.get("overwrites", []):
-                role_name = ow["role_name"]
-                if role_name == "@everyone":
-                    target = guild.default_role
-                elif role_name in role_map:
-                    target = role_map[role_name]
-                else:
-                    continue
-                
-                overwrites[target] = discord.PermissionOverwrite.from_pair(
-                    discord.Permissions(ow["allow"]), 
-                    discord.Permissions(ow["deny"])
-                )
+                target = guild.default_role if ow["role_name"] == "@everyone" else role_map.get(ow["role_name"])
+                if target:
+                    overwrites[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(ow["allow"]), discord.Permissions(ow["deny"])
+                    )
+
+            try:
+                new_cat = await guild.create_category(name=c_data["name"], overwrites=overwrites, reason="還原備份")
+                category_map[c_data["name"]] = new_cat
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"分類 {c_data['name']} 建立失敗: {e}")
+
+        # --- 階段 3.2: 建立一般頻道並精準放入分類 ---
+        for idx, c_data in enumerate(other_channels_data, 1):
+            await status_msg.edit(content=f"📂 **步驟 4/4: 重建頻道中... ({idx}/{total_others})**")
+            
+            overwrites = {}
+            for ow in c_data.get("overwrites", []):
+                target = guild.default_role if ow["role_name"] == "@everyone" else role_map.get(ow["role_name"])
+                if target:
+                    overwrites[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(ow["allow"]), discord.Permissions(ow["deny"])
+                    )
+
+            parent_cat = category_map.get(c_data["category_name"])
+            common_args = {
+                "name": c_data["name"],
+                "category": parent_cat,
+                "overwrites": overwrites,
+                "reason": "還原備份"
+            }
 
             try:
                 ctype = discord.ChannelType(c_data["type"])
-                
-                if ctype == discord.ChannelType.category:
-                    new_cat = await guild.create_category(
-                        name=c_data["name"],
-                        overwrites=overwrites,
-                        reason="還原備份"
-                    )
-                    category_map[c_data["name"]] = new_cat
-                
-                else:
-                    parent_cat = category_map.get(c_data["category_name"])
-                    
-                    common_args = {
-                        "name": c_data["name"],
-                        "category": parent_cat,
-                        "overwrites": overwrites,
-                        "reason": "還原備份"
-                    }
-
-                    if ctype == discord.ChannelType.text:
-                        await guild.create_text_channel(
-                            topic=c_data.get("topic"),
-                            nsfw=c_data.get("nsfw", False),
-                            **common_args
-                        )
-                    elif ctype == discord.ChannelType.voice:
-                        await guild.create_voice_channel(
-                            user_limit=c_data.get("user_limit"),
-                            bitrate=c_data.get("bitrate"),
-                            **common_args
-                        )
-                
+                if ctype == discord.ChannelType.text:
+                    await guild.create_text_channel(topic=c_data.get("topic"), nsfw=c_data.get("nsfw", False), **common_args)
+                elif ctype == discord.ChannelType.voice:
+                    await guild.create_voice_channel(user_limit=c_data.get("user_limit"), bitrate=c_data.get("bitrate"), **common_args)
                 await asyncio.sleep(0.5)
-
             except Exception as e:
                 logger.error(f"頻道 {c_data['name']} 建立失敗: {e}")
 
+        # 4. 完成回報
         await status_msg.delete()
         view = DeleteSafeChannelView(safe_channel, original_name)
         await safe_channel.send(
             f"{interaction.user.mention} 🎉 **還原程序結束！**\n"
-            f"共嘗試還原 {len(role_map)} 個身份組與 {len(server_data['channels'])} 個頻道。\n\n"
+            f"✅ 身份組：{total_roles} 個\n"
+            f"✅ 分類：{total_cats} 個\n"
+            f"✅ 頻道：{total_others} 個\n\n"
             "請選擇如何處理這個安全頻道：",
             view=view
         )
+
 
     # --- 指令區 ---
     @app_commands.command(name="備份伺服器", description="生成伺服器配置的加密備份")
