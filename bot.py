@@ -641,39 +641,78 @@ class BackupSystem(commands.Cog):
             except Exception as e:
                 logger.error(f"分類 {c_data['name']} 建立失敗: {e}")
 
-        # --- 階段 3.2: 建立一般頻道 (修正後的 others 部分) ---
+        # --- 階段 3.2: 建立一般頻道 (Text, News, Voice, Stage, Forum) ---
         total_others = len(others)
         for idx, c_data in enumerate(others, 1):
+            # 顯示進度：📢 步驟 4/4: 重建頻道中... (1/20)
             await status_msg.edit(content=f"📢 **步驟 4/4: 重建頻道中... ({idx}/{total_others})**")
             
-            # 權限處理
+            # 1. 處理權限覆蓋 (Overwrites)
             ow = {}
             for o in c_data.get("overwrites", []):
-                target = role_map.get(o["role_name"]) or (guild.default_role if o["role_name"] == "@everyone" else None)
+                target = role_map.get(o["role_name"])
+                if not target and o["role_name"] == "@everyone":
+                    target = guild.default_role
+                
                 if target:
                     ow[target] = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(o["allow"]), discord.Permissions(o["deny"])
+                        discord.Permissions(o["allow"]), 
+                        discord.Permissions(o["deny"])
                     )
 
+            # 2. 準備參數
             parent_cat = cat_map.get(c_data["category_name"])
-            args = {"name": c_data["name"], "category": parent_cat, "overwrites": ow}
-            
+            common_args = {
+                "name": c_data["name"],
+                "category": parent_cat,
+                "overwrites": ow,
+                "reason": "還原備份"
+            }
+
             try:
-                ctype = discord.ChannelType(c_data["type"])
-                if ctype == discord.ChannelType.text:
-                    await guild.create_text_channel(topic=c_data.get("topic"), nsfw=c_data.get("nsfw", False), **args)
-                elif ctype == discord.ChannelType.news:
-                    await guild.create_text_channel(topic=c_data.get("topic"), news=True, **args)
-                elif ctype == discord.ChannelType.voice:
-                    await guild.create_voice_channel(user_limit=c_data.get("user_limit"), bitrate=c_data.get("bitrate"), **args)
-                elif ctype == discord.ChannelType.stage_voice:
-                    await guild.create_stage_channel(**args)
-                elif ctype == discord.ChannelType.forum:
-                    await guild.create_forum_channel(topic=c_data.get("topic"), **args)
-                await asyncio.sleep(0.5)
+                ctype_value = c_data["type"]
+                
+                # --- 類型判斷與建立 ---
+                
+                # 文字頻道 (0) 或 公告頻道 (5)
+                if ctype_value == 0 or ctype_value == 5:
+                    # 先建立文字頻道
+                    new_ch = await guild.create_text_channel(
+                        topic=c_data.get("topic"), 
+                        nsfw=c_data.get("nsfw", False), 
+                        **common_args
+                    )
+                    # 如果備份是公告頻道，嘗試轉換 (目標伺服器必須開啟社群功能)
+                    if ctype_value == 5:
+                        try:
+                            await new_ch.edit(type=discord.ChannelType.news)
+                        except:
+                            logger.warning(f"頻道 {c_data['name']} 無法轉換為公告類型，可能是伺服器未開啟社群功能。")
+
+                # 語音頻道 (2)
+                elif ctype_value == 2:
+                    await guild.create_voice_channel(
+                        user_limit=c_data.get("user_limit"), 
+                        bitrate=c_data.get("bitrate"), 
+                        **common_args
+                    )
+
+                # 舞台頻道 (13)
+                elif ctype_value == 13:
+                    await guild.create_stage_channel(**common_args)
+
+                # 論壇頻道 (15)
+                elif ctype_value == 15:
+                    await guild.create_forum_channel(
+                        topic=c_data.get("topic"), 
+                        **common_args
+                    )
+
+                # 3. 避免觸發速率限制 (Rate Limit)
+                await asyncio.sleep(0.6) 
+
             except Exception as e:
                 logger.error(f"頻道 {c_data['name']} 建立失敗: {e}")
-
 
 
         # 4. 完成回報
