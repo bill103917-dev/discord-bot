@@ -611,107 +611,69 @@ class BackupSystem(commands.Cog):
             except Exception as e:
                 logger.error(f"身份組 {r_data['name']} 建立失敗: {e}")
 
-        # 3. 重建頻道結構 (兩階段建立法)
-        category_map = {}
-        all_channels = server_data["channels"]
+        # 3. 兩階段還原頻道
+        cat_map = {}
+        all_ch = server_data["channels"]
         
-        # 分離分類與一般頻道
-        categories_data = [c for c in all_channels if c["type"] == discord.ChannelType.category.value]
-        other_channels_data = [c for c in all_channels if c["type"] != discord.ChannelType.category.value]
-        
-        total_cats = len(categories_data)
-        total_others = len(other_channels_data)
+        # 分類資料
+        cats = [c for c in all_ch if c["type"] == discord.ChannelType.category.value]
+        # 非分類頻道資料 (這就是你漏掉的 others 定義)
+        others = [c for c in all_ch if c["type"] != discord.ChannelType.category.value]
 
-        # --- 階段 3.1: 先建立所有分類 ---
-        for idx, c_data in enumerate(categories_data, 1):
-            await status_msg.edit(content=f"📂 **步驟 3/4: 重建分類中... ({idx}/{total_cats})**")
+        # --- 階段 3.1: 建立所有分類 ---
+        total_cats = len(cats)
+        for i, c_data in enumerate(cats, 1):
+            await status_msg.edit(content=f"📂 **步驟 3/4: 重建分類... ({i}/{total_cats})**")
             
-            overwrites = {}
-            for ow in c_data.get("overwrites", []):
-                target = guild.default_role if ow["role_name"] == "@everyone" else role_map.get(ow["role_name"])
+            # 權限處理
+            ow = {}
+            for o in c_data.get("overwrites", []):
+                target = role_map.get(o["role_name"]) or (guild.default_role if o["role_name"] == "@everyone" else None)
                 if target:
-                    overwrites[target] = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(ow["allow"]), discord.Permissions(ow["deny"])
+                    ow[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(o["allow"]), discord.Permissions(o["deny"])
                     )
 
             try:
-                new_cat = await guild.create_category(name=c_data["name"], overwrites=overwrites, reason="還原備份")
-                category_map[c_data["name"]] = new_cat
-                await asyncio.sleep(0.5)
+                new_cat = await guild.create_category(name=c_data["name"], overwrites=ow)
+                cat_map[c_data["name"]] = new_cat
+                await asyncio.sleep(0.4)
             except Exception as e:
                 logger.error(f"分類 {c_data['name']} 建立失敗: {e}")
 
-        # --- 階段 3.2: 建立一般頻道並精準放入分類 ---
+        # --- 階段 3.2: 建立一般頻道 (修正後的 others 部分) ---
         total_others = len(others)
         for idx, c_data in enumerate(others, 1):
-            # 更新狀態訊息：📢 重建頻道... (1/20)
-            await status_msg.edit(content=f"📢 **重建頻道中... ({idx}/{total_others})**")
+            await status_msg.edit(content=f"📢 **步驟 4/4: 重建頻道中... ({idx}/{total_others})**")
             
-            # 1. 處理權限覆蓋 (Overwrites)
-            overwrites = {}
-            for ow in c_data.get("overwrites", []):
-                # 優先匹配身分組名稱，若找不到且為 @everyone 則使用預設身分組
-                target = role_map.get(ow["role_name"])
-                if not target and ow["role_name"] == "@everyone":
-                    target = guild.default_role
-                
+            # 權限處理
+            ow = {}
+            for o in c_data.get("overwrites", []):
+                target = role_map.get(o["role_name"]) or (guild.default_role if o["role_name"] == "@everyone" else None)
                 if target:
-                    overwrites[target] = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(ow["allow"]), 
-                        discord.Permissions(ow["deny"])
+                    ow[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(o["allow"]), discord.Permissions(o["deny"])
                     )
 
-            # 2. 找出該頻道所屬的分類物件
             parent_cat = cat_map.get(c_data["category_name"])
+            args = {"name": c_data["name"], "category": parent_cat, "overwrites": ow}
             
-            # 3. 準備通用參數
-            common_args = {
-                "name": c_data["name"],
-                "category": parent_cat, # 如果備份時沒分類，這裡會是 None
-                "overwrites": overwrites,
-                "reason": "還原備份：重建頻道"
-            }
-
             try:
                 ctype = discord.ChannelType(c_data["type"])
-                
-                # 根據頻道類型調用對應的建立方法
                 if ctype == discord.ChannelType.text:
-                    await guild.create_text_channel(
-                        topic=c_data.get("topic"), 
-                        nsfw=c_data.get("nsfw", False), 
-                        **common_args
-                    )
-                
-                elif ctype == discord.ChannelType.news: # 📢 公告頻道
-                    await guild.create_text_channel(
-                        topic=c_data.get("topic"), 
-                        news=True, # 關鍵參數
-                        **common_args
-                    )
-                
-                elif ctype == discord.ChannelType.voice: # 🔊 語音頻道
-                    await guild.create_voice_channel(
-                        user_limit=c_data.get("user_limit"), 
-                        bitrate=c_data.get("bitrate"), 
-                        **common_args
-                    )
-                
-                elif ctype == discord.ChannelType.stage_voice: # 🎭 舞台頻道
-                    await guild.create_stage_channel(**common_args)
-                
-                elif ctype == discord.ChannelType.forum: # 🏛️ 論壇頻道
-                    await guild.create_forum_channel(
-                        topic=c_data.get("topic"), 
-                        **common_args
-                    )
-
-                # 4. 頻率控制：避免過快導致 Discord API 429 限制
-                await asyncio.sleep(0.5) 
-
+                    await guild.create_text_channel(topic=c_data.get("topic"), nsfw=c_data.get("nsfw", False), **args)
+                elif ctype == discord.ChannelType.news:
+                    await guild.create_text_channel(topic=c_data.get("topic"), news=True, **args)
+                elif ctype == discord.ChannelType.voice:
+                    await guild.create_voice_channel(user_limit=c_data.get("user_limit"), bitrate=c_data.get("bitrate"), **args)
+                elif ctype == discord.ChannelType.stage_voice:
+                    await guild.create_stage_channel(**args)
+                elif ctype == discord.ChannelType.forum:
+                    await guild.create_forum_channel(topic=c_data.get("topic"), **args)
+                await asyncio.sleep(0.5)
             except Exception as e:
-                # 記錄錯誤但繼續執行，避免單一頻道失敗導致整個還原崩潰
                 logger.error(f"頻道 {c_data['name']} 建立失敗: {e}")
+
 
 
         # 4. 完成回報
