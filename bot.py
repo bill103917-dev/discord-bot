@@ -472,6 +472,25 @@ class RestoreConfirmView(discord.ui.View):
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RestoreConfirmModal(self.cog, self.key, self.backup_file))
 
+class CommunityCheckView(discord.ui.View):
+    def __init__(self, cog, key, backup_file, resume_idx):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.key = key
+        self.backup_file = backup_file
+        self.resume_idx = resume_idx
+
+    @discord.ui.button(label="我已設定完畢，繼續還原", style=discord.ButtonStyle.green)
+    async def continue_restore(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="✅ 收到，繼續執行剩餘還原程序...", view=None)
+        # 呼叫一個新的方法從 resume_idx 繼續，或重新跑一次邏輯
+        self.cog.bot.loop.create_task(self.cog._execute_restore(interaction, self.key, self.backup_file, start_at=self.resume_idx))
+
+    @discord.ui.button(label="不復原特殊頻道，保持現狀", style=discord.ButtonStyle.gray)
+    async def skip_special(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="✅ 收到，將略過社群功能相關頻道。", view=None)
+        # 這裡可以寫一個邏輯讓它繼續但跳過 type 5, 13, 15
+
 # ==========================================
 # 2. 核心 Cog 系統
 # ==========================================
@@ -641,78 +660,68 @@ class BackupSystem(commands.Cog):
             except Exception as e:
                 logger.error(f"分類 {c_data['name']} 建立失敗: {e}")
 
-        # --- 階段 3.2: 建立一般頻道 (Text, News, Voice, Stage, Forum) ---
+        # --- 階段 3.2: 建立一般頻道 ---
         total_others = len(others)
+        community_warning_sent = False # 標記是否已經發過社群提醒
+
         for idx, c_data in enumerate(others, 1):
-            # 顯示進度：📢 步驟 4/4: 重建頻道中... (1/20)
             await status_msg.edit(content=f"📢 **步驟 4/4: 重建頻道中... ({idx}/{total_others})**")
             
-            # 1. 處理權限覆蓋 (Overwrites)
-            ow = {}
-            for o in c_data.get("overwrites", []):
-                target = role_map.get(o["role_name"])
-                if not target and o["role_name"] == "@everyone":
-                    target = guild.default_role
-                
-                if target:
-                    ow[target] = discord.PermissionOverwrite.from_pair(
-                        discord.Permissions(o["allow"]), 
-                        discord.Permissions(o["deny"])
-                    )
+            # 偵測是否為社群相關頻道 (公告=5, 舞台=13, 論壇=15)
+            is_community_type = c_data["type"] in [5, 13, 15]
+            
+            # 如果是社群頻道但伺服器沒開社群功能 (檢查是否有 rules_channel)
+            if is_community_type and not guild.rules_channel and not community_warning_sent:
+                view = CommunityCheckView(self, key, backup_file, idx) # 需定義此 View
+                await safe_ch.send(
+                    "⚠️ **偵測到公告/論壇/舞台頻道，但您的伺服器尚未開啟「社群」功能。**\n"
+                    "這將導致這些特殊頻道建立失敗。請開啟後再繼續，或選擇忽略。",
+                    view=view
+                )
+                community_warning_sent = True
+                return # 暫時中斷，等待 View 回傳指令重新觸發
 
-            # 2. 準備參數
-            parent_cat = cat_map.get(c_data["category_name"])
-            common_args = {
-                "name": c_data["name"],
-                "category": parent_cat,
-                "overwrites": ow,
-                "reason": "還原備份"
-            }
-
+            # --- 建立邏輯修正 ---
+            ow = { (role_map.get(o["role_name"]) or guild.default_role): discord.PermissionOverwrite.from_pair(discord.Permissions(o["allow"]), discord.Permissions(o["deny"])) for o in c_data.get("overwrites", []) if o["role_name"] in role_map or o["role_name"] == "@everyone" }
+            p_cat = cat_map.get(c_data["category_name"])
+            
             try:
                 ctype_value = c_data["type"]
                 
-                # --- 類型判斷與建立 ---
-                
-                # 文字頻道 (0) 或 公告頻道 (5)
-                if ctype_value == 0 or ctype_value == 5:
-                    # 先建立文字頻道
-                    new_ch = await guild.create_text_channel(
-                        topic=c_data.get("topic"), 
-                        nsfw=c_data.get("nsfw", False), 
-                        **common_args
-                    )
-                    # 如果備份是公告頻道，嘗試轉換 (目標伺服器必須開啟社群功能)
+                # 1. 文字/公告頻道
+                if ctype_value in [0, 5]:
+                    new_ch = await guild.create_text_channel(name=c_data["name"], category=p_cat, overwrites=ow, topic=c_data.get("topic"), nsfw=c_data.get("nsfw", False))
                     if ctype_value == 5:
-                        try:
-                            await new_ch.edit(type=discord.ChannelType.news)
-                        except:
-                            logger.warning(f"頻道 {c_data['name']} 無法轉換為公告類型，可能是伺服器未開啟社群功能。")
+                        try: await new_ch.edit(type=discord.ChannelType.news)
+                        except: logger.warning(f"公告頻道 {c_data['name']} 轉型失敗")
 
-                # 語音頻道 (2)
+                # 2. 語音頻道 (注意：不能傳入 topic，否則會噴 50024 錯誤)
                 elif ctype_value == 2:
-                    await guild.create_voice_channel(
-                        user_limit=c_data.get("user_limit"), 
-                        bitrate=c_data.get("bitrate"), 
-                        **common_args
-                    )
+                    await guild.create_voice_channel(name=c_data["name"], category=p_cat, overwrites=ow, user_limit=c_data.get("user_limit"), bitrate=c_data.get("bitrate"))
 
-                # 舞台頻道 (13)
+                # 3. 舞台頻道 (13)
                 elif ctype_value == 13:
-                    await guild.create_stage_channel(**common_args)
+                    try:
+                        await guild.create_stage_channel(name=c_data["name"], category=p_cat, overwrites=ow)
+                    except Exception as e:
+                        logger.error(f"舞台頻道建立失敗 (可能未開社群): {e}")
 
-                # 論壇頻道 (15)
+                # 4. 論壇頻道 (15) - 修正 AttributeError
                 elif ctype_value == 15:
-                    await guild.create_forum_channel(
-                        topic=c_data.get("topic"), 
-                        **common_args
-                    )
+                    try:
+                        # 嘗試多種建立方式以相容環境
+                        if hasattr(guild, 'create_forum_channel'):
+                            await guild.create_forum_channel(name=c_data["name"], category=p_cat, overwrites=ow, topic=c_data.get("topic"))
+                        else:
+                            # 備用方案：使用通用 create_channel
+                            await guild.create_channel(name=c_data["name"], type=discord.ChannelType.forum, category=p_cat, overwrites=ow, topic=c_data.get("topic"))
+                    except Exception as e:
+                        logger.error(f"論壇頻道建立失敗: {e}")
 
-                # 3. 避免觸發速率限制 (Rate Limit)
-                await asyncio.sleep(0.6) 
-
+                await asyncio.sleep(0.6)
             except Exception as e:
                 logger.error(f"頻道 {c_data['name']} 建立失敗: {e}")
+
 
 
         # 4. 完成回報
