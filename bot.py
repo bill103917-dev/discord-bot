@@ -790,9 +790,7 @@ class BackupSystem(commands.Cog):
             ephemeral=True
         )
 
-# Cog 載入 setup (如果是在 extensions 裡)
-async def setup(bot):
-    await bot.add_cog(BackupSystem(bot))
+# Cog 載入 setup (如果是在 extensio
 
 
 
@@ -2528,7 +2526,7 @@ async def on_ready():
             await bot.add_cog(ModerationCog(bot))
             await bot.add_cog(FunCog(bot))
             await bot.add_cog(SupportCog(bot))
-            await bot.add_cog(備份系統(bot))
+            await bot.add_cog(BackupSystem(bot))
             await bot.add_cog(VoiceCog(bot))
             await bot.add_cog(ImageDrawCog(bot))
             await bot.add_cog(ScheduledUploadCog(bot)) 
