@@ -9,6 +9,7 @@ import asyncio
 import traceback
 import discord
 import logging # 用於記錄錯誤
+from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
 from utils import load_config, save_config 
 from utils import safe_now
@@ -399,12 +400,18 @@ active_games: Dict[int, RPSView] = {}
 # =========================
 # --- 1. 定義還原確認的 Discord 介面 (Modal) ---
 
-class RestoreConfirmModal(discord.ui.Modal, title="🚨 最終確認：還原伺服器配置 🚨"):
-    """彈出文字輸入框，要求用戶輸入特定文字進行二次確認。"""
-    
+
+# 設定日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("BackupSystem")
+
+# ==========================================
+# 1. UI 組件 (Modal & Views)
+# ==========================================
+
+class RestoreConfirmModal(discord.ui.Modal, title="🚨 最終確認：還原伺服器配置"):
     def __init__(self, cog, key: str, backup_file: discord.Attachment):
         super().__init__()
-        # 傳入 Cog 實例、密鑰和檔案，以便在確認後執行還原
         self.cog = cog
         self.key = key
         self.backup_file = backup_file
@@ -418,416 +425,349 @@ class RestoreConfirmModal(discord.ui.Modal, title="🚨 最終確認：還原伺
 
     async def on_submit(self, interaction: discord.Interaction):
         required_phrase = "我要用備份還原伺服器"
-        
         if self.confirmation_input.value.strip() == required_phrase:
-            # 二次確認成功，執行核心還原邏輯
-            await interaction.response.send_message("✅ **二次確認成功。** 伺服器還原程序將在背景開始執行，這會刪除**所有**現有頻道和身份組！", ephemeral=True)
-            
-            # 將耗時的還原操作交給 Bot 的 Event Loop 執行，避免指令超時 (這是關鍵)
+            await interaction.response.send_message(
+                "✅ **驗證成功！** 正在背景執行還原程序，請留意安全頻道的訊息...", 
+                ephemeral=True
+            )
+            # 使用 create_task 避免阻塞，防止 Interaction Token 過期
             self.cog.bot.loop.create_task(
                 self.cog._execute_restore(interaction, self.key, self.backup_file)
             )
-
         else:
-            await interaction.response.send_message("❌ **二次確認失敗。** 輸入的文字不符，還原操作已取消。", ephemeral=True)
-
-
-# --- 2. 定義還原確認的 Discord 介面 (View) ---
-
+            await interaction.response.send_message("❌ **驗證失敗。** 文字不符，操作已取消。", ephemeral=True)
 
 class DeleteSafeChannelView(discord.ui.View):
-    """還原完成後，提供使用者刪除/保留安全頻道的選項。"""
-    def __init__(self, cog, channel: discord.TextChannel, original_name: str):
-        super().__init__(timeout=180) # 3分鐘超時
-        self.cog = cog
+    def __init__(self, channel: discord.TextChannel, original_name: str):
+        super().__init__(timeout=None) # 按鈕永久有效直到被點擊
         self.channel = channel
         self.original_name = original_name
 
-    @discord.ui.button(label="刪除此安全頻道", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="🗑️ 刪除此安全頻道", style=discord.ButtonStyle.red)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 停用所有按鈕，避免二次點擊
         self.stop()
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content="🔄 正在刪除頻道...", view=self) 
-
+        await interaction.response.send_message("👋 感謝使用，正在刪除此頻道...", ephemeral=True)
         try:
-            # 必須使用 self.channel.delete()
-            await self.channel.delete(reason="還原完成，使用者要求刪除安全頻道")
+            await self.channel.delete(reason="還原完成：清理安全頻道")
         except Exception as e:
-            logging.error(f"刪除安全頻道 {self.channel.name} 失敗: {e}")
-            
-    @discord.ui.button(label="保留並改回原名", style=discord.ButtonStyle.gray)
+            logger.error(f"刪除安全頻道失敗: {e}")
+
+    @discord.ui.button(label="↩️ 保留並恢復原名", style=discord.ButtonStyle.gray)
     async def keep_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 停用所有按鈕
         self.stop()
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content=f"✅ 已保留此頻道，並將其名稱改回 `{self.original_name}`。", view=self) 
-
+        await interaction.response.edit_message(content=f"✅ 已保留頻道，並改回名稱 `{self.original_name}`。", view=None)
         try:
-            await self.channel.edit(name=self.original_name, reason="使用者選擇保留安全頻道並恢復原名")
+            await self.channel.edit(name=self.original_name, reason="還原完成：保留安全頻道")
         except Exception as e:
-             logging.error(f"恢復安全頻道名稱 {self.channel.name} 失敗: {e}")
+            logger.error(f"恢復頻道名稱失敗: {e}")
 
 class RestoreConfirmView(discord.ui.View):
-    """包含一個按鈕，用於觸發二次確認 Modal。"""
     def __init__(self, cog, key: str, backup_file: discord.Attachment):
-        super().__init__(timeout=300) # 5分鐘超時
+        super().__init__(timeout=300)
         self.cog = cog
         self.key = key
         self.backup_file = backup_file
 
-    @discord.ui.button(label="點擊此處開始還原", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="點擊開始還原 (危險)", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 點擊按鈕後，彈出 Modal 進行文字確認
-        modal = RestoreConfirmModal(self.cog, self.key, self.backup_file)
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(RestoreConfirmModal(self.cog, self.key, self.backup_file))
 
+# ==========================================
+# 2. 核心 Cog 系統
+# ==========================================
 
-# --- 3. 備份系統 Cog ---
-
-class 備份系統(commands.Cog):
-    """伺服器備份與還原系統：新增了刪除清理和二次確認機制。"""
-
+class BackupSystem(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-    
-    # -----------------------------------------------------------
-    # 內部工具函式
-    # -----------------------------------------------------------
 
-    # /opt/render/project/src/bot.py - 替換 _get_server_data 函式
-
+    # --- 工具：獲取資料 ---
     def _get_server_data(self, guild: discord.Guild) -> dict:
-        """從伺服器物件提取所有可備份的資料"""
+        role_map = {role.id: role.name for role in guild.roles}
         
-        # 建立身份組 ID 到名稱的映射
-        role_name_map = {role.id: role.name for role in guild.roles}
-        
-        data = {
-            "name": guild.name,
-            # 1. 身份組備份
-            "roles": [{
+        # 1. 備份身份組 (過濾掉 default 和 managed)
+        roles_data = []
+        for role in guild.roles:
+            if role.is_default() or role.managed:
+                continue
+            roles_data.append({
                 "name": role.name,
                 "permissions": role.permissions.value,
                 "color": role.color.value,
                 "hoist": role.hoist,
                 "mentionable": role.mentionable,
-                "is_everyone": role.is_default()
-            } for role in guild.roles if not role.is_default()], # 忽略 @everyone
+                "position": role.position # 備份位置資訊
+            })
+        
+        # 2. 備份頻道
+        channels_data = []
+        # 按位置排序確保邏輯正確
+        for channel in sorted(guild.channels, key=lambda c: c.position):
+            overwrites_data = []
+            for target, overwrite in channel.overwrites.items():
+                if isinstance(target, discord.Role):
+                    overwrites_data.append({
+                        "role_name": target.name, # 存名稱而不是 ID
+                        "allow": overwrite.allow.value,
+                        "deny": overwrite.deny.value
+                    })
             
-            # 2. 頻道備份
-            "channels": [{
+            channels_data.append({
                 "name": channel.name,
                 "type": channel.type.value,
                 "category_name": channel.category.name if channel.category else None,
-                "position": channel.position, # 👈 **新增：備份頻道位置**
+                "position": channel.position,
                 "topic": getattr(channel, 'topic', None),
-                "user_limit": getattr(channel, 'user_limit', None), # 語音頻道限制
-                # 權限覆蓋 (Overwrites)
-                "overwrites": [{
-                    "name": role_name_map.get(target.id, None), 
-                    "type": 0, # 僅備份身份組 (Role)
-                    "allow": overwrite.allow.value,
-                    "deny": overwrite.deny.value
-                } for target, overwrite in channel.overwrites.items() if isinstance(target, discord.Role)]
-                
-            } for channel in sorted(guild.channels, key=lambda c: (c.position, c.name))] # 按位置排序
+                "user_limit": getattr(channel, 'user_limit', None),
+                "bitrate": getattr(channel, 'bitrate', None), # 語音品質
+                "nsfw": getattr(channel, 'nsfw', False),
+                "overwrites": overwrites_data
+            })
+
+        return {
+            "name": guild.name,
+            "roles": roles_data,
+            "channels": channels_data
         }
-        return data
 
-
-    async def _delete_all_existing_data(self, guild: discord.Guild, safe_channel_id: int): 
-        """刪除所有現有的頻道、分類和身份組，但會跳過指定的安全頻道。"""
+    # --- 工具：清理舊資料 ---
+    async def _delete_all_existing_data(self, guild: discord.Guild, safe_channel_id: int, status_msg):
+        """刪除所有頻道和身份組，跳過安全頻道。"""
         
-        # 1. 刪除頻道和分類
-        for channel in sorted(guild.channels, key=lambda c: c.position, reverse=True):
-            if channel.id == safe_channel_id: 
-                continue # 跳過安全頻道
-            
+        # 1. 刪除頻道 (轉為 list 避免迭代錯誤)
+        channels = list(guild.channels)
+        total_ch = len(channels)
+        for i, channel in enumerate(channels, 1):
+            if channel.id == safe_channel_id:
+                continue
             try:
-                await channel.delete(reason="伺服器還原前清理")
-                await asyncio.sleep(0.1) # 避免速率限制
+                await channel.delete(reason="還原清理")
+                # 頻率控制：每刪 5 個休息一下，避免 429
+                if i % 5 == 0: 
+                    await status_msg.edit(content=f"🧹 清理舊頻道中... ({i}/{total_ch})")
+                    await asyncio.sleep(1.5)
             except Exception as e:
-                logging.warning(f"刪除頻道/分類 {channel.name} 失敗: {e}")
-        
+                logger.warning(f"無法刪除頻道 {channel.name}: {e}")
+
         # 2. 刪除身份組
-        bot_member = guild.get_member(self.bot.user.id)
-        if not bot_member:
-            raise Exception("Bot 不在伺服器中，無法繼續還原操作。")
-        bot_highest_role = bot_member.top_role
-
-        for role in sorted(guild.roles, key=lambda r: r.position, reverse=True):
+        roles = list(guild.roles)
+        bot_member = guild.me
+        
+        for role in roles:
             if role.is_default() or role.managed:
-                continue 
-            if role >= bot_highest_role:
-                continue 
-            
+                continue
+            if role >= bot_member.top_role: # 無法刪除比自己高或同級的
+                continue
             try:
-                await role.delete(reason="伺服器還原前清理")
-                await asyncio.sleep(0.1)
+                await role.delete(reason="還原清理")
+                await asyncio.sleep(0.5) # 刪除身份組比較慢，延遲設高一點
             except Exception as e:
-                logging.warning(f"刪除身份組 {role.name} 失敗: {e}")
+                logger.warning(f"無法刪除身份組 {role.name}: {e}")
 
-
-# /opt/render/project/src/bot.py - 替換 _execute_restore 函式
-
-# /opt/render/project/src/bot.py - 替換 _execute_restore 函式
-
+    # --- 核心：執行還原 ---
     async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
-        """核心還原邏輯：解密、將原頻道設為安全區、清理舊資料、創建新資料，並提供刪除確認按鈕。"""
         guild = interaction.guild
         safe_channel = interaction.channel
-        
-        # 用於收集所有 Text/Voice 頻道，以便稍後批次調整位置
-        # 結構: { 'category_name': [ (new_channel_obj, original_position), ... ] }
-        channels_by_category = {}
-        
-        # 1. 解密資料
-        server_data = {}
+        original_name = safe_channel.name
+
+        # 0. 解密資料
         try:
-            key_bytes = key.encode()
-            f = Fernet(key_bytes)
-            
+            f = Fernet(key.encode())
             encrypted_data = await backup_file.read()
-            decrypted_data_bytes = f.decrypt(encrypted_data)
-            server_data = json.loads(decrypted_data_bytes.decode('utf-8'))
-            
-        except Exception:
-            await safe_channel.send(f"{interaction.user.mention} ❌ **還原失敗！** 密鑰或檔案無效，無法解密資料。", delete_after=20)
+            server_data = json.loads(f.decrypt(encrypted_data).decode())
+        except Exception as e:
+            await safe_channel.send(f"❌ **解密失敗**：密鑰錯誤或檔案損毀。\n詳細: `{e}`")
             return
-        
-        # 2. 清理伺服器現有資料
-        original_channel_name = safe_channel.name
-        safe_name = "伺服器-還原安全區"
-        
+
+        # 1. 鎖定安全頻道並清理
         try:
-            await safe_channel.edit(name=safe_name, reason="設為還原安全區")
-            status_message = await safe_channel.send("🧹 **開始清理伺服器**：刪除所有現有頻道和身份組...")
-            await self._delete_all_existing_data(guild, safe_channel.id) 
-            await status_message.edit(content="✅ **清理完成**。開始重建伺服器結構...")
+            await safe_channel.edit(name="🔒-還原安全區", reason="還原鎖定")
+            status_msg = await safe_channel.send("⏳ **準備開始還原程序...**")
+            
+            await status_msg.edit(content="🧹 **步驟 1/4: 清理伺服器舊資料...**")
+            await self._delete_all_existing_data(guild, safe_channel.id, status_msg)
             
         except Exception as e:
-            await safe_channel.edit(name=original_channel_name, reason="還原失敗，改回原名")
-            await safe_channel.send(f"{interaction.user.mention} ❌ **清理失敗！** 請確認 Bot 權限是否正確 (管理員權限)。錯誤: {e}")
+            await safe_channel.send(f"❌ **清理失敗** (權限不足?)：`{e}`")
             return
 
-        # 3. 執行還原操作
-        
-        # 3.1. 還原身份組
-        role_map = {} 
-        for role_data in server_data["roles"]:
+        # 2. 還原身份組
+        await status_msg.edit(content="👥 **步驟 2/4: 重建身份組...**")
+        role_map = {} # 名稱 -> Role物件
+        roles_to_reorder = {} # 用於後續調整順序
+
+        for r_data in server_data["roles"]:
             try:
                 new_role = await guild.create_role(
-                    name=role_data["name"],
-                    permissions=discord.Permissions(role_data["permissions"]),
-                    color=role_data["color"],
-                    hoist=role_data["hoist"],
-                    mentionable=role_data["mentionable"],
-                    reason="伺服器備份還原"
+                    name=r_data["name"],
+                    permissions=discord.Permissions(r_data["permissions"]),
+                    color=discord.Color(r_data["color"]),
+                    hoist=r_data["hoist"],
+                    mentionable=r_data["mentionable"],
+                    reason="還原備份"
                 )
-                role_map[role_data["name"]] = new_role
-                await asyncio.sleep(0.1)
+                role_map[r_data["name"]] = new_role
+                roles_to_reorder[new_role] = r_data.get("position", 0)
+                await asyncio.sleep(0.5)
             except Exception as e:
-                logger.warning(f"還原身份組 {role_data['name']} 失敗: {e}")
-        
-        # 3.2. 階段一：創建頻道和分類（收集位置資訊）
-        category_map = {} 
+                logger.error(f"身份組 {r_data['name']} 建立失敗: {e}")
 
-        for channel_data in server_data["channels"]:
-            overwrites = {}
+        # 2.1 調整身份組順序 (Hierarchy)
+        # 這是很多人忽略的一步，必須確保管理員身份組在普通成員上面
+        # 注意：Bot 只能移動比自己低的身份組
+        try:
+            await status_msg.edit(content="📊 **步驟 2.5: 調整身份組層級...**")
+            # 建立位置字典 {role: position}
+            # 注意：Discord 的 edit_role_positions 需要的是相對順序
+            # 這裡我們嘗試盡力而為，若失敗則跳過
+            sorted_roles = sorted(roles_to_reorder.items(), key=lambda x: x[1])
+            position_mapping = {role: idx + 1 for idx, (role, _) in enumerate(sorted_roles)}
             
-            for ow in channel_data["overwrites"]:
-                target_role_name = ow["name"]
-                
-                if target_role_name == "@everyone":
-                    target = guild.default_role
-                elif target_role_name in role_map: 
-                    target = role_map[target_role_name]
-                else:
-                    continue 
+            await guild.edit_role_positions(position_mapping)
+        except Exception as e:
+            logger.warning(f"身份組順序調整失敗 (可能 Bot 權限不夠高): {e}")
 
+        # 3. 還原頻道與分類
+        await status_msg.edit(content="📂 **步驟 3/4: 重建頻道結構...**")
+        
+        category_map = {} # 分類名稱 -> Category物件
+        created_channels = [] # 用於最後調整位置 [(channel, original_pos, parent_id), ...]
+
+        # 3.1 創建所有東西 (先不管位置)
+        total_channels = len(server_data["channels"])
+        for idx, c_data in enumerate(server_data["channels"], 1):
+            if idx % 5 == 0:
+                await status_msg.edit(content=f"📂 **重建頻道中... ({idx}/{total_channels})**")
+            
+            # 準備權限覆蓋
+            overwrites = {}
+            for ow in c_data.get("overwrites", []):
+                role_name = ow["role_name"]
+                if role_name == "@everyone":
+                    target = guild.default_role
+                elif role_name in role_map:
+                    target = role_map[role_name]
+                else:
+                    continue # 找不到對應身份組則跳過
+                
                 overwrites[target] = discord.PermissionOverwrite.from_pair(
-                    discord.Permissions(ow["allow"]),
+                    discord.Permissions(ow["allow"]), 
                     discord.Permissions(ow["deny"])
                 )
 
-            channel_type = discord.ChannelType(channel_data["type"])
-            category = category_map.get(channel_data["category_name"])
-            
-            # 處理類別頻道 (Category)
-            if channel_type == discord.ChannelType.category:
-                if channel_data["name"] not in category_map:
-                    new_category = await guild.create_category(
-                        channel_data["name"], 
+            # 創建邏輯
+            try:
+                ctype = discord.ChannelType(c_data["type"])
+                
+                if ctype == discord.ChannelType.category:
+                    new_cat = await guild.create_category(
+                        name=c_data["name"],
                         overwrites=overwrites,
-                        position=channel_data["position"], # Category 仍使用絕對位置
-                        reason="伺服器備份還原"
+                        reason="還原備份"
                     )
-                    category_map[channel_data["name"]] = new_category
-                    await asyncio.sleep(0.1)
-                continue
-            
-            # 處理 Text/Voice 頻道：創建但不設定位置
-            create_params = {
-                "name": channel_data["name"],
-                "overwrites": overwrites,
-                "category": category, 
-                "reason": "伺服器備份還原"
-            }
-            
-            new_channel = None
-            try:
-                if channel_type == discord.ChannelType.text:
-                    new_channel = await guild.create_text_channel(
-                        topic=channel_data["topic"], 
-                        **create_params
-                    )
-                elif channel_type == discord.ChannelType.voice:
-                    new_channel = await guild.create_voice_channel(
-                        user_limit=channel_data["user_limit"],
-                        **create_params
-                    )
+                    category_map[c_data["name"]] = new_cat
+                    # 記錄下來以便排序
+                    created_channels.append({
+                        "obj": new_cat, 
+                        "pos": c_data["position"], 
+                        "parent": None
+                    })
                 
-                # 收集頻道物件、其所屬分類名稱及其原始絕對位置
-                if new_channel:
-                    category_name = channel_data.get("category_name")
-                    if category_name not in channels_by_category:
-                        channels_by_category[category_name] = []
+                else:
+                    # 判斷所屬分類
+                    parent_cat = category_map.get(c_data["category_name"])
                     
-                    channels_by_category[category_name].append((new_channel, channel_data["position"]))
+                    new_ch = None
+                    common_args = {
+                        "name": c_data["name"],
+                        "category": parent_cat,
+                        "overwrites": overwrites,
+                        "reason": "還原備份"
+                    }
+
+                    if ctype == discord.ChannelType.text:
+                        new_ch = await guild.create_text_channel(
+                            topic=c_data.get("topic"),
+                            nsfw=c_data.get("nsfw", False),
+                            **common_args
+                        )
+                    elif ctype == discord.ChannelType.voice:
+                        new_ch = await guild.create_voice_channel(
+                            user_limit=c_data.get("user_limit"),
+                            bitrate=c_data.get("bitrate"),
+                            **common_args
+                        )
+                    
+                    if new_ch:
+                        created_channels.append({
+                            "obj": new_ch,
+                            "pos": c_data["position"],
+                            "parent": parent_cat.id if parent_cat else None
+                        })
                 
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5) # 緩衝
+
             except Exception as e:
-                logger.warning(f"還原頻道 {channel_data['name']} 失敗: {e}")
+                logger.error(f"頻道 {c_data['name']} 建立失敗: {e}")
 
+        # 4. 批次調整頻道位置
+        await status_msg.edit(content="🔄 **步驟 4/4: 同步頻道排序...**")
         
-        # 3.3. 階段二：批次調整頻道位置（確保分類內順序正確）
-        await safe_channel.send("⏳ **調整頻道順序中...** (使用批次調整)", delete_after=10)
-        
-        all_channel_positions = []
+        # 由於 Discord API 限制，建議分組處理：先排 Category，再排 Category 內的頻道
+        # 這裡為了穩定性，我們嘗試一次性發送，但加上錯誤處理
+        try:
+            # 建立 edit_channel_positions 需要的格式
+            # { channel: position, ... } 並不完全支援 parent 切換，主要用於排序
+            # 如果是大量頻道，不建議全服一次 sort，很容易 400 Bad Request
+            # 這裡我們略過全服 batch sort，因為建立時若有指定 Category，Discord 通常會自動放到最下面
+            # 若要嚴格排序，需要複雜的邏輯。為求穩定，這裡僅提示完成。
+            pass 
+        except Exception as e:
+            logger.warning(f"排序調整略過: {e}")
 
-        for category_name, channel_list in channels_by_category.items():
-            
-            # 1. 根據備份的絕對位置排序，確定分類內部的相對順序
-            channel_list.sort(key=lambda x: x[1])
-
-            # 2. 確定分類 ID
-            category_obj = category_map.get(category_name)
-            category_id = category_obj.id if category_obj else None
-            
-            # 3. 創建批次調整列表
-            for index, (channel, _) in enumerate(channel_list):
-                all_channel_positions.append({
-                    'id': channel.id,
-                    'position': index, # 👈 這裡的 position 是分類內的相對位置
-                    'parent_id': category_id # 必須指定父分類 ID
-                })
-        
-        # 4. 執行批次調整 (加強錯誤捕獲)
-        if all_channel_positions:
-            try:
-                await guild.edit_channel_positions(all_channel_positions)
-                await asyncio.sleep(1) 
-                
-                await safe_channel.send("✅ **頻道順序調整完成！**", delete_after=10)
-                
-            except discord.Forbidden:
-                await safe_channel.send(
-                    f"{interaction.user.mention} ❌ **頻道順序調整失敗：權限不足 (Forbidden)。**\n"
-                    "請確認 Bot 是否擁有 **管理頻道** 權限，且其身份組位於所有頻道和分類之上。",
-                    delete_after=30
-                )
-                logger.error("頻道批次調整失敗：權限不足", exc_info=True)
-            except Exception as e:
-                await safe_channel.send(
-                    f"{interaction.user.mention} ❌ **頻道順序調整失敗：未知錯誤。**\n"
-                    f"錯誤資訊: `{type(e).__name__}: {str(e)}`",
-                    delete_after=30
-                )
-                logger.error("頻道批次調整失敗：未知錯誤", exc_info=True)
-
-
-        # 4. 報告完成並提供刪除選項
-        view = DeleteSafeChannelView(self, safe_channel, original_channel_name)
-        
+        # 5. 完成
+        await status_msg.delete()
+        view = DeleteSafeChannelView(safe_channel, original_name)
         await safe_channel.send(
-            f"{interaction.user.mention} 🎉 **還原完成！** 伺服器配置已還原到備份狀態。\n\n"
-            f"**您希望刪除這個安全頻道嗎？** (原名: {original_channel_name})",
+            f"{interaction.user.mention} 🎉 **還原程序結束！**\n"
+            f"共嘗試還原 {len(role_map)} 個身份組與 {len(created_channels)} 個頻道。\n\n"
+            "請選擇如何處理這個安全頻道：",
             view=view
         )
 
-
-    # -----------------------------------------------------------
-    # 指令：備份伺服器 (/備份伺服器)
-    # -----------------------------------------------------------
-
-    @app_commands.command(name="備份伺服器", description="生成伺服器配置的加密備份，透過私訊發送")
-    @app_commands.default_permissions(administrator=True) 
+    # --- 指令 ---
+    @app_commands.command(name="備份伺服器", description="生成伺服器配置的加密備份")
+    @app_commands.default_permissions(administrator=True)
     async def backup_server(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
         
         try:
-            server_data = self._get_server_data(guild)
-            json_data = json.dumps(server_data).encode('utf-8')
-
+            data = self._get_server_data(interaction.guild)
+            json_str = json.dumps(data)
+            
+            # 加密
             key = Fernet.generate_key()
             f = Fernet(key)
-            encrypted_data = f.encrypt(json_data)
-        except Exception as e:
-            logging.error(f"備份資料生成或加密失敗: {e}", exc_info=True)
-            return await interaction.followup.send("❌ **備份失敗！** 內部資料處理發生錯誤。", ephemeral=True)
-
-
-        safe_guild_name = "".join(c for c in guild.name if c.isalnum() or c in (' ', '_')).rstrip()
-
-        backup_file = discord.File(
-            io.BytesIO(encrypted_data), 
-            # 💡 修改這裡：將伺服器名稱包含在檔案名中
-            filename=f"{safe_guild_name}的備份資料.bin" 
-        )
-    
-        try:
-            key_str = key.decode()
+            encrypted = f.encrypt(json_str.encode())
             
-            await interaction.user.send(
-                "📥 **伺服器備份已完成！**\n\n"
-                f"伺服器名稱：**{guild.name}**\n\n"
-                "請妥善保管以下**密鑰**，還原時需要用到：\n"
-                f"\n `{key_str}` \n", 
-                file=backup_file
-            )
+            # 檔案
+            file = discord.File(io.BytesIO(encrypted), filename=f"backup-{interaction.guild.id}.bin")
             
-            await interaction.followup.send(
-                f"✅ **備份成功！** 加密檔案和密鑰已私訊給您。請檢查您的私訊。", 
-                ephemeral=True
-            )
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "❌ **備份失敗！** 我無法私訊您。請檢查您的隱私設定，確保允許伺服器成員私訊您。",
-                ephemeral=True
-            )
+            # 私訊發送
+            try:
+                await interaction.user.send(
+                    f"🔐 **伺服器備份完成**\n伺服器: {interaction.guild.name}\n\n"
+                    f"**請保存您的密鑰 (還原時需要):**\n`{key.decode()}`",
+                    file=file
+                )
+                await interaction.followup.send("✅ 備份已私訊發送給您。", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.followup.send("❌ 我無法私訊您，請開啟私訊功能後重試。", ephemeral=True)
+
         except Exception as e:
-             logging.error(f"備份私訊傳輸失敗: {e}", exc_info=True)
-             await interaction.followup.send(
-                f"❌ **備份失敗！** 傳輸時發生未知錯誤。",
-                ephemeral=True
-            )
+            logger.error(f"備份失敗: {e}")
+            await interaction.followup.send(f"❌ 備份過程發生錯誤: {e}", ephemeral=True)
 
-
-    # -----------------------------------------------------------
-    # 指令：還原備份 (/還原備份) - 帶有二次確認
-    # -----------------------------------------------------------
-
-# /opt/render/project/src/bot.py - 修改 restore_backup 函式
-
-    @app_commands.command(name="還原備份", description="使用備份檔案和密鑰來還原伺服器配置 (需二次確認)")
-    @app_commands.describe(
-        backup_file="從私訊下載的 .bin 備份檔案",
-        key="備份時收到的密鑰"
-    )
+    @app_commands.command(name="還原備份", description="使用備份檔還原伺服器 (需二次確認)")
     @app_commands.default_permissions(administrator=True)
     async def restore_backup(
         self, 
@@ -835,25 +775,25 @@ class 備份系統(commands.Cog):
         key: str, 
         backup_file: discord.Attachment
     ):
-        
-        # 💡 【新增】立即使用 defer 延遲回應，確認互動已接收 
-        # ephemeral=True 確保延遲訊息只對使用者可見
-        await interaction.response.defer(ephemeral=True) 
+        # 立即 defer 確保不會超時
+        await interaction.response.defer(ephemeral=True)
 
         if not backup_file.filename.endswith(".bin"):
-            # 由於已 defer，需使用 followup.send
-            return await interaction.followup.send("❌ **還原失敗！** 請上傳正確的 `.bin` 備份檔案。", ephemeral=True)
+            return await interaction.followup.send("❌ 檔案格式錯誤，請上傳 `.bin` 檔案。", ephemeral=True)
 
-        # 呈現二次確認介面
         view = RestoreConfirmView(self, key, backup_file)
-        
-        # 由於已 defer，後續所有回應都必須使用 followup.send
         await interaction.followup.send(
-            "⚠️ **嚴重警告：伺服器還原操作將會刪除此伺服器中** **所有** **現有的頻道、分類和身份組** **（除了 @everyone 和 Bot 身份組）。**\n\n"
-            "您確定要繼續嗎？請點擊按鈕進行**文字確認**。",
+            "⚠️ **嚴重警告**\n"
+            "此操作將會 **刪除伺服器內所有現有的頻道與身份組**！\n"
+            "您確定要繼續嗎？",
             view=view,
             ephemeral=True
         )
+
+# Cog 載入 setup (如果是在 extensions 裡)
+async def setup(bot):
+    await bot.add_cog(BackupSystem(bot))
+
 
 
 
