@@ -11,3 +11,4 @@ authlib
 requests-oauthlib
 youtube-dl
 discord.py>=2.3.0
+cryptography
