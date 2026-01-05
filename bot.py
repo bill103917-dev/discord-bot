@@ -1846,8 +1846,9 @@ from flask import Flask, render_template, session, redirect, url_for, request, j
 from werkzeug.utils import secure_filename
 import uuid # 用於生成獨特的檔案名
 import random # 用於隨機邏輯 (儘管在此版本中已棄用)
-# 🚨 確保您已在專案中定義這些工具
-from utils import load_config, save_config, safe_now 
+from utils.config_manager import load_config, save_config
+from utils.time_utils import safe_now
+
 
 
 app = Flask(__name__)
