@@ -11,9 +11,7 @@ import discord
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
-from utils import load_config, save_config 
-from utils import safe_now
-from utils import load_support_config, save_support_config
+from utils.config_manager import load_support_config, save_support_config
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
@@ -22,9 +20,6 @@ import tempfile
 import uuid  # <--- 請新增這一行在最上面
 import traceback
 import tempfile
-from cryptography.fernet import Fernet # 新增
-import json # 新增
-import io # 新增
 import base64 # 新增
 from typing import Optional, TYPE_CHECKING
 import logging
