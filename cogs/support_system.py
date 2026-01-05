@@ -11,9 +11,10 @@ from datetime import datetime
 # =========================
 # -- 工具與基礎設定
 # =========================
+# 匯入時間工具
+from utils.time_utils import safe_now
 
-def safe_now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 # =========================
 # -- Views & Modal (Support)
