@@ -31,8 +31,11 @@ from discord import FFmpegPCMAudio
 
 from cogs.backup_system import BackupSystem, RestorePreCheckView
 
-from youtube_dl import YoutubeDL 
-from cogs.support_system import ReplyView
+
+# 確保這裡有匯入你要用的所有 Cog 類別與 View
+from cogs.support_system import SupportCog, ReplyView
+from cogs.backup_system import BackupSystem, RestorePreCheckView
+# ... 其他 Cog 的匯入 ...
 
 
 from typing import Optional, Dict, List, Tuple, Literal
