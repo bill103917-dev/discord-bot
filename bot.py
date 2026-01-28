@@ -1818,12 +1818,6 @@ async def on_ready():
         except Exception as e:
             print(f"持久化設定失敗: {e}")
 
-        # --- 2. 註冊持久化 View ---
-        try:
-            bot.add_view(ReplyView())
-            print("✅ ReplyView persistent class registered.")
-        except Exception as e:
-            print("持久話伺服器設定設定失敗: {e}")
 
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
     try:
@@ -2322,7 +2316,7 @@ def run_web():
     
     # 🚨 Render 預設提供 $PORT (約 10000)。
     # 確保備用端口與 Bot API 端口 8080 衝突。
-    port = os.getenv("PORT", 8081)  # 使用 8081 作為備用端口
+    port = os.getenv("PORT", 8080)  # 使用 8081 作為備用端口
     
     print(f"Flask Web 正在嘗試啟動於端口: {port}")
     
