@@ -2344,29 +2344,35 @@ async def start_bot():
     global discord_loop
     discord_loop = asyncio.get_running_loop()
     print("啟動 Discord Bot...")
-    try:
-        # 這是 Discord.py 啟動的主循環
-        await bot.start(TOKEN) 
-        break
+    
+    retry_count = 0
+    while retry_count < 5:
+        try:
+            # 這是 Discord.py 啟動的主循環
+            await bot.start(TOKEN) 
+            break
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                print(f"⚠️ 遭到 Discord 限流 (429)，30 秒後嘗試第 {retry_count+1} 次重連...")
-                await asyncio.sleep(30)
                 retry_count += 1
+                print(f"⚠️ 遭到 Discord 限流 (429)，30 秒後嘗試第 {retry_count} 次重連...")
+                await asyncio.sleep(30)
             else:
-                raise e
+                print(f"❌ HTTP 錯誤: {e}")
+                break
+        except Exception as e:
+            print(f"❌ 啟動時發生錯誤: {e}")
+            break
 
         
 if __name__ == "__main__":
     # 1️⃣ 在背景執行緒中啟動 Flask Web 服務 (綁定 10000)
     keep_web_alive()
 
-    # 2️⃣ 在主線程中啟動 Discord Bot (Bot 的 on_ready 會啟動 8080 服務)
+    # 2️⃣ 在主線程中啟動 Discord Bot
     try:
-        # asyncio.run 會運行 start_bot，直到它完成（Bot 運行時不會完成）
+        # asyncio.run 會運行 start_bot，直到它完成
         asyncio.run(start_bot())
     except RuntimeError as e:
-        # 處理常見的 Event Loop 關閉錯誤
         if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
             print("⚠️ Event loop 已關閉或不可從當前線程啟動。")
         else:
