@@ -2348,20 +2348,27 @@ async def start_bot():
     retry_count = 0
     while retry_count < 5:
         try:
-            # 這是 Discord.py 啟動的主循環
-            await bot.start(TOKEN) 
+            # 嘗試登入並啟動
+            await bot.login(TOKEN)
+            await bot.connect()
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 retry_count += 1
-                print(f"⚠️ 遭到 Discord 限流 (429)，30 秒後嘗試第 {retry_count} 次重連...")
+                print(f"⚠️ 偵測到 Discord 限流，嘗試第 {retry_count} 次重連...")
+                await bot.close() # 💡 先關閉舊 session 避免 Unclosed session 錯誤
                 await asyncio.sleep(30)
             else:
-                print(f"❌ HTTP 錯誤: {e}")
+                print(f"❌ 登入失敗: {e}")
                 break
         except Exception as e:
-            print(f"❌ 啟動時發生錯誤: {e}")
+            print(f"❌ 執行時發生錯誤: {e}")
             break
+        finally:
+            # 確保最後一定會嘗試釋放資源
+            if not bot.is_closed():
+                await bot.close()
+
 
         
 if __name__ == "__main__":
