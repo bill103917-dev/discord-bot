@@ -156,7 +156,11 @@ class SupportCog(commands.Cog):
         self.db_url = os.getenv("DATABASE_URL")
         self.support_config = {}
         self.user_target_guild = {}
-        self.bot.loop.create_task(self.init_db())
+
+    async def cog_load(self):
+         """當 Cog 被載入時自動執行"""
+         self.bot.loop.create_task(self.init_db())
+
 
     async def init_db(self):
         try:
