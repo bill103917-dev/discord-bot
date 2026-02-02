@@ -2338,56 +2338,101 @@ def keep_web_alive():
     print("Flask Web 已啟動於背景線程。")
 
 import traceback
+import logging
 
+# =========================
+# 🛡️ 1. 頂級日誌配置
+# =========================
+# 建立一個自定義格式：[時間] [層級] [來源] 訊息
+log_formatter = logging.Formatter(
+    fmt='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# 設置控制台輸出
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(log_formatter)
+
+# 設置全域 Log 等級 (DEBUG 會顯示最詳細的連線握手資訊)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO) # 如果還是抓不到，可以改為 logging.DEBUG
+logger.addHandler(handler)
+
+# 專門監控 discord 與 aiohttp
+logging.getLogger('discord').setLevel(logging.INFO)
+logging.getLogger('aiohttp').setLevel(logging.DEBUG) # 監控連線池
+
+# =========================
+# 🚀 2. 強化版啟動函式
+# =========================
 async def start_bot():
-    """啟動 Discord Bot 的 asyncio 主循環 (強化偵錯版)"""
-    global discord_loop
-    discord_loop = asyncio.get_running_loop()
-    
+    """啟動 Discord Bot 並監控詳細過程"""
     retry_count = 0
-    while retry_count < 5:
-        print(f"🚀 啟動 Discord Bot (第 {retry_count + 1} 次嘗試)...")
+    max_retries = 5
+    
+    while retry_count < max_retries:
         try:
-            # 💡 這裡加上 close 保險，確保舊的 session 徹底清除
-            if bot.is_closed() == False:
+            # 💡 每次嘗試前，先檢查並清理舊的 Session
+            if not bot.is_closed():
+                logger.info("檢測到未關閉的 Bot 實例，正在嘗試強制關閉...")
                 await bot.close()
             
-            await bot.start(TOKEN) 
-            break
-        except discord.errors.LoginFailure:
-            print("❌ Token 錯誤，請檢查環境變數。")
-            break
+            # 給予系統資源回收的時間，避免 Unclosed client session
+            await asyncio.sleep(2)
+            
+            # 載入 Cogs (帶有錯誤回報)
+            if not hasattr(bot, 'cogs_ready'):
+                logger.info("正在掃描並載入 Cogs...")
+                for filename in os.listdir('./cogs'):
+                    if filename.endswith('.py'):
+                        try:
+                            await bot.load_extension(f'cogs.{filename[:-3]}')
+                            logger.info(f"✅ 成功載入模組: {filename}")
+                        except Exception as e:
+                            logger.error(f"❌ 載入模組 {filename} 失敗!")
+                            logger.error(traceback.format_exc())
+                bot.cogs_ready = True
+
+            logger.info(f"正在發起 Discord 登入請求 (嘗試次數: {retry_count + 1})...")
+            
+            # 執行登入
+            await bot.start(TOKEN)
+            break 
+
         except discord.errors.HTTPException as e:
-            if e.status == 429:
-                print(f"⚠️ 偵測到 Discord 限流 (429/1015)。")
-                await bot.close()
-                wait_time = 45 * (retry_count + 1) # 增加等待時間
-                print(f"⏰ 等待 {wait_time} 秒後重啟...")
-                await asyncio.sleep(wait_time)
+            if e.status == 429 or e.status == 1015:
                 retry_count += 1
+                wait_time = 60 * retry_count
+                logger.warning(f"🚨 觸發 Discord 限速 (1015/429)! IP 可能已被暫時封鎖。")
+                logger.warning(f"⏰ 將在 {wait_time} 秒後重新嘗試...")
+                
+                # 遇到 1015 時，必須徹底關閉連線池，否則重試也會失敗
+                await bot.close()
+                await asyncio.sleep(wait_time)
             else:
-                print(f"❌ HTTP 錯誤: {e}")
-                traceback.print_exc()
+                logger.error(f"❌ 發生 HTTP 異常: {e}")
+                logger.error(traceback.format_exc())
                 break
         except Exception as e:
-            print(f"❌ 執行時發生未知錯誤: {e}")
-            traceback.print_exc() # 這行會告訴我們具體錯在哪個檔案哪一行
+            logger.error(f"❌ 啟動過程中發生未預期錯誤: {e}")
+            logger.error(traceback.format_exc())
             await bot.close()
-            await asyncio.sleep(15)
+            await asyncio.sleep(20)
             retry_count += 1
 
-
-        
+# =========================
+# ⚙️ 3. 執行區塊
+# =========================
 if __name__ == "__main__":
-    # 1️⃣ 在背景執行緒中啟動 Flask Web 服務 (綁定 10000)
+    # 啟動 Flask 背景執行緒
     keep_web_alive()
-
-    # 2️⃣ 在主線程中啟動 Discord Bot
+    
     try:
-        # asyncio.run 會運行 start_bot，直到它完成
+        # 啟動主事件循環
         asyncio.run(start_bot())
-    except RuntimeError as e:
-        if "Event loop is closed" in str(e) or "cannot run from a thread" in str(e):
-            print("⚠️ Event loop 已關閉或不可從當前線程啟動。")
-        else:
-            raise
+    except KeyboardInterrupt:
+        logger.info("🛑 收到停止指令，關閉機器人中...")
+    except Exception as e:
+        logger.critical(f"💥 主程序崩潰: {e}")
+        logger.critical(traceback.format_exc())
+
