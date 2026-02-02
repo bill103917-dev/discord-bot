@@ -2347,11 +2347,15 @@ async def start_bot():
     try:
         # 這是 Discord.py 啟動的主循環
         await bot.start(TOKEN) 
-    except KeyboardInterrupt:
-        print("機器人已手動關閉。")
-    except Exception as e:
-        print(f"Discord Bot 啟動錯誤: {e}")
-        traceback.print_exc()
+        break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                print(f"⚠️ 遭到 Discord 限流 (429)，30 秒後嘗試第 {retry_count+1} 次重連...")
+                await asyncio.sleep(30)
+                retry_count += 1
+            else:
+                raise e
+
         
 if __name__ == "__main__":
     # 1️⃣ 在背景執行緒中啟動 Flask Web 服務 (綁定 10000)
