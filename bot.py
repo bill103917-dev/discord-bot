@@ -2337,48 +2337,45 @@ def keep_web_alive():
     t.start()
     print("Flask Web 已啟動於背景線程。")
 
+import traceback
 
 async def start_bot():
-    """啟動 Discord Bot 的 asyncio 主循環。"""
+    """啟動 Discord Bot 的 asyncio 主循環 (強化偵錯版)"""
     global discord_loop
     discord_loop = asyncio.get_running_loop()
     
-    # 🚨 關鍵修正：啟動前先檢查 bot 是否已經有殘留連線
-    if bot.is_ready():
-        print("⚠️ 偵測到機器人已在運行中，嘗試關閉舊連線...")
-        await bot.close()
-
     retry_count = 0
     while retry_count < 5:
         print(f"🚀 啟動 Discord Bot (第 {retry_count + 1} 次嘗試)...")
         try:
-            # 💡 這裡加上一個簡單的判斷，確保 Token 存在
-            if not TOKEN:
-                print("❌ 錯誤: 找不到 TOKEN，請檢查環境變數。")
-                return
-
+            # 💡 這裡加上 close 保險，確保舊的 session 徹底清除
+            if bot.is_closed() == False:
+                await bot.close()
+            
             await bot.start(TOKEN) 
+            break
+        except discord.errors.LoginFailure:
+            print("❌ Token 錯誤，請檢查環境變數。")
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                retry_count += 1
                 print(f"⚠️ 偵測到 Discord 限流 (429/1015)。")
                 await bot.close()
-                wait_time = 30 * retry_count
+                wait_time = 45 * (retry_count + 1) # 增加等待時間
                 print(f"⏰ 等待 {wait_time} 秒後重啟...")
                 await asyncio.sleep(wait_time)
+                retry_count += 1
             else:
                 print(f"❌ HTTP 錯誤: {e}")
+                traceback.print_exc()
                 break
         except Exception as e:
-            print(f"❌ 執行時發生錯誤: {e}")
-            # 發生錯誤時一定要 close 掉當前的 session
-            try:
-                await bot.close()
-            except:
-                pass
-            await asyncio.sleep(10)
+            print(f"❌ 執行時發生未知錯誤: {e}")
+            traceback.print_exc() # 這行會告訴我們具體錯在哪個檔案哪一行
+            await bot.close()
+            await asyncio.sleep(15)
             retry_count += 1
+
 
         
 if __name__ == "__main__":
