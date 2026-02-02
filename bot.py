@@ -58,7 +58,6 @@ except Exception:
 # =========================
 # Basic config from env
 # =========================
-TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
@@ -67,9 +66,10 @@ PORT = int(os.getenv("PORT", 8080))
 TEMP_UPLOAD_FOLDER = 'static/temp_uploads' 
 TARGET_CHANNEL_ID = "1446781237422198855" 
 
+
+TOKEN = os.getenv("DISCORD_TOKEN") # 確保你的環境變數名稱是對應的
 if not TOKEN:
-    print("❌ DISCORD_TOKEN not set. Exiting.")
-    sys.exit(1)
+    raise ValueError("找不到 DISCORD_TOKEN 環境變數！")
 
 # =========================
 # Utils & Shared State
