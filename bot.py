@@ -2343,18 +2343,26 @@ async def start_bot():
     global discord_loop
     discord_loop = asyncio.get_running_loop()
     
+    # 🚨 關鍵修正：啟動前先檢查 bot 是否已經有殘留連線
+    if bot.is_ready():
+        print("⚠️ 偵測到機器人已在運行中，嘗試關閉舊連線...")
+        await bot.close()
+
     retry_count = 0
     while retry_count < 5:
         print(f"🚀 啟動 Discord Bot (第 {retry_count + 1} 次嘗試)...")
         try:
-            # 使用 start 而不是 login/connect，它會處理整套生命週期
+            # 💡 這裡加上一個簡單的判斷，確保 Token 存在
+            if not TOKEN:
+                print("❌ 錯誤: 找不到 TOKEN，請檢查環境變數。")
+                return
+
             await bot.start(TOKEN) 
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 retry_count += 1
                 print(f"⚠️ 偵測到 Discord 限流 (429/1015)。")
-                # 這裡要徹底關閉舊連線，避免 Session is closed 殘留
                 await bot.close()
                 wait_time = 30 * retry_count
                 print(f"⏰ 等待 {wait_time} 秒後重啟...")
@@ -2363,13 +2371,14 @@ async def start_bot():
                 print(f"❌ HTTP 錯誤: {e}")
                 break
         except Exception as e:
-            # 如果出現 Session is closed，我們強制 close 後重試
             print(f"❌ 執行時發生錯誤: {e}")
-            await bot.close()
+            # 發生錯誤時一定要 close 掉當前的 session
+            try:
+                await bot.close()
+            except:
+                pass
             await asyncio.sleep(10)
             retry_count += 1
-
-
 
         
 if __name__ == "__main__":
