@@ -157,9 +157,11 @@ class SupportCog(commands.Cog):
         self.support_config = {}
         self.user_target_guild = {}
 
-    async def cog_load(self):
+     async def cog_load(self):
          """當 Cog 被載入時自動執行"""
-         self.bot.loop.create_task(self.init_db())
+         asyncio.create_task(self.init_db())
+         print("✅ SupportCog: 已在背景啟動資料庫初始化任務")
+
 
 
     async def init_db(self):
