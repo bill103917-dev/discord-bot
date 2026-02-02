@@ -2338,36 +2338,37 @@ def keep_web_alive():
     print("Flask Web 已啟動於背景線程。")
 
 
-
 async def start_bot():
     """啟動 Discord Bot 的 asyncio 主循環。"""
     global discord_loop
     discord_loop = asyncio.get_running_loop()
-    print("啟動 Discord Bot...")
     
     retry_count = 0
     while retry_count < 5:
+        print(f"🚀 啟動 Discord Bot (第 {retry_count + 1} 次嘗試)...")
         try:
-            # 嘗試登入並啟動
-            await bot.login(TOKEN)
-            await bot.connect()
+            # 使用 start 而不是 login/connect，它會處理整套生命週期
+            await bot.start(TOKEN) 
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 retry_count += 1
-                print(f"⚠️ 偵測到 Discord 限流，嘗試第 {retry_count} 次重連...")
-                await bot.close() # 💡 先關閉舊 session 避免 Unclosed session 錯誤
-                await asyncio.sleep(30)
+                print(f"⚠️ 偵測到 Discord 限流 (429/1015)。")
+                # 這裡要徹底關閉舊連線，避免 Session is closed 殘留
+                await bot.close()
+                wait_time = 30 * retry_count
+                print(f"⏰ 等待 {wait_time} 秒後重啟...")
+                await asyncio.sleep(wait_time)
             else:
-                print(f"❌ 登入失敗: {e}")
+                print(f"❌ HTTP 錯誤: {e}")
                 break
         except Exception as e:
+            # 如果出現 Session is closed，我們強制 close 後重試
             print(f"❌ 執行時發生錯誤: {e}")
-            break
-        finally:
-            # 確保最後一定會嘗試釋放資源
-            if not bot.is_closed():
-                await bot.close()
+            await bot.close()
+            await asyncio.sleep(10)
+            retry_count += 1
+
 
 
         
