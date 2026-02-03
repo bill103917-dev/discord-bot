@@ -1291,7 +1291,7 @@ class MusicControlView(discord.ui.View):
 # (位於第二段程式碼中 MusicControlView 類別內部)
 # ===============================================
         async def interaction_check(self, interaction: Interaction) -> bool:
-        vc = self.cog.vc_dict.get(self.guild_id)
+            vc = self.cog.vc_dict.get(self.guild_id)
         
         # 如果機器人沒連線，僅限管理員操作（用於清理殘留訊息）
         if not vc or not vc.is_connected():
