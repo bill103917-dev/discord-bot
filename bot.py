@@ -2314,21 +2314,12 @@ def logout():
 # =========================
 # ⚡ 執行區塊 (修正版)
 # =========================
+# bot.py 裡的啟動代碼
 def run_web():
-    """在單獨的執行緒中運行 Flask 應用程式。"""
-    
-    # 🚨 Render 預設提供 $PORT (約 10000)。
-    # 確保備用端口與 Bot API 端口 8080 衝突。
-    port = os.getenv("PORT", 8080)  # 使用 8081 作為備用端口
-    
-    print(f"Flask Web 正在嘗試啟動於端口: {port}")
-    
-    # 使用 Flask 內建的開發伺服器啟動 (生產環境建議使用 Waitress)
-    try:
-        # 如果您使用 Waitress: serve(app, host="0.0.0.0", port=int(port))
-        app.run(host="0.0.0.0", port=int(port), debug=False, use_reloader=False)
-    except Exception as e:
-        print(f"❌ Flask Web 啟動失敗: {e}")
+    port = int(os.getenv("PORT", 10000))
+    # 🚨 務必確認 debug=False 且 use_reloader=False
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
 
 def keep_web_alive():
     """在背景執行緒中啟動 Flask 服務。"""
