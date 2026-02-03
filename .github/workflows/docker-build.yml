@@ -24,14 +24,14 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }} # 稍後設定
         password: ${{ secrets.DOCKER_PASSWORD }} # 稍後設定
 
-    - name: Build and Push Docker Image # 步驟 3: 構建映像檔並推送
-      # 使用您的 Dockerfile 進行構建，並將其標記為最新
+    - name: Build and Push Docker Image
       uses: docker/build-push-action@v5
       with:
-        context: . # 使用當前目錄作為構建上下文
-        push: true # 啟用推送
-        tags: ${{ secrets.DOCKER_USERNAME }}/<dot.py dc我是機器人>:latest 
-        # 請將 <您的映像檔名稱> 替換成一個自訂名稱，例如：my-python-bot
+        context: .
+        push: true
+        # 🚨 修正：移除中文與特殊括號，請確保名稱只包含小寫英文字母、數字、底線或連字號
+        tags: ${{ secrets.DOCKER_USERNAME }}/my-discord-bot:latest 
+
 
     - name: Build Succeeded Message # 步驟 4: 構建成功提示 (可選)
       run: echo "Docker 映像檔已成功構建並推送到 Docker Hub！"
