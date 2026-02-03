@@ -403,9 +403,10 @@ import random
 class ImageDrawCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 確保在初始化時可以讀取這些全局變數
-        self.TARGET_CHANNEL_ID = TARGET_CHANNEL_ID
-        self.TEMP_UPLOAD_FOLDER = TEMP_UPLOAD_FOLDER
+        # 確保從全局變數正確讀取，若無則設為預設值
+        self.target_channel_id = int(os.getenv("TARGET_CHANNEL_ID", TARGET_CHANNEL_ID))
+        self.temp_folder = TEMP_UPLOAD_FOLDER
+
         
     @app_commands.command(name="隨機抽圖", description="從圖庫中隨機抽取一張圖片發送。")
     async def draw_image(self, interaction: discord.Interaction):
@@ -1304,16 +1305,24 @@ class MusicControlView(discord.ui.View):
 # 📌 修改 2：MusicControlView 的 interaction_check
 # (位於第二段程式碼中 MusicControlView 類別內部)
 # ===============================================
-    async def interaction_check(self, interaction: Interaction) -> bool:
+        async def interaction_check(self, interaction: Interaction) -> bool:
         vc = self.cog.vc_dict.get(self.guild_id)
         
+        # 如果機器人沒連線，僅限管理員操作（用於清理殘留訊息）
         if not vc or not vc.is_connected():
             return interaction.user.guild_permissions.administrator
         
+        # 檢查使用者是否在同一個語音頻道
         if interaction.user.voice and interaction.user.voice.channel == vc.channel:
             return True
             
-        return interaction.user.guild_permissions.administrator
+        # 若不在頻道，檢查是否為管理員
+        if interaction.user.guild_permissions.administrator:
+            return True
+
+        await interaction.response.send_message("❌ 你必須與機器人在同一個語音頻道才能控制音樂！", ephemeral=True)
+        return False
+
         
     @discord.ui.button(label="⏯️", style=discord.ButtonStyle.primary)
     async def btn_pause_resume(self, interaction: Interaction, button: discord.ui.Button):
@@ -1799,11 +1808,13 @@ async def on_ready():
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
     # --- 1. 嘗試載入 Cogs (具備錯誤回滾意識) ---
+    # --- 1. 嘗試載入 Cogs ---
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
         VoiceCog, ImageDrawCog, ScheduledUploadCog, BackupSystem
     ]
+
 
     for cog in cog_list:
         try:
