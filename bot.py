@@ -1290,23 +1290,28 @@ class MusicControlView(discord.ui.View):
 # 📌 修改 2：MusicControlView 的 interaction_check
 # (位於第二段程式碼中 MusicControlView 類別內部)
 # ===============================================
-        async def interaction_check(self, interaction: Interaction) -> bool:
-            vc = self.cog.vc_dict.get(self.guild_id)
+# ===============================================
+# 📌 修正：修正關鍵字大小寫與縮排
+# ===============================================
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        vc = self.cog.vc_dict.get(self.guild_id)
         
-        # 如果機器人沒連線，僅限管理員操作（用於清理殘留訊息）
+        # 1. 如果機器人沒連線，僅限管理員操作
         if not vc or not vc.is_connected():
             return interaction.user.guild_permissions.administrator
         
-        # 檢查使用者是否在同一個語音頻道
+        # 2. 檢查使用者是否在同一個語音頻道
         if interaction.user.voice and interaction.user.voice.channel == vc.channel:
             return True
             
-        # 若不在頻道，檢查是否為管理員
+        # 3. 若不在頻道，檢查是否為管理員
         if interaction.user.guild_permissions.administrator:
             return True
 
+        # 4. 以上條件都不符合，報錯並攔截
         await interaction.response.send_message("❌ 你必須與機器人在同一個語音頻道才能控制音樂！", ephemeral=True)
         return False
+
 
         
     @discord.ui.button(label="⏯️", style=discord.ButtonStyle.primary)
