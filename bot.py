@@ -665,6 +665,21 @@ class UtilityCog(commands.Cog):
             await interaction.followup.send(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
+        # 加在 UtilityCog 類別內，或者作為一個獨立的 @bot.command
+        
+        
+    @app_commands.command(name="sync", description="手動同步指令（僅管理員）")
+    async def sync_tree(self, interaction: Interaction):
+        if interaction.user.id not in SPECIAL_USER_IDS:
+             return await interaction.response.send_message("❌ 你沒有權限", ephemeral=True)
+        
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.bot.tree.sync()
+            await interaction.followup.send("✅ 指令同步完成！")
+        except Exception as e:
+            await interaction.followup.send(f"❌ 同步失敗: {e}")
+
 
     @app_commands.command(name="announce", description="發布公告（管理員限定）")
     async def announce(self, interaction: Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
@@ -1784,7 +1799,6 @@ async def on_ready():
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
     # --- 1. 嘗試載入 Cogs (具備錯誤回滾意識) ---
-    # 我們將 Cog 列表分開，這樣出錯時可以明確知道是哪一個
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
@@ -1793,12 +1807,9 @@ async def on_ready():
 
     for cog in cog_list:
         try:
-            # 嘗試載入新代碼
             await bot.add_cog(cog(bot))
             print(f"✅ {cog.__name__} 載入成功")
         except Exception as e:
-            # 如果這個 Cog 載入出錯，我們會印出錯誤日誌但「不停止」其他 Cog 的載入
-            # 這能確保即使某個檔案改爛了，其他功能依然能運作 (即沿用沒出錯的部分)
             print(f"❌ {cog.__name__} 修正版有誤，載入失敗: {e}")
             traceback.print_exc()
 
@@ -1810,12 +1821,13 @@ async def on_ready():
     except Exception as e:
         print(f"❌ 持久化設定失敗: {e}")
 
-    # --- 3. 同步斜線指令 (確保只有在成功載入後才同步) ---
-    try:
-        await bot.tree.sync() 
-        print("✅ 斜線指令已同步完成。")
-    except Exception as e:
-        print(f"❌ 同步指令時發生錯誤: {e}")
+    # --- 🚨 危險修正：移除這裡的 bot.tree.sync() 🚨 ---
+    # 不要由 on_ready 自動同步，改用指令手動觸發
+    # try:
+    #     await bot.tree.sync() 
+    #     print("✅ 斜線指令已同步完成。")
+    # except Exception as e:
+    #     print(f"❌ 同步指令時發生錯誤: {e}")
 
     # --- 4. 設定 Bot 狀態 ---
     try:
