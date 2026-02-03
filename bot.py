@@ -2331,99 +2331,100 @@ def keep_web_alive():
 import traceback
 import logging
 
-# =========================
-# 🛡️ 1. 頂級日誌配置
-# =========================
-# 建立一個自定義格式：[時間] [層級] [來源] 訊息
-log_formatter = logging.Formatter(
-    fmt='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+import asyncio
+import discord
+from discord.ext import commands
+import logging
+import aiohttp
+import os
+import sys
 
-# 設置控制台輸出
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(log_formatter)
+# ==========================================
+# 1. 強化版日誌配置 (精確追蹤握手)
+# ==========================================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('HandshakeDiagnose')
 
-# 設置全域 Log 等級 (DEBUG 會顯示最詳細的連線握手資訊)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO) # 如果還是抓不到，可以改為 logging.DEBUG
-logger.addHandler(handler)
-
-# 專門監控 discord 與 aiohttp
-logging.getLogger('discord').setLevel(logging.INFO)
-logging.getLogger('aiohttp').setLevel(logging.DEBUG) # 監控連線池
-
-# =========================
-# 🚀 2. 強化版啟動函式
-# =========================
+# ==========================================
+# 2. 完整 start_bot 函式
+# ==========================================
 async def start_bot():
-    """啟動 Discord Bot 並監控詳細過程"""
+    """
+    精確診斷版啟動函式
+    追蹤流程：TCP建立 -> HTTP握手 -> Token驗證 -> Gateway連接
+    """
     retry_count = 0
     max_retries = 5
     
     while retry_count < max_retries:
         try:
-            # 💡 每次嘗試前，先檢查並清理舊的 Session
-            if not bot.is_closed():
-                logger.info("檢測到未關閉的 Bot 實例，正在嘗試強制關閉...")
-                await bot.close()
-            
-            # 給予系統資源回收的時間，避免 Unclosed client session
+            # 🚨 A. 強制清理舊連線 (預防 1015/Unclosed Session)
+            if bot.http.connector:
+                await bot.http.close()
+            await bot.close()
             await asyncio.sleep(2)
-            
-            # 載入 Cogs (帶有錯誤回報)
-            if not hasattr(bot, 'cogs_ready'):
-                logger.info("正在掃描並載入 Cogs...")
-                for filename in os.listdir('./cogs'):
-                    if filename.endswith('.py'):
-                        try:
-                            await bot.load_extension(f'cogs.{filename[:-3]}')
-                            logger.info(f"✅ 成功載入模組: {filename}")
-                        except Exception as e:
-                            logger.error(f"❌ 載入模組 {filename} 失敗!")
-                            logger.error(traceback.format_exc())
-                bot.cogs_ready = True
 
-            logger.info(f"正在發起 Discord 登入請求 (嘗試次數: {retry_count + 1})...")
+            logger.info(f"📡 [嘗試 {retry_count + 1}] 開始 Discord 握手流程...")
+
+            # 🚨 B. 建立追蹤配置 (捕捉 aiohttp 異常)
+            trace_config = aiohttp.TraceConfig()
             
-            # 執行登入
-            await bot.start(TOKEN)
-            break 
+            async def on_request_start(session, context, params):
+                logger.info(f"🚀 [步驟 1/3] 發送 HTTP 請求至 Discord: {params.method} {params.url}")
+            
+            async def on_request_exception(session, context, params):
+                logger.error(f"❌ [握手中斷] 請求發生異常: {params.exception}")
+            
+            trace_config.on_request_start.append(on_request_start)
+            trace_config.on_request_exception.append(on_request_exception)
+
+            # 🚨 C. 嘗試登入 (Token 驗證階段)
+            logger.info("🔑 [步驟 2/3] 正在驗證 Token...")
+            await bot.login(TOKEN)
+            logger.info("✅ Token 驗證成功！")
+
+            # 🚨 D. 建立 Gateway 連線 (WebSocket 階段)
+            logger.info("🌐 [步驟 3/3] 嘗試連接 Discord Gateway...")
+            await bot.connect()
+            break
 
         except discord.errors.HTTPException as e:
-            if e.status == 429 or e.status == 1015:
-                retry_count += 1
-                wait_time = 60 * retry_count
-                logger.warning(f"🚨 觸發 Discord 限速 (1015/429)! IP 可能已被暫時封鎖。")
-                logger.warning(f"⏰ 將在 {wait_time} 秒後重新嘗試...")
-                
-                # 遇到 1015 時，必須徹底關閉連線池，否則重試也會失敗
-                await bot.close()
+            # 這裡能精確捕捉 1015 (Rate Limit)
+            if e.status == 1015 or e.status == 429:
+                logger.error(f"🛑 [連線拒絕] 錯誤 1015: Render IP 被 Discord 限速。")
+                logger.error(f"具體訊息: {e.text}")
+                wait_time = 60 * (retry_count + 1)
+                logger.warning(f"⏰ 等待 {wait_time} 秒後重試...")
                 await asyncio.sleep(wait_time)
+                retry_count += 1
             else:
-                logger.error(f"❌ 發生 HTTP 異常: {e}")
-                logger.error(traceback.format_exc())
+                logger.error(f"❌ HTTP 異常 ({e.status}): {e.text}")
                 break
+                
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"❌ [網路錯誤] 無法建立連線 (可能是 DNS 或網路阻斷): {e}")
+            await asyncio.sleep(20)
+            retry_count += 1
+            
         except Exception as e:
-            logger.error(f"❌ 啟動過程中發生未預期錯誤: {e}")
+            logger.error(f"💥 [崩潰] 發生未預期錯誤: {type(e).__name__}: {e}")
+            import traceback
             logger.error(traceback.format_exc())
-            await bot.close()
             await asyncio.sleep(20)
             retry_count += 1
 
-# =========================
-# ⚙️ 3. 執行區塊
-# =========================
+# ==========================================
+# 3. 主程序進入點
+# ==========================================
 if __name__ == "__main__":
-    # 啟動 Flask 背景執行緒
-    keep_web_alive()
-    
+    # 啟動 Flask (確保 use_reloader=False 防止重複啟動)
+    # run_web() 內部應調用 app.run(..., use_reloader=False)
+    keep_web_alive() 
+
     try:
-        # 啟動主事件循環
+        # 使用 asyncio.run 啟動主函式
         asyncio.run(start_bot())
     except KeyboardInterrupt:
-        logger.info("🛑 收到停止指令，關閉機器人中...")
+        logger.info("🛑 機器人手動關閉。")
     except Exception as e:
-        logger.critical(f"💥 主程序崩潰: {e}")
-        logger.critical(traceback.format_exc())
-
+        logger.critical(f"🚨 主事件循環崩潰: {e}")
