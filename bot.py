@@ -523,42 +523,27 @@ class ScheduledUploadCog(commands.Cog):
             os.remove(path)
 
     async def upload_and_clear_local_files(self):
-        """掃描本地暫存資料夾，上傳到 Discord 並清除。"""
         try:
             channel = self.bot.get_channel(int(TARGET_CHANNEL_ID))
-        except ValueError:
-            print(f"❌ 錯誤：TARGET_CHANNEL_ID 必須是有效的數字 ID")
+        except (ValueError, TypeError):
             return
 
-        if not channel:
-            return
+        if not channel: return
             
-        # 1. 改為非同步獲取檔案列表
         files_to_upload = await asyncio.to_thread(self._get_files)
-        
-        if not files_to_upload:
-            return
-
-        print(f"📦 發現 {len(files_to_upload)} 個檔案待上傳...")
-        uploaded_count = 0
         
         for file_path in files_to_upload:
             try:
-                # 2. 上傳到 Discord (discord.File 讀取 IO 會卡，但在數量不大時可接受，若檔案很大也建議 await to_thread)
-                discord_file = discord.File(file_path, filename=os.path.basename(file_path))
+                # 使用 to_thread 包裝檔案讀取
+                discord_file = await asyncio.to_thread(lambda: discord.File(file_path, filename=os.path.basename(file_path)))
                 await channel.send(file=discord_file)
                 
-                # 3. 改為非同步刪除
-                await asyncio.to_thread(self._remove_file, file_path)
-                uploaded_count += 1
-                
-                # 4. 避免瞬間發送過快被 Rate Limit，稍微睡一下
-                await asyncio.sleep(1.0) 
-                
+                # 非同步刪除
+                await asyncio.to_thread(os.remove, file_path)
+                await asyncio.sleep(0.5) # 稍微緩衝避免 Rate Limit
             except Exception as e:
-                print(f"❌ 上傳/刪除檔案 {file_path} 時發生錯誤: {e}")
+                print(f"❌ 檔案 {file_path} 處理失敗: {e}")
 
-        print(f"✅ 排程任務完成，成功上傳 {uploaded_count} 個檔案。")
 
     @tasks.loop(minutes=10)
     async def upload_scheduler(self):
@@ -1963,9 +1948,9 @@ def upload_file_from_web():
 
         # 3. 根據結果返回訊息
         if saved_count > 0:
-            # 成功儲存至少一個檔案
-            message = f"✅ 成功上傳 {saved_count} 張圖片！圖片已暫存，將於下一排程時間由 Bot 轉發至 Discord。"
+            message = f"✅ 成功接收 {saved_count} 張圖片！預計 10 分鐘內會同步至 Discord 頻道 ({TARGET_CHANNEL_ID})。"
             status = "success"
+
         elif error_count > 0 and saved_count == 0:
             # 雖然選擇了檔案，但所有檔案都不符合要求
             message = "❌ 所有選擇的檔案都無效或格式不支援 (僅限 png, jpg, jpeg, gif)。"
