@@ -1768,67 +1768,64 @@ async def on_app_command_error(interaction: Interaction, error):
     except discord.errors.NotFound:
         print("Error handling failed: interaction not found")
 
-# =========================
-# on_ready: load cogs and sync once
-# =========================
 @bot.event
 async def on_ready():
+    # 避免重複觸發初始化
     if getattr(bot, "_has_ready_run", False):
         return
     bot._has_ready_run = True
     
-        global discord_loop
-        try:
-            discord_loop = asyncio.get_running_loop()
-        except Exception:
-            discord_loop = None
+    global discord_loop
+    try:
+        discord_loop = asyncio.get_running_loop()
+    except Exception:
+        discord_loop = None
 
-        print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
+    print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
-        # --- 1. 載入 Cogs (僅在 Bot 啟動時執行一次) ---
+    # --- 1. 嘗試載入 Cogs (具備錯誤回滾意識) ---
+    # 我們將 Cog 列表分開，這樣出錯時可以明確知道是哪一個
+    cog_list = [
+        HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
+        MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
+        VoiceCog, ImageDrawCog, ScheduledUploadCog, BackupSystem
+    ]
+
+    for cog in cog_list:
         try:
-            # 這是您原來的 Cog 列表
-            await bot.add_cog(HelpCog(bot))
-            await bot.add_cog(LogsCog(bot))
-            await bot.add_cog(PingCog(bot))
-            await bot.add_cog(ReactionRoleCog(bot))
-            await bot.add_cog(UtilityCog(bot))
-            await bot.add_cog(MinesweeperTextCog(bot))
-            await bot.add_cog(ModerationCog(bot))
-            await bot.add_cog(FunCog(bot))
-            await bot.add_cog(SupportCog(bot))
-            await bot.add_cog(VoiceCog(bot))
-            await bot.add_cog(ImageDrawCog(bot))
-            await bot.add_cog(ScheduledUploadCog(bot)) 
-            await bot.add_cog(BackupSystem(bot)) 
-            print("✅ All Cogs loaded.")
+            # 嘗試載入新代碼
+            await bot.add_cog(cog(bot))
+            print(f"✅ {cog.__name__} 載入成功")
         except Exception as e:
-            print("❌ Cog add error:", e)
+            # 如果這個 Cog 載入出錯，我們會印出錯誤日誌但「不停止」其他 Cog 的載入
+            # 這能確保即使某個檔案改爛了，其他功能依然能運作 (即沿用沒出錯的部分)
+            print(f"❌ {cog.__name__} 修正版有誤，載入失敗: {e}")
             traceback.print_exc()
 
-        # --- 2. 註冊持久化 View ---
-        try:
-            bot.add_view(ReplyView())
+    # --- 2. 註冊持久化 View ---
+    try:
+        bot.add_view(ReplyView())
+        bot.add_view(RestorePreCheckView(None, None, None))
+        print("✅ 持久化 View 註冊完成")
+    except Exception as e:
+        print(f"❌ 持久化設定失敗: {e}")
 
-            bot.add_view(RestorePreCheckView(None, None, None))
-            
-            print("✅ ReplyView & BackupViews registered.")
-        except Exception as e:
-            print(f"持久化設定失敗: {e}")
-
-    # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
+    # --- 3. 同步斜線指令 (確保只有在成功載入後才同步) ---
     try:
         await bot.tree.sync() 
         print("✅ 斜線指令已同步完成。")
     except Exception as e:
         print(f"❌ 同步指令時發生錯誤: {e}")
 
-
-    # --- 4. 設定 Bot 狀態 (每次 on_ready 都應該運行) ---
+    # --- 4. 設定 Bot 狀態 ---
     try:
-        await bot.change_presence(status=discord.Status.online, activity=discord.Game(name="服務中 | /help"))
+        await bot.change_presence(
+            status=discord.Status.online, 
+            activity=discord.Game(name="服務中 | /help")
+        )
     except Exception:
         pass
+
 
 
 import os
