@@ -1,4 +1,3 @@
-# cogs/support_system.py
 import discord
 from discord import app_commands, Interaction, ui
 from discord.ext import commands
@@ -12,10 +11,7 @@ from datetime import datetime
 # =========================
 # -- 工具與基礎設定
 # =========================
-# 匯入時間工具
 from utils.time_utils import safe_now
-
-
 
 # =========================
 # -- Views & Modal (Support)
@@ -42,11 +38,7 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
             description=f"**管理員說：**\n>>> {reply_content}",
             color=discord.Color.green()
         )
-        embed.add_field(
-            name="管理員回覆您的問題:", 
-            value=f"```\n{self.original_content[:1000]}\n```", 
-            inline=False
-        )
+        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}\n```", inline=False)
         embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}")
 
         if user_obj:
@@ -54,7 +46,7 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
                 await user_obj.send(embed=embed)
                 await interaction.followup.send("✅ 回覆已成功發送。", ephemeral=True)
             except discord.Forbidden:
-                await interaction.followup.send("❌ 無法私訊用戶（可能被封鎖）。", ephemeral=True)
+                await interaction.followup.send("❌ 無法私訊用戶。", ephemeral=True)
         else:
             await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
 
@@ -65,18 +57,15 @@ class ReplyView(ui.View):
     @ui.button(label='回覆問題', style=discord.ButtonStyle.success, emoji="💬", custom_id="support_reply_btn")
     async def reply_button(self, interaction: Interaction, button: ui.Button):
         if not interaction.user.guild_permissions.manage_guild:
-            return await interaction.response.send_message("❌ 您沒有權限回覆此問題。", ephemeral=True)
+            return await interaction.response.send_message("❌ 您沒有權限。", ephemeral=True)
         
         try:
             embed = interaction.message.embeds[0]
-            # 從 Footer 提取 ID: "User ID: 123456789 | ..."
             user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
-            # 提取原始問題內容
             content = embed.description.split("訊息內容:**\n```\n")[1].split("\n```")[0]
+            await interaction.response.send_modal(ReplyModal(user_id, content))
         except:
-            return await interaction.response.send_message("❌ 無法解析訊息內容，請手動私訊用戶。", ephemeral=True)
-
-        await interaction.response.send_modal(ReplyModal(user_id, content))
+            await interaction.response.send_message("❌ 無法解析訊息。", ephemeral=True)
 
     @ui.button(label='已處理', style=discord.ButtonStyle.danger, emoji="🛑", custom_id="support_stop_btn")
     async def stop_button(self, interaction: Interaction, button: ui.Button):
@@ -86,66 +75,34 @@ class ReplyView(ui.View):
         embed = interaction.message.embeds[0]
         embed.title = f"🛑 已處理 - 由 {interaction.user.display_name}"
         embed.color = discord.Color.light_grey()
-        
-        view = ui.View(timeout=None)
-        view.add_item(ui.Button(label=f'處理完畢 ({interaction.user.display_name})', disabled=True))
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=None)
 
 # =========================
-# -- Server Selection View
+# -- Server Selection
 # =========================
 
 class ServerSelectView(ui.View):
-    def __init__(self, bot: commands.Bot, user_id: int, cog):
+    def __init__(self, bot, user_id, cog):
         super().__init__(timeout=None)
         self.bot = bot
         self.user_id = user_id
         self.cog = cog
         
-        # 建立選單
-        self.server_select = ui.Select(placeholder="請選擇伺服器...", custom_id=f"support_select_{user_id}")
-        self.server_select.callback = self._on_select
-        self.add_item(self.server_select)
-        
-        self.reset_button = ui.Button(label="重新選擇", style=discord.ButtonStyle.secondary, custom_id=f"support_reset_{user_id}", disabled=True)
-        self.reset_button.callback = self._on_reset
-        self.add_item(self.reset_button)
-        
-        self._load_options()
-
-    def _load_options(self):
         shared_guilds = [g for g in self.bot.guilds if g.get_member(self.user_id) is not None]
-        options = []
-        for guild in shared_guilds:
-            if guild.id in self.cog.support_config:
-                desc = "✅ 管理員已設定接收頻道"
-            else:
-                desc = "⚠️ 該伺服器尚未設定支援功能"
-            options.append(discord.SelectOption(label=guild.name, value=str(guild.id), description=desc))
+        options = [discord.SelectOption(label=g.name, value=str(g.id)) for g in shared_guilds if g.id in self.cog.support_config]
         
         if not options:
-            self.server_select.disabled = True
-            self.server_select.placeholder = "無共享伺服器"
+            self.stop()
         else:
-            self.server_select.options = options
+            select = ui.Select(placeholder="請選擇目標伺服器...", options=options)
+            select.callback = self._on_select
+            self.add_item(select)
 
     async def _on_select(self, interaction: Interaction):
-        selected_id = int(self.server_select.values[0])
-        if selected_id not in self.cog.support_config:
-            return await interaction.response.send_message("❌ 該伺服器管理員尚未設定此功能。", ephemeral=True)
-        
+        selected_id = int(interaction.data['values'][0])
         self.cog.user_target_guild[self.user_id] = selected_id
         await self.cog.db_save_user_target(self.user_id, selected_id)
-        
-        await interaction.response.edit_message(
-            embed=discord.Embed(title="✅ 設定成功", description=f"您現在發送的訊息將轉發至：**{self.bot.get_guild(selected_id).name}**", color=discord.Color.green()),
-            view=None # 選擇後移除選單，或更新狀態
-        )
-
-    async def _on_reset(self, interaction: Interaction):
-        self.cog.user_target_guild.pop(self.user_id, None)
-        await self.cog.db_save_user_target(self.user_id, None)
-        await interaction.response.send_message("🔄 已重置選擇，請重新發送訊息選擇伺服器。", ephemeral=True)
+        await interaction.response.edit_message(content=f"✅ 已設定發送至：**{self.bot.get_guild(selected_id).name}**", embed=None, view=None)
 
 # =========================
 # -- SupportCog Core
@@ -157,88 +114,77 @@ class SupportCog(commands.Cog):
         self.db_url = os.getenv("DATABASE_URL")
         self.support_config = {}
         self.user_target_guild = {}
+        self.pool = None
+        self._cd_mapping = commands.CooldownMapping.from_cooldown(1, 7.0, commands.BucketType.user)
 
     async def cog_load(self):
-         """當 Cog 被載入時自動執行"""
-         asyncio.create_task(self.init_db())
-         print("✅ SupportCog: 已在背景啟動資料庫初始化任務")
-
-
+        await self.init_db()
 
     async def init_db(self):
         try:
-            conn = await asyncpg.connect(self.db_url)
-            await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
-            await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
-            
-            rows = await conn.fetch('SELECT * FROM support_configs')
-            for r in rows: self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
-            
-            targets = await conn.fetch('SELECT * FROM user_targets')
-            for t in targets: self.user_target_guild[t['user_id']] = t['guild_id']
-            
-            await conn.close()
-            print("✅ Support System Database Connected & Synced.")
+            self.pool = await asyncpg.create_pool(self.db_url, min_size=1, max_size=3)
+            async with self.pool.acquire() as conn:
+                await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
+                await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
+                
+                for r in await conn.fetch('SELECT * FROM support_configs'):
+                    self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
+                for t in await conn.fetch('SELECT * FROM user_targets'):
+                    self.user_target_guild[t['user_id']] = t['guild_id']
+            print("✅ SupportCog: Database Pool Ready.")
         except Exception as e:
             print(f"❌ DB Error: {e}")
 
     async def db_save_config(self, g_id, c_id, r_id):
-        conn = await asyncpg.connect(self.db_url)
-        await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', g_id, c_id, r_id)
-        await conn.close()
+        async with self.pool.acquire() as conn:
+            await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', g_id, c_id, r_id)
 
     async def db_save_user_target(self, u_id, g_id):
-        conn = await asyncpg.connect(self.db_url)
-        if g_id is None: await conn.execute('DELETE FROM user_targets WHERE user_id=$1', u_id)
-        else: await conn.execute('INSERT INTO user_targets VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET guild_id=$2', u_id, g_id)
-        await conn.close()
+        async with self.pool.acquire() as conn:
+            if g_id is None: await conn.execute('DELETE FROM user_targets WHERE user_id=$1', u_id)
+            else: await conn.execute('INSERT INTO user_targets VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET guild_id=$2', u_id, g_id)
 
-    @app_commands.command(name="set_support_channel")
+    @app_commands.command(name="set_support_channel", description="設定轉發頻道")
     @app_commands.default_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
-        await interaction.response.defer(ephemeral=True)
         g_id, c_id, r_id = interaction.guild.id, channel.id, (role.id if role else None)
         self.support_config[g_id] = (c_id, r_id)
         await self.db_save_config(g_id, c_id, r_id)
-        await interaction.followup.send(f"✅ 已設定轉發至 {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"✅ 設定成功，轉發至 {channel.mention}", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or message.guild is not None:
-            return
+        if message.author.bot or message.guild is not None: return
         
-        user_id = message.author.id
-        target_id = self.user_target_guild.get(user_id)
+        retry_after = self._cd_mapping.get_bucket(message).update_rate_limit()
+        if retry_after: return # 安靜處理，不發送冷卻提示以防被洗頻
+
+        u_id = message.author.id
+        target_id = self.user_target_guild.get(u_id)
 
         if target_id and target_id in self.support_config:
             await self.process_forward(message.author, message.content, target_id)
         else:
-            view = ServerSelectView(self.bot, user_id, self)
-            await message.channel.send(embed=discord.Embed(title="📞 聯繫管理員", description="請選擇您要發送問題的伺服器：", color=discord.Color.blue()), view=view)
+            await message.channel.send(embed=discord.Embed(title="📞 聯繫管理員", description="請選擇伺服器：", color=0x3498db), view=ServerSelectView(self.bot, u_id, self))
 
-    async def process_forward(self, user: discord.User, question: str, guild_id: int):
+    async def process_forward(self, user, question, guild_id):
         guild = self.bot.get_guild(guild_id)
         config = self.support_config.get(guild_id)
-        if not guild or not config: return
+        if not guild or not config or not (channel := guild.get_channel(config[0])): return
 
-        channel = guild.get_channel(config[0])
-        if not channel: return
-
-        embed = discord.Embed(
-            title=f"❓ 來自 {user.name} 的問題",
-            description=f"**發送者:** <@{user.id}>\n**伺服器:** `{guild.name}`\n\n**訊息內容:**\n```\n{question}\n```",
-            color=discord.Color.gold()
-        )
-        embed.set_footer(text=f"User ID: {user.id} | 時間: {safe_now()}")
-
+        embed = discord.Embed(title=f"❓ 來自 {user.name}", description=f"**訊息內容:**\n```\n{question[:1500]}\n```", color=0xf1c40f)
+        embed.set_footer(text=f"User ID: {user.id} | {safe_now()}")
+        
         view = ReplyView()
-        match = re.search(r"(https?://[^\s]+)", question)
-        if match:
-            view.add_item(ui.Button(label="🔗 開啟連結", url=match.group(0)))
+        if match := re.search(r"(https?://[^\s]+)", question):
+            view.add_item(ui.Button(label="🔗 連結", url=match.group(0)))
 
         mention = f"<@&{config[1]}>" if config[1] else "@here"
         await channel.send(content=mention, embed=embed, view=view)
-        await user.send(f"✅ 訊息已送達 **{guild.name}**。")
+        await user.send(f"✅ 已送達 **{guild.name}**。")
+
+    async def cog_unload(self):
+        if self.pool: await self.pool.close()
 
 async def setup(bot):
     await bot.add_cog(SupportCog(bot))
