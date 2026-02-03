@@ -506,61 +506,61 @@ class ImageDrawCog(commands.Cog):
 class ScheduledUploadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 🚨 啟動定時任務
         self.upload_scheduler.start() 
         print("✅ 排程上傳任務已啟動。")
 
     def cog_unload(self):
         self.upload_scheduler.cancel() 
-        
+    
+    # 將檔案操作封裝為非阻塞函數
+    def _get_files(self):
+        search_path = os.path.join(TEMP_UPLOAD_FOLDER, '*')
+        return [f for f in glob.glob(search_path) if os.path.isfile(f)]
+
+    def _remove_file(self, path):
+        if os.path.exists(path):
+            os.remove(path)
+
     async def upload_and_clear_local_files(self):
         """掃描本地暫存資料夾，上傳到 Discord 並清除。"""
-        
-        # 使用 try-except 確保 Bot 找不到頻道時不會崩潰
         try:
             channel = self.bot.get_channel(int(TARGET_CHANNEL_ID))
         except ValueError:
-            print(f"❌ 錯誤：TARGET_CHANNEL_ID 必須是有效的數字 ID: {TARGET_CHANNEL_ID}")
+            print(f"❌ 錯誤：TARGET_CHANNEL_ID 必須是有效的數字 ID")
             return
 
         if not channel:
-            print(f"❌ 錯誤：找不到目標頻道 ID: {TARGET_CHANNEL_ID}")
             return
             
-        # 1. 搜尋所有待上傳的圖片檔案
-        search_path = os.path.join(TEMP_UPLOAD_FOLDER, '*')
-        files_to_upload = glob.glob(search_path)
+        # 1. 改為非同步獲取檔案列表
+        files_to_upload = await asyncio.to_thread(self._get_files)
         
         if not files_to_upload:
             return
 
         print(f"📦 發現 {len(files_to_upload)} 個檔案待上傳...")
-        
         uploaded_count = 0
         
         for file_path in files_to_upload:
             try:
-                # 2. 上傳到 Discord
+                # 2. 上傳到 Discord (discord.File 讀取 IO 會卡，但在數量不大時可接受，若檔案很大也建議 await to_thread)
                 discord_file = discord.File(file_path, filename=os.path.basename(file_path))
-                await channel.send(
-                    file=discord_file
-                )
+                await channel.send(file=discord_file)
                 
-                # 3. 成功後刪除本地檔案
-                os.remove(file_path)
+                # 3. 改為非同步刪除
+                await asyncio.to_thread(self._remove_file, file_path)
                 uploaded_count += 1
+                
+                # 4. 避免瞬間發送過快被 Rate Limit，稍微睡一下
+                await asyncio.sleep(1.0) 
                 
             except Exception as e:
                 print(f"❌ 上傳/刪除檔案 {file_path} 時發生錯誤: {e}")
-                # 繼續處理下一個檔案
 
         print(f"✅ 排程任務完成，成功上傳 {uploaded_count} 個檔案。")
 
-
-    # 🚨 每10分鐘執行一次
     @tasks.loop(minutes=10)
     async def upload_scheduler(self):
-        """定時執行上傳任務"""
         await self.bot.wait_until_ready() 
         print(f"\n--- 執行排程上傳任務 @ {safe_now()} ---")
         await self.upload_and_clear_local_files()
