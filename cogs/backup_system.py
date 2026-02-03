@@ -1,4 +1,3 @@
-# cogs/backup_system.py
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,9 +11,9 @@ from cryptography.fernet import Fernet
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BackupSystem")
 
-# ==========================================
-# 1. UI 組件 (保持不變)
-# ==========================================
+# =========================
+# UI 組件
+# =========================
 
 class RestorePreCheckView(discord.ui.View):
     def __init__(self, cog, key: str, backup_file: discord.Attachment):
@@ -26,7 +25,6 @@ class RestorePreCheckView(discord.ui.View):
     @discord.ui.button(label="我已經設定完成", style=discord.ButtonStyle.green)
     async def confirm_done(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="✅ 重新檢查環境並繼續...", view=None)
-        # 改為直接 await 或更安全的 Task 管理
         asyncio.create_task(self.cog._execute_restore(interaction, self.key, self.backup_file))
 
     @discord.ui.button(label="跳過特殊頻道，建立一般頻道", style=discord.ButtonStyle.blurple)
@@ -34,7 +32,7 @@ class RestorePreCheckView(discord.ui.View):
         await interaction.response.edit_message(content="✅ 收到，將略過公告/論壇/舞台頻道執行還原...", view=None)
         asyncio.create_task(self.cog._execute_restore(interaction, self.key, self.backup_file, skip_special=True))
 
-    @discord.ui.button(label="取消復原，保持現狀", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="取消復原", style=discord.ButtonStyle.gray)
     async def cancel_restore(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="❌ 已取消還原操作。", view=None)
 
@@ -53,16 +51,20 @@ class DeleteSafeChannelView(discord.ui.View):
 
     @discord.ui.button(label="↩️ 保留並恢復原名", style=discord.ButtonStyle.gray)
     async def keep_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.channel.edit(name=self.original_name)
-        await interaction.response.edit_message(content=f"✅ 頻道名稱已恢復。", view=None)
+        try:
+            await self.channel.edit(name=self.original_name)
+            await interaction.response.edit_message(content="✅ 頻道名稱已恢復。", view=None)
+        except:
+            pass
 
-# ==========================================
-# 2. 備份系統核心 Cog (修正版)
-# ==========================================
+# =========================
+# 備份系統核心 Cog
+# =========================
 
 class BackupSystem(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.is_restoring = False # 🔒 全域鎖定，防止多重還原觸發 1015
 
     def _get_overwrites_data(self, channel):
         overwrites_data = []
@@ -77,25 +79,23 @@ class BackupSystem(commands.Cog):
         return overwrites_data
 
     async def _safe_delay(self, seconds):
-        """自定義延遲，確保不會阻塞 Event Loop"""
+        """強化版延遲，確保不阻塞連線"""
         await asyncio.sleep(seconds)
 
     async def _delete_all_existing_data(self, guild, safe_id, status_msg):
-        """工具：清理伺服器 (大幅強化防限流)"""
+        """清理伺服器 (加入間歇性長休眠，避開 Cloudflare 偵測)"""
         channels = [c for c in guild.channels if c.id != safe_id]
         for i, ch in enumerate(channels, 1):
             try:
                 await ch.delete()
-                # 提高延遲，避免連續刪除觸發 Cloudflare
-                await self._safe_delay(0.8) 
-                if i % 5 == 0: 
-                    await status_msg.edit(content=f"🧹 清理舊頻道中... ({i}/{len(channels)})")
-                    await self._safe_delay(1.5)
+                await self._safe_delay(1.2) # 增加基礎延遲
+                if i % 4 == 0: 
+                    await status_msg.edit(content=f"🧹 清理中 (避開限流)... ({i}/{len(channels)})")
+                    await self._safe_delay(3.0) # 每刪 4 個停 3 秒
             except discord.errors.HTTPException as e:
                 if e.status == 429:
                     retry_after = getattr(e, 'retry_after', 30)
-                    print(f"⚠️ 刪除頻道遇到限流，等待 {retry_after} 秒...")
-                    await asyncio.sleep(retry_after)
+                    await asyncio.sleep(retry_after + 5)
                 continue
             except: pass
         
@@ -103,60 +103,53 @@ class BackupSystem(commands.Cog):
         for r in roles:
             try: 
                 await r.delete()
-                await self._safe_delay(0.5)
-            except discord.errors.HTTPException as e:
-                if e.status == 429:
-                    await asyncio.sleep(getattr(e, 'retry_after', 10))
-                continue
+                await self._safe_delay(0.8)
             except: pass
 
     async def _execute_restore(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment, skip_special: bool = False):
+        if self.is_restoring:
+            return await interaction.channel.send("⚠️ **警告**：系統正在執行還原中，請勿重複啟動。")
+
+        self.is_restoring = True
         guild = interaction.guild
         safe_channel = interaction.channel
         original_name = safe_channel.name
 
-        # 1. 解密資料
         try:
+            # 1. 解密
             f = Fernet(key.encode())
             raw_data = await backup_file.read()
             server_data = json.loads(f.decrypt(raw_data).decode())
-        except Exception as e:
-            logger.error(f"解密出錯: {e}")
-            return await safe_channel.send("❌ **解密失敗**：密鑰或檔案錯誤。")
 
-        # 2. 環境預檢 (保持原有邏輯)
-        special_types = [5, 13, 15] 
-        has_special = any(c["type"] in special_types for c in server_data["channels"])
-        
-        if has_special and not guild.rules_channel and not skip_special:
-            view = RestorePreCheckView(self, key, backup_file)
-            embed = discord.Embed(title="🚫 還原預檢未通過", color=discord.Color.red(),
-                description="備份檔包含特殊頻道，但伺服器尚未開啟「社群」功能。")
-            return await safe_channel.send(embed=embed, view=view)
+            # 2. 預檢社群功能
+            special_types = [5, 13, 15]
+            has_special = any(c["type"] in special_types for c in server_data["channels"])
+            if has_special and not guild.rules_channel and not skip_special:
+                view = RestorePreCheckView(self, key, backup_file)
+                embed = discord.Embed(title="🚫 需開啟社群功能", color=discord.Color.red(), description="此備份包含公告/論壇頻道，請先開啟伺服器社群功能。")
+                self.is_restoring = False
+                return await safe_channel.send(embed=embed, view=view)
 
-        # 3. 開始還原程序
-        status_msg = await safe_channel.send("🚀 **預檢通過！開始清理伺服器...**")
-        try:
+            status_msg = await safe_channel.send("🚀 **驗證成功，開始還原程序...**")
             await safe_channel.edit(name="🔒-還原安全區")
+
+            # 3. 清理環境
             await self._delete_all_existing_data(guild, safe_channel.id, status_msg)
 
             # 4. 重建身份組
             role_map = {}
-            total_roles = len(server_data["roles"])
             for i, r in enumerate(server_data["roles"], 1):
                 try:
-                    await status_msg.edit(content=f"👥 **[2/4] 重建身份組... ({i}/{total_roles})**")
+                    await status_msg.edit(content=f"👥 **[2/4] 重建身份組... ({i}/{len(server_data['roles'])})**")
                     new_role = await guild.create_role(
                         name=r["name"], permissions=discord.Permissions(r["permissions"]),
                         color=discord.Color(r["color"]), hoist=r["hoist"], mentionable=r["mentionable"]
                     )
                     role_map[r["name"]] = new_role
-                    await self._safe_delay(1.0) # 身份組變動很大，建議 1 秒
-                except discord.errors.HTTPException as e:
-                    if e.status == 429:
-                        await asyncio.sleep(getattr(e, 'retry_after', 30))
+                    await self._safe_delay(1.5)
+                except: continue
             
-            # 5. 兩階段重建頻道 (加入更嚴格的 429 處理)
+            # 5. 重建頻道
             all_ch = server_data["channels"]
             cat_map = {}
             cats = [c for c in all_ch if c["type"] == discord.ChannelType.category.value]
@@ -170,9 +163,9 @@ class BackupSystem(commands.Cog):
                 ow = { (role_map.get(o["role_name"]) or guild.default_role): discord.PermissionOverwrite.from_pair(discord.Permissions(o["allow"]), discord.Permissions(o["deny"])) for o in c["overwrites"] if o["role_name"] in role_map or o["role_name"] == "@everyone" }
                 new_cat = await guild.create_category(name=c["name"], overwrites=ow)
                 cat_map[c["name"]] = new_cat
-                await self._safe_delay(1.2)
+                await self._safe_delay(2.0)
 
-            # 5.2 建立一般頻道
+            # 5.2 建立內容頻道 (高頻率操作，每 3 個長休)
             for i, c in enumerate(others, 1):
                 await status_msg.edit(content=f"📢 **[4/4] 重建頻道... ({i}/{len(others)})**")
                 ow = { (role_map.get(o["role_name"]) or guild.default_role): discord.PermissionOverwrite.from_pair(discord.Permissions(o["allow"]), discord.Permissions(o["deny"])) for o in c.get("overwrites", []) if o["role_name"] in role_map or o["role_name"] == "@everyone" }
@@ -192,22 +185,21 @@ class BackupSystem(commands.Cog):
                     elif cv == 15:
                         await guild.create_forum_channel(name=c["name"], category=p_cat, overwrites=ow, topic=c.get("topic"))
                     
-                    await self._safe_delay(1.5) # 建立頻道頻率最高，設為 1.5 秒
-                except discord.errors.HTTPException as e:
-                    if e.status == 429:
-                        await asyncio.sleep(getattr(e, 'retry_after', 30))
+                    await self._safe_delay(2.0)
+                    if i % 3 == 0: await self._safe_delay(4.0)
+                except Exception as e:
                     logger.error(f"頻道 {c['name']} 失敗: {e}")
 
             await status_msg.delete()
-            reminders = f"\n📌 **手動提醒：** 請檢查規則頻道設定。" if server_data.get("rules_channel_name") else ""
-            await safe_channel.send(f"🎉 **伺服器還原結束！**{reminders}", view=DeleteSafeChannelView(safe_channel, original_name))
+            await safe_channel.send(f"🎉 **伺服器還原結束！**", view=DeleteSafeChannelView(safe_channel, original_name))
 
         except Exception as e:
-            await safe_channel.send(f"❌ **還原中斷**：遇到不可預期錯誤: {e}")
-            logger.error(f"還原重大錯誤: {e}")
+            await safe_channel.send(f"❌ **還原中斷**：{e}")
+            logger.error(f"重大錯誤: {e}")
+        finally:
+            self.is_restoring = False # 🔓 解鎖
 
-    # --- 斜線指令 ---
-    @app_commands.command(name="備份伺服器", description="加密備份伺服器配置與頻道")
+    @app_commands.command(name="備份伺服器", description="加密備份伺服器配置")
     @app_commands.default_permissions(administrator=True)
     async def backup_server(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -226,7 +218,7 @@ class BackupSystem(commands.Cog):
             key = Fernet.generate_key()
             encrypted = Fernet(key).encrypt(json.dumps(data).encode())
             file = discord.File(io.BytesIO(encrypted), filename=f"backup-{guild.name}.bin")
-            await interaction.user.send(f"🔐 **伺服器備份完成**\n密鑰: `{key.decode()}`", file=file)
+            await interaction.user.send(f"🔐 **備份完成**\n密鑰: `{key.decode()}`", file=file)
             await interaction.followup.send("✅ 備份已私訊。", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ 備份失敗: {e}", ephemeral=True)
@@ -234,10 +226,11 @@ class BackupSystem(commands.Cog):
     @app_commands.command(name="還原備份", description="還原伺服器結構")
     @app_commands.default_permissions(administrator=True)
     async def restore_backup(self, interaction: discord.Interaction, key: str, backup_file: discord.Attachment):
+        if self.is_restoring:
+            return await interaction.response.send_message("⚠️ 系統正在還原中，請稍後再試。", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
-        # 啟動非阻塞任務
         self.bot.loop.create_task(self._execute_restore(interaction, key, backup_file))
-        await interaction.followup.send("⏳ 還原程序啟動中，請查看頻道訊息。", ephemeral=True)
+        await interaction.followup.send("⏳ 還原任務已啟動，請查看頻道訊息。", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(BackupSystem(bot))
