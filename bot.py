@@ -2393,7 +2393,7 @@ async def start_bot():
             if e.status == 1015 or e.status == 429:
                 logger.error(f"🛑 [連線拒絕] 錯誤 1015: Render IP 被 Discord 限速。")
                 logger.error(f"具體訊息: {e.text}")
-                wait_time = 60 * (retry_count + 1)
+                wait_time = 300 * (retry_count + 1)
                 logger.warning(f"⏰ 等待 {wait_time} 秒後重試...")
                 await asyncio.sleep(wait_time)
                 retry_count += 1
