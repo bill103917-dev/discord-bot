@@ -1773,15 +1773,10 @@ async def on_app_command_error(interaction: Interaction, error):
 # =========================
 @bot.event
 async def on_ready():
-    # 確保 on_ready 邏輯只運行一次（特別是針對載入 Cogs）
     if getattr(bot, "_has_ready_run", False):
-        # 如果已經運行過，只同步指令和設定狀態，避免重複載入 Cog
-        # ⚠️ 注意：這裡省略了 return，讓指令同步和狀態設定能再次運行
-        pass 
-    else:
-        # 第一次運行
-        bot._has_ready_run = True
-
+        return
+    bot._has_ready_run = True
+    
         global discord_loop
         try:
             discord_loop = asyncio.get_running_loop()
@@ -1821,13 +1816,13 @@ async def on_ready():
         except Exception as e:
             print(f"持久化設定失敗: {e}")
 
-
     # --- 3. 同步斜線指令 (每次 on_ready 都應該運行) ---
     try:
         await bot.tree.sync() 
         print("✅ 斜線指令已同步完成。")
     except Exception as e:
         print(f"❌ 同步指令時發生錯誤: {e}")
+
 
     # --- 4. 設定 Bot 狀態 (每次 on_ready 都應該運行) ---
     try:
