@@ -2414,17 +2414,24 @@ async def start_bot():
             retry_count += 1
 
 # ==========================================
-# 3. 主程序進入點
+# 修正後的進入點：將隨機延遲與連線優化
 # ==========================================
 if __name__ == "__main__":
-    # 啟動 Flask (確保 use_reloader=False 防止重複啟動)
-    # run_web() 內部應調用 app.run(..., use_reloader=False)
+    # 1. 啟動 Flask (保持不變)
     keep_web_alive() 
 
+    # 2. 給環境一點「呼吸時間」
+    # 讓 Flask 先穩定下來並通過 Render 的初步檢測
+    import time
+    time.sleep(5) 
+
     try:
-        # 使用 asyncio.run 啟動主函式
-        asyncio.run(start_bot())
-    except KeyboardInterrupt:
-        logger.info("🛑 機器人手動關閉。")
+        # 3. 直接使用 bot.run，內建了自動重連與更穩定的連線管理
+        # bot.run 會自動處理 login 和 connect，且出錯時的重連機制更符合 Discord 規範
+        bot.run(TOKEN)
+    except discord.errors.HTTPException as e:
+        if e.status == 1015:
+            logger.error("🛑 偵測到 1015！目前的 IP 已被暫時封鎖。")
+            logger.error("建議：請將 Render 服務暫停 1 小時，或更換 Region。")
     except Exception as e:
-        logger.critical(f"🚨 主事件循環崩潰: {e}")
+        logger.critical(f"🚨 啟動失敗: {e}")
