@@ -1823,7 +1823,7 @@ async def on_ready():
         print(f"❌ 持久化設定失敗: {e}")
 
 
-     try:
+    try:
         await bot.tree.sync() 
         print("✅ 斜線指令已同步完成。")
     except Exception as e:
