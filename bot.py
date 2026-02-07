@@ -29,7 +29,7 @@ from discord import app_commands, Interaction, ui
 from discord.ext.commands import Context
 from discord import FFmpegPCMAudio 
 
-from cogs.backup_system import BackupSystem, RestorePreCheckView
+
 
 
 # 確保這裡有匯入你要用的所有 Cog 類別與 View
