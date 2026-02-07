@@ -1822,13 +1822,12 @@ async def on_ready():
     except Exception as e:
         print(f"❌ 持久化設定失敗: {e}")
 
-    # --- 🚨 危險修正：移除這裡的 bot.tree.sync() 🚨 ---
-    # 不要由 on_ready 自動同步，改用指令手動觸發
-    # try:
-    #     await bot.tree.sync() 
-    #     print("✅ 斜線指令已同步完成。")
-    # except Exception as e:
-    #     print(f"❌ 同步指令時發生錯誤: {e}")
+
+     try:
+        await bot.tree.sync() 
+        print("✅ 斜線指令已同步完成。")
+    except Exception as e:
+        print(f"❌ 同步指令時發生錯誤: {e}")
 
     # --- 4. 設定 Bot 狀態 ---
     try:
