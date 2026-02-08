@@ -49,6 +49,42 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
                 await interaction.followup.send("❌ 無法私訊用戶。", ephemeral=True)
         else:
             await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
+            class ReplyView(ui.View):
+
+    # --- 🆕 新增：發起臨時聊天按鈕 ---
+    @ui.button(label='發起臨時聊天', style=discord.ButtonStyle.primary, emoji="🚀", custom_id="support_chat_invite_btn")
+    async def chat_invite_button(self, interaction: Interaction, button: ui.Button):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ 您沒有權限。", ephemeral=True)
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # 1. 解析目標用戶 ID (從 Embed Footer)
+            embed = interaction.message.embeds[0]
+            user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
+            user_obj = interaction.client.get_user(user_id)
+            
+            if not user_obj:
+                return await interaction.followup.send("❌ 找不到該用戶，可能他已離開伺服器。", ephemeral=True)
+
+            # 2. 發送邀請給用戶 (私訊)
+            # 這裡調用我們之前寫的 ChatInviteView
+            invite_view = ChatInviteView(sender=interaction.user, receiver=user_obj, cog=self.cog)
+            
+            try:
+                await user_obj.send(
+                    f"🔔 **來自 {interaction.guild.name} 管理員的邀請**\n管理員 {interaction.user.display_name} 想與您進行即時對話，是否接受？",
+                    view=invite_view
+                )
+                await interaction.followup.send(f"✅ 已向 **{user_obj.name}** 發送聊天邀請，等待對方同意。", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.followup.send("❌ 無法私訊該用戶，對方可能關閉了私訊功能。", ephemeral=True)
+                
+        except Exception as e:
+            await interaction.followup.send(f"❌ 發生錯誤: {e}", ephemeral=True)
+
+
 
 class ChatInviteView(ui.View):
     def __init__(self, sender, receiver, cog):
