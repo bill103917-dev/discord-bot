@@ -168,7 +168,7 @@ class SupportCog(commands.Cog):
         await self.db_save_config(g_id, c_id, r_id)
         await interaction.response.send_message(f"✅ 設定成功，轉發至 {channel.mention}", ephemeral=True)
 
-        @commands.Cog.listener()
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is not None: return
         
