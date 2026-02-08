@@ -50,6 +50,94 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         else:
             await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
 
+class ChatInviteView(ui.View):
+    def __init__(self, sender, receiver, cog):
+        super().__init__(timeout=60)
+        self.sender = sender     # 發起者 (User/Admin)
+        self.receiver = receiver # 接收者
+        self.cog = cog
+
+    @ui.button(label='接受邀請', style=discord.ButtonStyle.success, emoji="✅")
+    async def accept(self, interaction: Interaction, button: ui.Button):
+        if interaction.user.id != self.receiver.id:
+            return await interaction.response.send_message("這不是給你的邀請。", ephemeral=True)
+        
+        await interaction.response.send_message("🔄 正在創建臨時聊天室...", ephemeral=True)
+        
+        # 創建臨時頻道 (假設在特定分類下)
+        guild = self.cog.bot.get_guild(self.cog.target_guild_id) # 你的目標伺服器
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            self.sender: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            self.receiver: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        
+        channel = await guild.create_text_channel(
+            name=f"temp-chat-{self.sender.name}",
+            overwrites=overwrites,
+            topic=f"User ID: {self.sender.id if hasattr(self.sender, 'id') else 'Admin'}"
+        )
+
+        # 發送前往按鈕
+        view = ui.View()
+        view.add_item(ui.Button(label="前往聊天室", url=channel.jump_url))
+        
+        await interaction.followup.send(f"✅ 對方已同意，請點選下方按鈕前往。", view=view, ephemeral=True)
+        await self.sender.send(f"✅ 對方已同意，請點選下方按鈕前往。", view=view)
+        
+        # 聊天室初始訊息
+        await channel.send(f"✨ 臨時聊天室已建立！\n雙方：{self.sender.mention} & {self.receiver.mention}\n點擊下方按鈕可結束對話。", view=TempChatControlView(self.cog))
+
+    @ui.button(label='拒絕', style=discord.ButtonStyle.danger, emoji="❌")
+    async def decline(self, interaction: Interaction, button: ui.Button):
+        await interaction.response.edit_message(content="❌ 已拒絕邀請。", view=None)
+        await self.sender.send(f"❌ {self.receiver.name} 拒絕了您的聊天邀請。")
+
+class TempChatControlView(ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.confirm_state = False
+
+    @ui.button(label='結束此對話', style=discord.ButtonStyle.secondary, emoji="🔒", custom_id="end_chat_btn")
+    async def end_chat(self, interaction: Interaction, button: ui.Button):
+        if not self.confirm_state:
+            self.confirm_state = True
+            button.label = "確認結束？ (10秒內再次點擊)"
+            button.style = discord.ButtonStyle.danger
+            await interaction.response.edit_message(view=self)
+            
+            # 10秒倒數
+            await asyncio.sleep(10)
+            if self.confirm_state:
+                self.confirm_state = False
+                button.label = "結束此對話"
+                button.style = discord.ButtonStyle.secondary
+                await interaction.edit_original_response(view=self)
+        else:
+            # 執行結束邏輯
+            await interaction.response.send_message("📂 正在產生紀錄並關閉頻道...")
+            await self.close_and_transcript(interaction.channel, interaction.user)
+
+    async def close_and_transcript(self, channel, closer):
+        messages = []
+        async for msg in channel.history(limit=1000, oldest_first=True):
+            if msg.author.bot: continue
+            time = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            messages.append(f"[{time}] {msg.author.display_name}: {msg.content}")
+
+        # 產生檔案
+        file_path = f"transcript_{channel.id}.txt"
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(messages))
+
+        # 傳送檔案給管理員總結訊息 (假設你有存原始訊息 ID)
+        # 這裡會根據你之前的「總結 Embed」進行更新，將「查看紀錄」按鈕連往這個檔案
+        
+        # 刪除頻道
+        await channel.delete()
+        # 這裡建議將 file 傳送到一個 log 頻道，然後取得連結給總結按鈕用
+
 # =========================
 # -- 修正後的 ReplyView (含總結功能)
 # =========================
@@ -106,18 +194,40 @@ class ReplyView(ui.View):
         
         summary_embed.set_footer(text=f"處理者：{interaction.user.display_name} | 結案編號: {interaction.message.id}")
 
-        # 4. 建立新的 View (查看紀錄與連結)
+        # 4. 建立新按鈕
         new_view = ui.View(timeout=None)
         
-        # 查看紀錄按鈕 (這通常連往你的網頁後台或日誌頻道，這裡先放一個示意)
-        new_view.add_item(ui.Button(label="查看紀錄", style=discord.ButtonStyle.link, url=f"https://discord.com/channels/{guild_id}/{interaction.channel.id}/{interaction.message.id}"))
+        # 原本的跳轉按鈕
+        jump_url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{interaction.message.id}"
+        new_view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
+
+        # --- 新增：處理對話紀錄文件 ---
+        # 假設你的文件路徑是之前產生的 (例如: transcript_12345.txt)
+        file_path = f"transcript_{user_id}.txt" 
         
-        # 檢查原始訊息是否有連結，如果有就加上去
+        if os.path.exists(file_path): # 確保檔案存在才執行
+            # 設定一個紀錄存放頻道 (請更換為你的頻道 ID)
+            log_channel = interaction.client.get_channel(123456789012345678) 
+            
+            if log_channel:
+                file = discord.File(file_path)
+                # 將文件發送到 Log 頻道
+                log_msg = await log_channel.send(content=f"📁 案件總結紀錄 | 用戶 ID: `{user_id}`", file=file)
+                
+                # 取得 Discord 伺服器上的檔案永久連結
+                file_url = log_msg.attachments[0].url
+                new_view.add_item(ui.Button(label="查看紀錄文件", style=discord.ButtonStyle.link, url=file_url))
+                
+                # 發送後可以刪除本地暫存檔，節省空間
+                # os.remove(file_path) 
+        # -----------------------------
+
+        # 如果有原始連結也加上去
         if match := re.search(r"(https?://[^\s]+)", content):
-            new_view.add_item(ui.Button(label="打開連結", style=discord.ButtonStyle.link, url=match.group(0)))
+            new_view.add_item(ui.Button(label="打開原始連結", style=discord.ButtonStyle.link, url=match.group(0)))
 
         # 5. 更新訊息
-        await interaction.edit_original_response(content="🛑 **本案件已關閉**", embed=summary_embed, view=new_view)
+        await interaction.edit_original_response(content=None, embed=summary_embed, view=new_view)
 
 # =========================
 # -- Server Selection
@@ -192,6 +302,16 @@ class SupportCog(commands.Cog):
             print("✅ SupportCog: Database Pool Ready.")
         except Exception as e:
             print(f"❌ DB Error: {e}")
+            # 在 SupportCog.init_db 中新增
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS temp_chats (
+            channel_id BIGINT PRIMARY KEY,
+            user_id BIGINT,
+            admin_id BIGINT,
+            created_at TIMESTAMP
+        )
+    ''')
+
 
     async def db_save_config(self, g_id, c_id, r_id):
         async with self.pool.acquire() as conn:
