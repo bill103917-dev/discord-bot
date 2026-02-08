@@ -14,44 +14,27 @@ from datetime import datetime
 from utils.time_utils import safe_now
 
 # =========================
-# -- Views & Modal (Support)
+# -- 修正：ReplyView 縮排與結構
 # =========================
 
-class ReplyModal(ui.Modal, title='回覆用戶問題'):
-    response_title = ui.TextInput(label='回覆標題 (可選)', required=False, max_length=100)
-    response_content = ui.TextInput(label='回覆內容', style=discord.TextStyle.long, required=True, max_length=1500)
+class ReplyView(ui.View):
+    def __init__(self, cog): # 這裡必須有縮排！
+        super().__init__(timeout=None)
+        self.cog = cog
 
-    def __init__(self, original_user_id: int, original_content: str):
-        super().__init__()
-        self.original_user_id = original_user_id
-        self.original_content = original_content
+    @ui.button(label='回覆問題', style=discord.ButtonStyle.success, emoji="💬", custom_id="support_reply_btn")
+    async def reply_button(self, interaction: Interaction, button: ui.Button):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ 您沒有權限。", ephemeral=True)
+        
+        try:
+            embed = interaction.message.embeds[0]
+            user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
+            content = embed.description.split("訊息內容:**\n```\n")[1].split("\n```")[0]
+            await interaction.response.send_modal(ReplyModal(user_id, content))
+        except:
+            await interaction.response.send_message("❌ 無法解析訊息。", ephemeral=True)
 
-    async def on_submit(self, interaction: Interaction):
-        await interaction.response.defer(ephemeral=True)
-        user_obj = interaction.client.get_user(self.original_user_id)
-        admin_name = interaction.user.display_name
-        reply_content = str(self.response_content).strip()
-        response_title = str(self.response_title).strip() or "管理員回覆"
-
-        embed = discord.Embed(
-            title=f"💬 {response_title}",
-            description=f"**管理員說：**\n>>> {reply_content}",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}\n```", inline=False)
-        embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}")
-
-        if user_obj:
-            try:
-                await user_obj.send(embed=embed)
-                await interaction.followup.send("✅ 回覆已成功發送。", ephemeral=True)
-            except discord.Forbidden:
-                await interaction.followup.send("❌ 無法私訊用戶。", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
-            class ReplyView(ui.View):
-
-    # --- 🆕 新增：發起臨時聊天按鈕 ---
     @ui.button(label='發起臨時聊天', style=discord.ButtonStyle.primary, emoji="🚀", custom_id="support_chat_invite_btn")
     async def chat_invite_button(self, interaction: Interaction, button: ui.Button):
         if not interaction.user.guild_permissions.manage_guild:
@@ -60,29 +43,33 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # 1. 解析目標用戶 ID (從 Embed Footer)
             embed = interaction.message.embeds[0]
             user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
             user_obj = interaction.client.get_user(user_id)
             
             if not user_obj:
-                return await interaction.followup.send("❌ 找不到該用戶，可能他已離開伺服器。", ephemeral=True)
+                return await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
 
-            # 2. 發送邀請給用戶 (私訊)
-            # 這裡調用我們之前寫的 ChatInviteView
+            # 發送邀請
             invite_view = ChatInviteView(sender=interaction.user, receiver=user_obj, cog=self.cog)
-            
-            try:
-                await user_obj.send(
-                    f"🔔 **來自 {interaction.guild.name} 管理員的邀請**\n管理員 {interaction.user.display_name} 想與您進行即時對話，是否接受？",
-                    view=invite_view
-                )
-                await interaction.followup.send(f"✅ 已向 **{user_obj.name}** 發送聊天邀請，等待對方同意。", ephemeral=True)
-            except discord.Forbidden:
-                await interaction.followup.send("❌ 無法私訊該用戶，對方可能關閉了私訊功能。", ephemeral=True)
-                
+            await user_obj.send(
+                f"🔔 **來自 {interaction.guild.name} 管理員的聊天邀請**\n管理員 {interaction.user.display_name} 想與您進行即時對話，是否接受？",
+                view=invite_view
+            )
+            await interaction.followup.send(f"✅ 已向 **{user_obj.name}** 發送邀請。", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ 發生錯誤: {e}", ephemeral=True)
+
+    @ui.button(label='已處理', style=discord.ButtonStyle.danger, emoji="🛑", custom_id="support_stop_btn")
+    async def stop_button(self, interaction: Interaction, button: ui.Button):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ 無法操作。", ephemeral=True)
+        
+        embed = interaction.message.embeds[0]
+        embed.title = f"🛑 已處理 - 由 {interaction.user.display_name}"
+        embed.color = discord.Color.light_grey()
+        await interaction.response.edit_message(embed=embed, view=None)
+
 
 
 
