@@ -80,29 +80,45 @@ class ReplyView(ui.View):
 # =========================
 # -- Server Selection
 # =========================
-
 class ServerSelectView(ui.View):
     def __init__(self, bot, user_id, cog):
-        super().__init__(timeout=None)
+        super().__init__(timeout=60) # 建議私訊選單設定超時
         self.bot = bot
         self.user_id = user_id
         self.cog = cog
         
-        shared_guilds = [g for g in self.bot.guilds if g.get_member(self.user_id) is not None]
-        options = [discord.SelectOption(label=g.name, value=str(g.id)) for g in shared_guilds if g.id in self.cog.support_config]
+        # 找出使用者所在的伺服器，且該伺服器有設定支援頻道
+        shared_guilds = [
+            g for g in self.bot.guilds 
+            if g.get_member(self.user_id) is not None and g.id in self.cog.support_config
+        ]
         
-        if not options:
-            self.stop()
-        else:
-            select = ui.Select(placeholder="請選擇目標伺服器...", options=options)
-            select.callback = self._on_select
-            self.add_item(select)
+        if not shared_guilds:
+            # 如果沒有共同伺服器或都沒設定，這部分由 on_message 處理，這裡不加 item
+            return
+
+        options = [
+            discord.SelectOption(label=g.name, value=str(g.id), emoji="🏢") 
+            for g in shared_guilds
+        ]
+        
+        select = ui.Select(placeholder="請選擇要聯繫的伺服器...", options=options, custom_id="support_server_select")
+        select.callback = self._on_select
+        self.add_item(select)
 
     async def _on_select(self, interaction: Interaction):
         selected_id = int(interaction.data['values'][0])
+        guild = self.bot.get_guild(selected_id)
+        
         self.cog.user_target_guild[self.user_id] = selected_id
         await self.cog.db_save_user_target(self.user_id, selected_id)
-        await interaction.response.edit_message(content=f"✅ 已設定發送至：**{self.bot.get_guild(selected_id).name}**", embed=None, view=None)
+        
+        await interaction.response.edit_message(
+            content=f"✅ 已設定發送目標：**{guild.name}**\n現在您可以直接發送訊息給我，我會幫您轉發！", 
+            embed=None, 
+            view=None
+        )
+
 
 # =========================
 # -- SupportCog Core
@@ -152,20 +168,35 @@ class SupportCog(commands.Cog):
         await self.db_save_config(g_id, c_id, r_id)
         await interaction.response.send_message(f"✅ 設定成功，轉發至 {channel.mention}", ephemeral=True)
 
-    @commands.Cog.listener()
+        @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is not None: return
         
         retry_after = self._cd_mapping.get_bucket(message).update_rate_limit()
-        if retry_after: return # 安靜處理，不發送冷卻提示以防被洗頻
+        if retry_after: return 
 
         u_id = message.author.id
         target_id = self.user_target_guild.get(u_id)
 
+        # 檢查是否有目標伺服器且該伺服器配置還在
         if target_id and target_id in self.support_config:
             await self.process_forward(message.author, message.content, target_id)
         else:
-            await message.channel.send(embed=discord.Embed(title="📞 聯繫管理員", description="請選擇伺服器：", color=0x3498db), view=ServerSelectView(self.bot, u_id, self))
+            # 建立 View
+            view = ServerSelectView(self.bot, u_id, self)
+            
+            # 檢查 View 裡面有沒有選單（透過檢查 children 數量）
+            if len(view.children) == 0:
+                return await message.channel.send(
+                    "❌ 找不到可用的伺服器。請確保您與機器人在同一個伺服器，且該伺服器已設定支援頻道。"
+                )
+
+            embed = discord.Embed(
+                title="📞 聯繫管理員", 
+                description="偵測到您想發送問題，但尚未設定目標伺服器。\n請從下方選單選擇一個伺服器：", 
+                color=0x3498db
+            )
+            await message.channel.send(embed=embed, view=view)
 
     async def process_forward(self, user, question, guild_id):
         guild = self.bot.get_guild(guild_id)
