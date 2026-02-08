@@ -50,6 +50,10 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         else:
             await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
 
+# =========================
+# -- 修正後的 ReplyView (含總結功能)
+# =========================
+
 class ReplyView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -61,8 +65,10 @@ class ReplyView(ui.View):
         
         try:
             embed = interaction.message.embeds[0]
+            # 解析 Footer 取得 User ID
             user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
-            content = embed.description.split("訊息內容:**\n```\n")[1].split("\n```")[0]
+            # 解析 Description 取得內容
+            content = embed.description.split("```\n")[1].split("\n```")[0]
             await interaction.response.send_modal(ReplyModal(user_id, content))
         except:
             await interaction.response.send_message("❌ 無法解析訊息。", ephemeral=True)
@@ -72,10 +78,46 @@ class ReplyView(ui.View):
         if not interaction.user.guild_permissions.manage_guild:
             return await interaction.response.send_message("❌ 無法操作。", ephemeral=True)
         
-        embed = interaction.message.embeds[0]
-        embed.title = f"🛑 已處理 - 由 {interaction.user.display_name}"
-        embed.color = discord.Color.light_grey()
-        await interaction.response.edit_message(embed=embed, view=None)
+        await interaction.response.defer() # 處理時間可能較長，先 defer
+        
+        # 1. 取得原始資料
+        old_embed = interaction.message.embeds[0]
+        user_id = old_embed.footer.text.split("ID: ")[1].split(" |")[0]
+        user_name = old_embed.title.replace("❓ 來自 ", "")
+        content = old_embed.description.split("```\n")[1].split("\n```")[0]
+        send_time = old_embed.footer.text.split("| ")[1]
+        process_time = safe_now()
+        
+        # 2. 獲取伺服器資訊 (假設從 Content 或 Embed 獲取)
+        guild_name = interaction.guild.name
+        guild_id = interaction.guild.id
+
+        # 3. 建立總結 Embed
+        summary_embed = discord.Embed(
+            title=f"✅ 案件已處理",
+            description=f"**處理人員：** {interaction.user.mention}\n**處理時間：** `{process_time}`",
+            color=discord.Color.light_grey()
+        )
+        
+        summary_embed.add_field(name="👤 用戶資訊", value=f"名稱: **{user_name}**\nID: `{user_id}`", inline=True)
+        summary_embed.add_field(name="🏢 伺服器資訊", value=f"目標: **{guild_name}**\nID: `{guild_id}`", inline=True)
+        summary_embed.add_field(name="📊 統計", value=f"發送時間: `{send_time}`\n處理狀態: 已結案", inline=False)
+        summary_embed.add_field(name="📝 原始問題", value=f"```\n{content[:500]}\n```", inline=False)
+        
+        summary_embed.set_footer(text=f"處理者：{interaction.user.display_name} | 結案編號: {interaction.message.id}")
+
+        # 4. 建立新的 View (查看紀錄與連結)
+        new_view = ui.View(timeout=None)
+        
+        # 查看紀錄按鈕 (這通常連往你的網頁後台或日誌頻道，這裡先放一個示意)
+        new_view.add_item(ui.Button(label="查看紀錄", style=discord.ButtonStyle.link, url=f"https://discord.com/channels/{guild_id}/{interaction.channel.id}/{interaction.message.id}"))
+        
+        # 檢查原始訊息是否有連結，如果有就加上去
+        if match := re.search(r"(https?://[^\s]+)", content):
+            new_view.add_item(ui.Button(label="打開連結", style=discord.ButtonStyle.link, url=match.group(0)))
+
+        # 5. 更新訊息
+        await interaction.edit_original_response(content="🛑 **本案件已關閉**", embed=summary_embed, view=new_view)
 
 # =========================
 # -- Server Selection
