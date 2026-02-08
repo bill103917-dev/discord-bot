@@ -1822,7 +1822,12 @@ async def on_ready():
     except Exception as e:
         print(f"❌ 持久化設定失敗: {e}")
 
+    # 在 bot.py 裡
+    support_cog = bot.get_cog("SupportCog")
+    if support_cog:
+        bot.add_view(ReplyView(support_cog)) # 這裡一定要傳 support_cog
 
+        
     try:
         await bot.tree.sync() 
         print("✅ 斜線指令已同步完成。")
