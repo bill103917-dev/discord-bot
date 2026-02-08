@@ -292,26 +292,24 @@ class SupportCog(commands.Cog):
         try:
             self.pool = await asyncpg.create_pool(self.db_url, min_size=1, max_size=3)
             async with self.pool.acquire() as conn:
+                # 原有的表格
                 await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
                 await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
                 
-                for r in await conn.fetch('SELECT * FROM support_configs'):
-                    self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
-                for t in await conn.fetch('SELECT * FROM user_targets'):
-                    self.user_target_guild[t['user_id']] = t['guild_id']
-            print("✅ SupportCog: Database Pool Ready.")
+                # 📌 這是你剛新增的內容，必須縮排放在 init_db 的 async with 區塊內！
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS temp_chats (
+                        channel_id BIGINT PRIMARY KEY,
+                        user_id BIGINT,
+                        admin_id BIGINT,
+                        created_at TIMESTAMP
+                    )
+                ''')
+                
+                # ... 加載資料的程式碼 ...
+            print("✅ SupportCog: Database Pool & Tables Ready.")
         except Exception as e:
             print(f"❌ DB Error: {e}")
-            # 在 SupportCog.init_db 中新增
-    await conn.execute('''
-        CREATE TABLE IF NOT EXISTS temp_chats (
-            channel_id BIGINT PRIMARY KEY,
-            user_id BIGINT,
-            admin_id BIGINT,
-            created_at TIMESTAMP
-        )
-    ''')
-
 
     async def db_save_config(self, g_id, c_id, r_id):
         async with self.pool.acquire() as conn:
