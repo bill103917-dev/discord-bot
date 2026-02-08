@@ -18,7 +18,7 @@ from utils.time_utils import safe_now
 # =========================
 
 class ReplyView(ui.View):
-    def __init__(self, cog): # 這裡必須有縮排！
+    def __init__(self, cog):
         super().__init__(timeout=None)
         self.cog = cog
 
@@ -29,11 +29,19 @@ class ReplyView(ui.View):
         
         try:
             embed = interaction.message.embeds[0]
-            user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
-            content = embed.description.split("訊息內容:**\n```\n")[1].split("\n```")[0]
+            # --- 優化解析方式 ---
+            # 1. 從 Footer 提取 User ID (格式: "User ID: 12345 | 時間")
+            footer_text = embed.footer.text
+            user_id = int(re.search(r"ID: (\d+)", footer_text).group(1))
+            
+            # 2. 從 Description 提取內容 (從 ``` 之間抓取)
+            content_match = re.search(r"```\n?(.*?)\n?```", embed.description, re.DOTALL)
+            content = content_match.group(1) if content_match else "無法解析內容"
+            
             await interaction.response.send_modal(ReplyModal(user_id, content))
-        except:
-            await interaction.response.send_message("❌ 無法解析訊息。", ephemeral=True)
+        except Exception as e:
+            print(f"解析錯誤: {e}") # 終端機會顯示錯誤原因
+            await interaction.response.send_message(f"❌ 無法解析訊息內容。原因: {e}", ephemeral=True)
 
     @ui.button(label='發起臨時聊天', style=discord.ButtonStyle.primary, emoji="🚀", custom_id="support_chat_invite_btn")
     async def chat_invite_button(self, interaction: Interaction, button: ui.Button):
@@ -44,21 +52,22 @@ class ReplyView(ui.View):
         
         try:
             embed = interaction.message.embeds[0]
-            user_id = int(embed.footer.text.split("ID: ")[1].split(" |")[0])
+            footer_text = embed.footer.text
+            user_id = int(re.search(r"ID: (\d+)", footer_text).group(1))
             user_obj = interaction.client.get_user(user_id)
             
             if not user_obj:
-                return await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
+                return await interaction.followup.send("❌ 找不到該用戶，他可能已離開伺服器或關閉私訊。", ephemeral=True)
 
-            # 發送邀請
             invite_view = ChatInviteView(sender=interaction.user, receiver=user_obj, cog=self.cog)
+            
             await user_obj.send(
-                f"🔔 **來自 {interaction.guild.name} 管理員的聊天邀請**\n管理員 {interaction.user.display_name} 想與您進行即時對話，是否接受？",
+                f"🔔 **來自 {interaction.guild.name} 管理員的邀請**\n管理員 {interaction.user.display_name} 想與您進行即時對話，是否接受？",
                 view=invite_view
             )
-            await interaction.followup.send(f"✅ 已向 **{user_obj.name}** 發送邀請。", ephemeral=True)
+            await interaction.followup.send(f"✅ 已向 **{user_obj.name}** 發送聊天邀請。", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ 發生錯誤: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ 邀請發送失敗: {e}", ephemeral=True)
 
     @ui.button(label='已處理', style=discord.ButtonStyle.danger, emoji="🛑", custom_id="support_stop_btn")
     async def stop_button(self, interaction: Interaction, button: ui.Button):
