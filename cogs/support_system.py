@@ -270,7 +270,7 @@ class SupportCog(commands.Cog):
             view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
 
             if os.path.exists(file_path):
-                log_chan = self.bot.get_channel(123456789) # 📌 這裡請修改為你的 Log 頻道 ID
+                log_chan = self.bot.get_channel(1470291339118641253) # 📌 這裡請修改為你的 Log 頻道 ID
                 if log_chan:
                     file_msg = await log_chan.send(content=f"📁 Log: `{user_name}`", file=discord.File(file_path))
                     view.add_item(ui.Button(label="📄 查看對話紀錄 (下載)", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url))
@@ -285,7 +285,7 @@ class SupportCog(commands.Cog):
         self.support_config[gid] = (cid, rid)
         async with self.pool.acquire() as conn:
             await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', gid, cid, rid)
-        await interaction.response.send_message(f"✅ 已設定至 {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"✅ 已設定 {channel.mention}為轉發頻道", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
