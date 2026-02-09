@@ -54,68 +54,68 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
 # =========================
 class ChatInviteView(ui.View):
     def __init__(self, sender, receiver, cog, origin_msg=None):
-        super().__init__(timeout=60)
+        super().__init__(timeout=120) # 延長至 2 分鐘
         self.sender = sender
         self.receiver = receiver
         self.cog = cog
         self.origin_msg = origin_msg 
-
 
     @ui.button(label='接受邀請', style=discord.ButtonStyle.success, emoji="✅")
     async def accept(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.receiver.id:
             return await interaction.response.send_message("這不是給你的邀請。", ephemeral=True)
         
-        await interaction.response.defer()
+        # 立即 defer 應對可能的頻道創建延遲
+        try:
+            await interaction.response.defer()
+        except:
+            return
         
-        # 尋找伺服器 (延用之前的邏輯)
+        # 尋找伺服器
         target_id = self.cog.user_target_guild.get(self.receiver.id)
         guild = interaction.client.get_guild(target_id)
         if not guild:
             return await interaction.followup.send("❌ 找不到伺服器。", ephemeral=True)
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            self.sender: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            self.receiver: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True)
-        }
-        
-        # 1. 建立頻道
-        channel = await guild.create_text_channel(
-            name=f"chat-{self.receiver.name}",
-            overwrites=overwrites,
-            topic=f"User ID: {self.receiver.id}"
-        )
-
-        # 2. 建立前往按鈕 (給用戶與管理員私訊用的)
-        go_view = ui.View()
-        go_btn = ui.Button(label="前往聊天室", url=channel.jump_url, emoji="🔗")
-        go_view.add_item(go_btn)
-        
-        await interaction.followup.send(f"✅ 頻道已建立：{channel.mention}", view=go_view, ephemeral=True)
-        
-        # 3. --- 重點：修改管理頻道的原始訊息 ---
-        # 我們需要找到管理員發起邀請時的那則訊息並更新它
         try:
-            # 建立一個新的 View 取代原本的「回覆/發起聊天/已處理」
-            admin_new_view = ui.View(timeout=None)
-            admin_new_view.add_item(ui.Button(label="已開啟臨時聊天室", url=channel.jump_url, style=discord.ButtonStyle.link, emoji="💬"))
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                self.sender: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
+                self.receiver: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True)
+            }
             
-            # 如果你有實作「已處理」按鈕，可以決定是否保留。這裡我們先只放前往按鈕。
-            # 這裡嘗試抓取管理員當初點擊按鈕的訊息 (這需要傳遞 message_id，或者從頻道紀錄找)
-            # 最快的方式：如果這是在 support_system 內，通常管理頻道會收到 Embed
-            
-            # 發送成功訊息給管理員
-            await self.sender.send(f"✅ {self.receiver.name} 已接受邀請！", view=go_view)
-            
-        except Exception as e:
-            print(f"更新管理端訊息失敗: {e}")
+            # 1. 建立頻道
+            channel = await guild.create_text_channel(
+                name=f"chat-{self.receiver.name}",
+                overwrites=overwrites,
+                topic=f"User ID: {self.receiver.id}"
+            )
 
-        # 4. 聊天室初始訊息
-        await channel.send(
-            f"✨ {self.sender.mention} & {self.receiver.mention} 已連線。", 
-            view=TempChatControlView(self.cog, self.receiver.id)
-        )
+            # 2. 建立前往按鈕
+            go_view = ui.View()
+            go_view.add_item(ui.Button(label="前往聊天室", url=channel.jump_url, emoji="🔗"))
+            
+            await interaction.followup.send(f"✅ 頻道已建立：{channel.mention}", view=go_view, ephemeral=True)
+            
+            # 3. --- 修改管理頻道的原始訊息 ---
+            if self.origin_msg:
+                try:
+                    admin_new_view = ui.View(timeout=None)
+                    admin_new_view.add_item(ui.Button(label="已開啟臨時聊天室", url=channel.jump_url, style=discord.ButtonStyle.link, emoji="💬"))
+                    # 保留已處理按鈕，讓管理員事後可以結案
+                    admin_new_view.add_item(ui.Button(label='已處理', style=discord.ButtonStyle.danger, emoji="🛑", custom_id="support_stop_btn"))
+                    await self.origin_msg.edit(view=admin_new_view)
+                except Exception as e:
+                    print(f"更新管理端按鈕失敗: {e}")
+
+            # 4. 通知發起者並初始化頻道
+            await self.sender.send(f"✅ {self.receiver.name} 已接受邀請！", view=go_view)
+            await channel.send(
+                f"✨ {self.sender.mention} & {self.receiver.mention} 已連線。", 
+                view=TempChatControlView(self.cog, self.receiver.id)
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ 建立頻道失敗: {e}", ephemeral=True)
         
     @ui.button(label='拒絕', style=discord.ButtonStyle.danger, emoji="❌")
     async def decline(self, interaction: Interaction, button: ui.Button):
@@ -179,11 +179,9 @@ class ReplyView(ui.View):
         
         try:
             embed = interaction.message.embeds[0]
-            # 使用正則解析 ID 與內容
             user_id = int(re.search(r"ID: (\d+)", embed.footer.text).group(1))
             content_match = re.search(r"```\n?(.*?)\n?```", embed.description, re.DOTALL)
             content = content_match.group(1) if content_match else "無法解析內容"
-            
             await interaction.response.send_modal(ReplyModal(user_id, content))
         except Exception as e:
             await interaction.response.send_message(f"❌ 解析失敗: {e}", ephemeral=True)
@@ -191,92 +189,76 @@ class ReplyView(ui.View):
     @ui.button(label='發起臨時聊天', style=discord.ButtonStyle.primary, emoji="🚀", custom_id="support_chat_invite_btn")
     async def chat_invite_button(self, interaction: Interaction, button: ui.Button):
         if not interaction.user.guild_permissions.manage_guild:
-            return await interaction.response.send_message("❌ 您沒有權限。", ephemeral=True)
+            return await interaction.response.send_message("❌ 您沒有權限使用此功能。", ephemeral=True)
         
-        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except (discord.errors.NotFound, discord.errors.HTTPException):
+            return
+
         try:
             embed = interaction.message.embeds[0]
-            user_id = int(re.search(r"ID: (\d+)", embed.footer.text).group(1))
-            user_obj = interaction.client.get_user(user_id)
+            user_id_match = re.search(r"ID: (\d+)", embed.footer.text)
+            if not user_id_match:
+                return await interaction.followup.send("❌ 無法提取用戶 ID。", ephemeral=True)
             
+            user_id = int(user_id_match.group(1))
+            user_obj = interaction.client.get_user(user_id)
             if not user_obj:
-                return await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
+                try: user_obj = await interaction.client.fetch_user(user_id)
+                except: return await interaction.followup.send("❌ 找不到該用戶。", ephemeral=True)
 
-            invite_view = ChatInviteView(sender=interaction.user, receiver=user_obj, cog=self.cog)
+            invite_view = ChatInviteView(interaction.user, user_obj, self.cog, origin_msg=interaction.message)
             await user_obj.send(
-                f"🔔 **來自 {interaction.guild.name} 管理員的邀請**\n管理員 {interaction.user.display_name} 想與您進行對話，是否接受？",
+                f"🔔 **來自 {interaction.guild.name} 管理員的邀請**\n管理員 **{interaction.user.display_name}** 邀請您對話：",
                 view=invite_view
             )
-            await interaction.followup.send(f"✅ 已對 **{user_obj.name}** 發送聊天邀請。", ephemeral=True)
+            await interaction.followup.send(f"✅ 已對 **{user_obj.name}** 發起邀請。", ephemeral=True)
+            
         except Exception as e:
-            await interaction.followup.send(f"❌ 邀請失敗: {e}", ephemeral=True)
+            try: await interaction.followup.send(f"❌ 錯誤: {e}", ephemeral=True)
+            except: pass
 
     @ui.button(label='已處理', style=discord.ButtonStyle.danger, emoji="🛑", custom_id="support_stop_btn")
     async def stop_button(self, interaction: Interaction, button: ui.Button):
-        # 先 defer 因為上傳檔案與編輯訊息可能超過 3 秒
         await interaction.response.defer()
         
         try:
-            # --- 1. 數據解析 ---
             old_embed = interaction.message.embeds[0]
-            # 解析 Footer (User ID: 12345 | 2023-...)
             footer_text = old_embed.footer.text
             user_id = re.search(r"ID: (\d+)", footer_text).group(1)
-            
-            # 解析 Title (❓ 來自 User)
             user_name = old_embed.title.replace("❓ 來自 ", "")
-            
-            # 解析內容 (```內容```)
             content_match = re.search(r"```\n?(.*?)\n?```", old_embed.description, re.DOTALL)
             content = content_match.group(1) if content_match else "無法讀取內容"
-            
-            # 解析時間 (抓取 | 之後的字串)
             send_time = footer_text.split("|")[1].strip() if "|" in footer_text else "未知"
 
-            # --- 2. 建立總結 Embed ---
             summary_embed = discord.Embed(
                 title="✅ 案件已處理", 
                 description=f"**處理人員：** {interaction.user.mention}\n**處理時間：** `{safe_now()}`",
                 color=discord.Color.dark_gray()
             )
-            
             summary_embed.add_field(name="👤 用戶資訊", value=f"名稱：**{user_name}**\nID：`{user_id}`", inline=True)
             summary_embed.add_field(name="🏢 伺服器資訊", value=f"目標：**{interaction.guild.name}**\nID：`{interaction.guild.id}`", inline=True)
             summary_embed.add_field(name="📊 統計", value=f"發送時間：`{send_time}`\n處理狀態：`已結案`", inline=False)
             summary_embed.add_field(name="📝 原始問題", value=f"```\n{content[:500]}\n```", inline=False)
-            
-            summary_embed.set_footer(text=f"處理者：{interaction.user.display_name} | 案件 ID：{interaction.message.id}")
+            summary_embed.set_footer(text=f"案件 ID：{interaction.message.id}")
 
-            # --- 3. 建立按鈕 ---
             new_view = ui.View(timeout=None)
-            # 原訊息連結
             jump_url = f"https://discord.com/channels/{interaction.guild_id}/{interaction.channel_id}/{interaction.message.id}"
             new_view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
 
-            # --- 4. 檔案上傳與 Log 連結 ---
             file_path = f"transcript_{user_id}.txt"
             if os.path.exists(file_path):
-                log_channel_id = 123456789  # 📌 記得改成你真正的 Log 頻道 ID
-                log_chan = interaction.client.get_channel(log_channel_id)
-                
+                log_chan = interaction.client.get_channel(123456789) # 📌 這裡填入你的 Log 頻道 ID
                 if log_chan:
-                    file = discord.File(file_path)
-                    log_msg = await log_chan.send(content=f"📁 **結案存檔** | 用戶：`{user_name}` (`{user_id}`)", file=file)
-                    # 取得 Discord 上的檔案永久連結
-                    file_url = log_msg.attachments[0].url
-                    new_view.add_item(ui.Button(label="查看對話文件", style=discord.ButtonStyle.link, url=file_url, emoji="📄"))
-                    
-                    # 刪除本地檔案，保持環境乾淨
+                    file_msg = await log_chan.send(content=f"📁 Log: `{user_name}`", file=discord.File(file_path))
+                    new_view.add_item(ui.Button(label="查看對話文件", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url, emoji="📄"))
                     os.remove(file_path)
 
-            # --- 5. 更新原始訊息 ---
             await interaction.edit_original_response(embed=summary_embed, view=new_view)
-
         except Exception as e:
-            print(f"結案程序發生錯誤: {e}")
-            await interaction.followup.send(f"❌ 結案失敗，原因：{e}", ephemeral=True)
+            print(f"結案錯誤: {e}")
 
-        
 # =========================
 # -- 5. 伺服器選擇 (Server Selection)
 # =========================
@@ -321,7 +303,6 @@ class SupportCog(commands.Cog):
             async with self.pool.acquire() as conn:
                 await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
                 await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
-                await conn.execute('CREATE TABLE IF NOT EXISTS temp_chats (channel_id BIGINT PRIMARY KEY, user_id BIGINT, admin_id BIGINT, created_at TIMESTAMP)')
                 
                 rows = await conn.fetch('SELECT * FROM support_configs')
                 for r in rows: self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
@@ -351,16 +332,14 @@ class SupportCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild: return
         if self._cd_mapping.get_bucket(message).update_rate_limit(): return
-
         uid = message.author.id
         tid = self.user_target_guild.get(uid)
-
         if tid in self.support_config:
             await self.process_forward(message.author, message.content, tid)
         else:
             view = ServerSelectView(self.bot, uid, self)
-            if not view.children: return await message.channel.send("❌ 找不到可用伺服器。")
-            await message.channel.send("📞 請選擇伺服器：", view=view)
+            if not view.children: return
+            await message.channel.send("📞 請選擇要聯繫的伺服器：", view=view)
 
     async def process_forward(self, user, question, guild_id):
         guild = self.bot.get_guild(guild_id)
@@ -369,14 +348,13 @@ class SupportCog(commands.Cog):
 
         embed = discord.Embed(title=f"❓ 來自 {user.name}", description=f"**訊息內容:**\n```\n{question[:1500]}\n```", color=0xf1c40f)
         embed.set_footer(text=f"User ID: {user.id} | {safe_now()}")
-        
         view = ReplyView(self)
         if match := re.search(r"(https?://[^\s]+)", question):
             view.add_item(ui.Button(label="🔗 連結", url=match.group(0)))
 
         mention = f"<@&{config[1]}>" if config[1] else "@here"
         await chan.send(content=mention, embed=embed, view=view)
-        await user.send(f"✅ 已送達 **{guild.name}**。")
+        await user.send(f"✅ 您的訊息已送達 **{guild.name}**，請耐心等待回覆。")
 
 async def setup(bot):
     await bot.add_cog(SupportCog(bot))
