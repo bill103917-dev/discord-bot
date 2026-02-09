@@ -76,7 +76,6 @@ class TempChatControlView(ui.View):
                 except: pass
         else:
             await interaction.response.send_message("📂 正在產生紀錄並執行自動結案程序...")
-            # 觸發 Cog 內的通用結案邏輯
             await self.cog.execute_final_close(
                 origin_msg=self.origin_msg, 
                 user_id=str(self.user_id), 
@@ -122,7 +121,6 @@ class ChatInviteView(ui.View):
             go_view = ui.View()
             go_view.add_item(ui.Button(label="前往聊天室", url=channel.jump_url, emoji="🔗"))
             
-            # 更新管理端訊息按鈕
             if self.origin_msg:
                 admin_new_view = ui.View(timeout=None)
                 admin_new_view.add_item(ui.Button(label="已開啟臨時聊天室", url=channel.jump_url, style=discord.ButtonStyle.link, emoji="💬"))
@@ -137,11 +135,6 @@ class ChatInviteView(ui.View):
             )
         except Exception as e:
             await interaction.followup.send(f"❌ 建立失敗: {e}", ephemeral=True)
-        
-    @ui.button(label='拒絕', style=discord.ButtonStyle.danger, emoji="❌")
-    async def decline(self, interaction: Interaction, button: ui.Button):
-        await interaction.response.edit_message(content="❌ 您已拒絕邀請。", view=None)
-        await self.sender.send(f"❌ {self.receiver.name} 拒絕了您的聊天邀請。")
 
 # =========================
 # -- 4. 管理端主按鈕 (Reply View)
@@ -187,13 +180,11 @@ class ReplyView(ui.View):
         
         old_embed = interaction.message.embeds[0]
         user_id_str = re.search(r"ID: (\d+)", old_embed.footer.text).group(1)
-        
-        # 檢查是否有正在進行的聊天室
         target_channel = discord.utils.get(interaction.guild.text_channels, topic=f"User ID: {user_id_str}")
         
         if target_channel:
             confirm_view = ui.View(timeout=60)
-            confirm_btn = ui.Button(label="管理員要求結案，確認結束", style=discord.ButtonStyle.danger, emoji="⚠️")
+            confirm_btn = ui.Button(label="管理員要求結案，點此確認結束", style=discord.ButtonStyle.danger, emoji="⚠️")
             async def force_close_callback(inner_interaction: Interaction):
                 await inner_interaction.response.send_message("📂 管理員已確認結案...")
                 await self.cog.execute_final_close(interaction.message, user_id_str, target_channel, interaction.user.display_name)
@@ -202,11 +193,10 @@ class ReplyView(ui.View):
             await target_channel.send(f"⚠️ {interaction.user.mention} 正在嘗試結案，是否同意？", view=confirm_view)
             return await interaction.followup.send("⚠️ 該用戶正在對話室，已發送確認。", ephemeral=True)
 
-        # 直接結案
         await self.cog.execute_final_close(interaction.message, user_id_str, closer_name=interaction.user.display_name)
 
 # =========================
-# -- 5. SupportCog Core (含通用結案邏輯)
+# -- 5. SupportCog Core
 # =========================
 class SupportCog(commands.Cog):
     def __init__(self, bot):
@@ -215,9 +205,13 @@ class SupportCog(commands.Cog):
         self.support_config = {}
         self.user_target_guild = {}
         self.pool = None
+        self.transcript_dir = "transcripts" # Render 資料夾
         self._cd_mapping = commands.CooldownMapping.from_cooldown(1, 7.0, commands.BucketType.user)
 
-    async def cog_load(self): await self.init_db()
+    async def cog_load(self):
+        if not os.path.exists(self.transcript_dir):
+            os.makedirs(self.transcript_dir)
+        await self.init_db()
 
     async def init_db(self):
         try:
@@ -233,28 +227,33 @@ class SupportCog(commands.Cog):
         except Exception as e: print(f"❌ DB Error: {e}")
 
     async def execute_final_close(self, origin_msg, user_id, channel=None, closer_name="系統"):
-        """統一結案排版邏輯"""
+        """統一結案邏輯：產檔、上傳 Log、更新 Embed、添加下載按鈕"""
         try:
-            file_path = f"transcript_{user_id}.txt"
+            file_name = f"transcript_{user_id}_{datetime.now().strftime('%m%d_%H%M')}.txt"
+            file_path = os.path.join(self.transcript_dir, file_name)
+            
+            # 1. 如果有對話頻道，執行錄製與產檔
             if channel:
                 msgs = []
                 async for m in channel.history(limit=1000, oldest_first=True):
                     if m.author.bot and not m.content.startswith("✨"): continue
                     msgs.append(f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {m.author.display_name}: {m.content}")
+                
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(f"--- Chat Log (User ID: {user_id}) ---\n" + "\n".join(msgs))
                 await channel.delete()
 
+            # 2. 解析原始資料建立總結 Embed
             old_embed = origin_msg.embeds[0]
             user_name = old_embed.title.replace("❓ 來自 ", "")
             content = re.search(r"```\n?(.*?)\n?```", old_embed.description, re.DOTALL).group(1)
             send_time = old_embed.footer.text.split("|")[1].strip() if "|" in old_embed.footer.text else "未知"
 
             summary_embed = discord.Embed(title="✅ 案件已處理", color=discord.Color.dark_gray())
-            summary_embed.description = f"處理人員：{closer_name}\n處理時間：{safe_now()}"
+            summary_embed.description = f"**處理人員：** {closer_name}\n**處理時間：** `{safe_now()}`"
             summary_embed.add_field(name="👤 用戶資訊", value=f"名稱：**{user_name}**\nID：`{user_id}`", inline=True)
             summary_embed.add_field(name="🏢 伺服器資訊", value=f"目標：**{origin_msg.guild.name}**\nID：`{origin_msg.guild.id}`", inline=True)
-            summary_embed.add_field(name="📊 統計", value=f"發送時間：`{send_time}`\n處理狀態：`已結案`", inline=False)
+            summary_embed.add_field(name="📊 統計", value=f"發送時間：`{send_time}`\n狀態：`已結案並產檔`", inline=False)
             summary_embed.add_field(name="📝 原始問題", value=f"```\n{content[:500]}\n```", inline=False)
             summary_embed.set_footer(text=f"處理者：{closer_name} | 案件 ID：{origin_msg.id}")
 
@@ -262,15 +261,19 @@ class SupportCog(commands.Cog):
             jump_url = f"https://discord.com/channels/{origin_msg.guild.id}/{origin_msg.channel.id}/{origin_msg.id}"
             view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
 
+            # 3. 上傳檔案並生成「查看對話紀錄」按鈕
             if os.path.exists(file_path):
-                log_chan = self.bot.get_channel(123456789) # 📌 這裡填入你的 Log ID
+                log_chan = self.bot.get_channel(123456789) # 📌 務必填入你的 Log 頻道 ID
                 if log_chan:
-                    file_msg = await log_chan.send(content=f"📁 Log: `{user_name}`", file=discord.File(file_path))
-                    view.add_item(ui.Button(label="查看對話文件", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url, emoji="📄"))
-                    os.remove(file_path)
+                    file_msg = await log_chan.send(
+                        content=f"📁 **案件紀錄存檔** | 用戶：`{user_name}`", 
+                        file=discord.File(file_path)
+                    )
+                    view.add_item(ui.Button(label="📄 查看對話紀錄 (下載)", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url))
+                    os.remove(file_path) # 刪除 Render 本地檔案
 
             await origin_msg.edit(embed=summary_embed, view=view)
-        except Exception as e: print(f"結案失敗: {e}")
+        except Exception as e: print(f"❌ 結案失敗: {e}")
 
     @app_commands.command(name="set_support_channel", description="設定轉發頻道")
     @app_commands.default_permissions(manage_guild=True)
@@ -317,7 +320,5 @@ class ServerSelectView(ui.View):
             select.callback = callback
             self.add_item(select)
 
-
-
-async def setup(bot):
+async def setup(bot): 
     await bot.add_cog(SupportCog(bot))
