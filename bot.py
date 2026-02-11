@@ -72,6 +72,23 @@ if not TOKEN:
     raise ValueError("找不到 DISCORD_TOKEN 環境變數！")
 
 # =========================
+# -- Intents 設定 (必備權限)
+# =========================
+intents = discord.Intents.default()
+
+# 1. 客服系統需要：讀取用戶私訊與指令內容
+intents.message_content = True  
+
+# 2. 客服系統需要：取得用戶資訊 (如 ID、名稱)
+intents.members = True          
+
+# 3. 音樂系統需要：偵測語音頻道狀態 (進出頻道、播放狀態)
+intents.voice_states = True     
+
+# 4. 基礎運行需要：接收伺服器相關事件
+intents.guilds = True           
+
+# =========================
 # Utils & Shared State
 # =========================
 def to_thread(func):
