@@ -65,6 +65,8 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 PORT = int(os.getenv("PORT", 8080))
 TEMP_UPLOAD_FOLDER = 'static/temp_uploads' 
 TARGET_CHANNEL_ID = "1446781237422198855" 
+# 填入你的 Discord ID (很多數字的那串)
+MIMIC_USER_IDS = [1238436456041676853] 
 
 
 TOKEN = os.getenv("DISCORD_TOKEN") # 確保你的環境變數名稱是對應的
@@ -646,74 +648,62 @@ class UtilityCog(commands.Cog):
         self.bot = bot
         
         
-    @app_commands.command(name="say", description="讓機器人發送訊息（可回覆或模仿他人）")
-    @app_commands.describe(
-        message="要發送的內容",
-        channel="發送到哪個頻道 (選填)",
-        user="私訊給特定對象 (選填)",
-        reply_to_id="要回覆的訊息 ID (選填)",
-        mimic_user="要模仿的使用者 (選填)"
-    )
+    @app_commands.command(name="say", description="讓機器人發送訊息或回覆")
+    @app_commands.describe(message="內容", channel="頻道", reply_to_id="訊息ID")
     async def say(self, interaction: Interaction, message: str, 
                   channel: Optional[discord.TextChannel] = None, 
-                  user: Optional[discord.User] = None,
-                  reply_to_id: Optional[str] = None,
-                  mimic_user: Optional[discord.Member] = None):
+                  reply_to_id: Optional[str] = None):
         
-        # 1. 延遲回應，避免 Render 延遲導致 3 秒逾時
         try:
             await interaction.response.defer(ephemeral=True)
-        except discord.errors.NotFound:
-            return
+        except: return
 
-        # 2. 權限檢查 (從 self.bot 讀取 SPECIAL_USER_IDS)
-        if not interaction.user.guild_permissions.administrator and interaction.user.id not in self.bot.SPECIAL_USER_IDS:
-            return await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
-
-        # 3. 優先處理私訊邏輯 (私訊不支援模仿)
-        if user:
-            try:
-                await user.send(message)
-                return await interaction.followup.send(f"✅ 已私訊給 {user.mention}", ephemeral=True)
-            except Exception as e:
-                return await interaction.followup.send(f"❌ 私訊失敗: {e}", ephemeral=True)
+        # 權限檢查
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
+            return await interaction.followup.send("❌ 權限不足", ephemeral=True)
 
         target_channel = channel or interaction.channel
-        
-        # 4. 處理回覆參考 (Reply Reference)
         reply_ref = None
         if reply_to_id:
             try:
                 reply_ref = await target_channel.fetch_message(int(reply_to_id))
             except:
-                return await interaction.followup.send("❌ 找不到該訊息 ID，請確認 ID 是否正確且在該頻道內。", ephemeral=True)
+                return await interaction.followup.send("❌ 找不到該訊息 ID", ephemeral=True)
+
+        await target_channel.send(content=message, reference=reply_ref)
+        await interaction.followup.send(f"✅ 訊息已發送", ephemeral=True)
+
+    @app_commands.command(name="mimic", description=" 模仿他人說話")
+    @app_commands.describe(user="要模仿的人", message="要說的話", channel="頻道 (選填)")
+    @app_commands.default_permissions(administrator=True)
+    async def mimic(self, interaction: Interaction, user: discord.Member, message: str, channel: Optional[discord.TextChannel] = None):
+        
+        # 核心權限檢查：只允許名單內的 ID 執行
+        if interaction.user.id not in self.bot.MIMIC_USER_IDS:
+            await interaction.response.send_message("❌ 你沒有權限使用此指令。", ephemeral=True)
+            return
 
         try:
-            # --- 模式 A：模仿他人 (使用 Webhook) ---
-            if mimic_user:
-                webhooks = await target_channel.webhooks()
-                # 尋找現有的 Webhook 或建立新的
-                webhook = next((wh for wh in webhooks if wh.name == "Utility-Webhook"), None)
-                if not webhook:
-                    webhook = await target_channel.create_webhook(name="Utility-Webhook")
-                
-                await webhook.send(
-                    content=message,
-                    username=mimic_user.display_name,
-                    avatar_url=mimic_user.display_avatar.url
-                )
-                await interaction.followup.send(f"✅ 已以 {mimic_user.display_name} 的身分發送", ephemeral=True)
+            await interaction.response.defer(ephemeral=True)
+        except: return
 
-            # --- 模式 B：一般發送或回覆 ---
-            else:
-                await target_channel.send(content=message, reference=reply_ref)
-                await interaction.followup.send(f"✅ 訊息已發送到 {target_channel.mention}", ephemeral=True)
+        target_channel = channel or interaction.channel
 
-        except discord.Forbidden:
-            await interaction.followup.send("❌ 機器人缺少『管理 Webhook』或『發送訊息』的權限。", ephemeral=True)
+        try:
+            # Webhook 邏輯
+            webhooks = await target_channel.webhooks()
+            webhook = next((wh for wh in webhooks if wh.name == "Secret-Hook"), None)
+            if not webhook:
+                webhook = await target_channel.create_webhook(name="Secret-Hook")
+
+            await webhook.send(
+                content=message,
+                username=user.display_name,
+                avatar_url=user.display_avatar.url
+            )
+            await interaction.followup.send(f"✅ 已成功模仿 {user.display_name}", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ 執行出錯: {e}", ephemeral=True)
-
+            await interaction.followup.send(f"❌ 執行失敗: {e}", ephemeral=True)
 
         
         
