@@ -660,13 +660,17 @@ class UtilityCog(commands.Cog):
                   reply_to_id: Optional[str] = None,
                   mimic_user: Optional[discord.Member] = None):
         
-        await interaction.response.defer(ephemeral=True)
+        # 1. 延遲回應，避免 Render 延遲導致 3 秒逾時
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.errors.NotFound:
+            return
 
-        # 1. 權限檢查 (從 self 讀取 SPECIAL_USER_IDS)
+        # 2. 權限檢查 (從 self.bot 讀取 SPECIAL_USER_IDS)
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in self.bot.SPECIAL_USER_IDS:
             return await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
 
-        # 2. 優先處理私訊邏輯
+        # 3. 優先處理私訊邏輯 (私訊不支援模仿)
         if user:
             try:
                 await user.send(message)
@@ -676,7 +680,7 @@ class UtilityCog(commands.Cog):
 
         target_channel = channel or interaction.channel
         
-        # 3. 處理回覆參考 (Reply Reference)
+        # 4. 處理回覆參考 (Reply Reference)
         reply_ref = None
         if reply_to_id:
             try:
@@ -687,13 +691,12 @@ class UtilityCog(commands.Cog):
         try:
             # --- 模式 A：模仿他人 (使用 Webhook) ---
             if mimic_user:
-                # 取得或創建 Webhook
                 webhooks = await target_channel.webhooks()
+                # 尋找現有的 Webhook 或建立新的
                 webhook = next((wh for wh in webhooks if wh.name == "Utility-Webhook"), None)
                 if not webhook:
                     webhook = await target_channel.create_webhook(name="Utility-Webhook")
                 
-                # Webhook 發送 (注意：Webhook 無法直接使用 Discord 原生回覆功能)
                 await webhook.send(
                     content=message,
                     username=mimic_user.display_name,
