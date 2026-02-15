@@ -644,6 +644,8 @@ class ReactionRoleCog(commands.Cog):
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        
+        
     @app_commands.command(name="say", description="讓機器人發送訊息（可回覆或模仿他人）")
     @app_commands.describe(
         message="要發送的內容",
