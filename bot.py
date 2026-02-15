@@ -679,7 +679,7 @@ class UtilityCog(commands.Cog):
     async def mimic(self, interaction: Interaction, user: discord.Member, message: str, channel: Optional[discord.TextChannel] = None):
         
         # 核心權限檢查：只允許名單內的 ID 執行
-        if interaction.user.id not in self.bot.MIMIC_USER_IDS:
+        if interaction.user.id not in MIMIC_USER_IDS:
             await interaction.response.send_message("❌ 你沒有權限使用此指令。", ephemeral=True)
             return
 
