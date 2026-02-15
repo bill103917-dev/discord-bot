@@ -644,31 +644,72 @@ class ReactionRoleCog(commands.Cog):
 class UtilityCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @app_commands.command(name="say", description="讓機器人發送訊息（管理員或特殊使用者限定）")
-    async def say(self, interaction: Interaction, message: str, channel: Optional[discord.TextChannel] = None, user: Optional[discord.User] = None):
-        await log_command(interaction, "/say")
+    @app_commands.command(name="say", description="讓機器人發送訊息（可回覆或模仿他人）")
+    @app_commands.describe(
+        message="要發送的內容",
+        channel="發送到哪個頻道 (選填)",
+        user="私訊給特定對象 (選填)",
+        reply_to_id="要回覆的訊息 ID (選填)",
+        mimic_user="要模仿的使用者 (選填)"
+    )
+    async def say(self, interaction: Interaction, message: str, 
+                  channel: Optional[discord.TextChannel] = None, 
+                  user: Optional[discord.User] = None,
+                  reply_to_id: Optional[str] = None,
+                  mimic_user: Optional[discord.Member] = None):
+        
         await interaction.response.defer(ephemeral=True)
 
-        if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
-            await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
-            return
+        # 1. 權限檢查 (從 self 讀取 SPECIAL_USER_IDS)
+        if not interaction.user.guild_permissions.administrator and interaction.user.id not in self.bot.SPECIAL_USER_IDS:
+            return await interaction.followup.send("❌ 你沒有權限使用此指令", ephemeral=True)
 
+        # 2. 優先處理私訊邏輯
         if user:
             try:
                 await user.send(message)
-                await interaction.followup.send(f"✅ 已私訊給 {user.mention}", ephemeral=True)
+                return await interaction.followup.send(f"✅ 已私訊給 {user.mention}", ephemeral=True)
             except Exception as e:
-                await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
-            return
+                return await interaction.followup.send(f"❌ 私訊失敗: {e}", ephemeral=True)
 
         target_channel = channel or interaction.channel
+        
+        # 3. 處理回覆參考 (Reply Reference)
+        reply_ref = None
+        if reply_to_id:
+            try:
+                reply_ref = await target_channel.fetch_message(int(reply_to_id))
+            except:
+                return await interaction.followup.send("❌ 找不到該訊息 ID，請確認 ID 是否正確且在該頻道內。", ephemeral=True)
+
         try:
-            await target_channel.send(message)
-            await interaction.followup.send(f"✅ 已在 {target_channel.mention} 發送訊息", ephemeral=True)
+            # --- 模式 A：模仿他人 (使用 Webhook) ---
+            if mimic_user:
+                # 取得或創建 Webhook
+                webhooks = await target_channel.webhooks()
+                webhook = next((wh for wh in webhooks if wh.name == "Utility-Webhook"), None)
+                if not webhook:
+                    webhook = await target_channel.create_webhook(name="Utility-Webhook")
+                
+                # Webhook 發送 (注意：Webhook 無法直接使用 Discord 原生回覆功能)
+                await webhook.send(
+                    content=message,
+                    username=mimic_user.display_name,
+                    avatar_url=mimic_user.display_avatar.url
+                )
+                await interaction.followup.send(f"✅ 已以 {mimic_user.display_name} 的身分發送", ephemeral=True)
+
+            # --- 模式 B：一般發送或回覆 ---
+            else:
+                await target_channel.send(content=message, reference=reply_ref)
+                await interaction.followup.send(f"✅ 訊息已發送到 {target_channel.mention}", ephemeral=True)
+
+        except discord.Forbidden:
+            await interaction.followup.send("❌ 機器人缺少『管理 Webhook』或『發送訊息』的權限。", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ 發送失敗: {e}", ephemeral=True)
-        # 加在 UtilityCog 類別內，或者作為一個獨立的 @bot.command
+            await interaction.followup.send(f"❌ 執行出錯: {e}", ephemeral=True)
+
+
         
         
     @app_commands.command(name="sync", description="手動同步指令（僅管理員）")
