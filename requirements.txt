@@ -9,5 +9,6 @@ spotipy>=2.23.0
 authlib>=1.3.0
 requests-oauthlib>=1.3.1
 cryptography>=41.0.0
-google-generativeai
+google-genai
 typing-extensions
+psycopg2-binary
