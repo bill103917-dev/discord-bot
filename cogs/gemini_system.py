@@ -64,6 +64,24 @@ class GeminiSystem(commands.Cog):
         conn.commit()
         cur.close()
         conn.close()
+        
+        
+    @app_commands.command(name="ai_clear", description="清空本頻道的 AI 對話記憶")
+    @app_commands.default_permissions(administrator=True)
+    async def ai_clear(self, interaction: Interaction):
+        # 刪除資料庫紀錄
+        conn = psycopg2.connect(self.db_url)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ai_memory WHERE channel_id = %s", (interaction.channel_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        # 如果當前對話正在運行，重置它
+        if interaction.channel_id in self.ai_chats:
+            self.ai_chats[interaction.channel_id] = self.model.start_chat(history=[])
+            
+        await interaction.response.send_message("🧹 已清空本頻道的所有 AI 記憶！", ephemeral=True)
 
     @app_commands.command(name="ai_chat", description="開啟或關閉本頻道的 AI 自動對話功能")
     @app_commands.describe(action="選擇開啟或關閉")
