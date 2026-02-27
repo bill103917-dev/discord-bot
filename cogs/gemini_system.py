@@ -8,10 +8,19 @@ import psycopg2
 import psycopg2.extras
 
 class GeminiSystem(commands.Cog):
-    def __init__(self, bot):
+        def __init__(self, bot):
         self.bot = bot
-        # 儲存運作中的對話 Session {channel_id: chat_session}
         self.ai_chats = {}
+        self.db_url = os.getenv("DATABASE_URL")
+        self._init_db()
+
+        # Gemini 配置
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self.model_id = "gemini-1.5-flash"
+        
+        # 🟢 成功初始化後吱一聲
+        print(f"🔹 [GeminiSystem] 記憶資料庫已對接，Gemini 客戶端準備就緒！")
+
         
         # --- 資料庫設定 ---
         self.db_url = os.getenv("DATABASE_URL")
