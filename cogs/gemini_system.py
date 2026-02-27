@@ -121,28 +121,43 @@ class GeminiSystem(commands.Cog):
 
     # ==================== 監聽器 ====================
 
-    @commands.Cog.listener()
+        @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot: return
-        if message.channel.id not in self.ai_chats: return
-        if message.content.startswith("-"): return
+        # 1. 基本排除：機器人、未開啟頻道、開頭為 "-"
+        if message.author.bot or message.channel.id not in self.ai_chats or message.content.startswith("-"):
+            return
+
+        # 2. 檢查訊息內容是否為空 (例如只有貼圖或圖片)
+        if not message.content.strip():
+            return
 
         chat_session = self.ai_chats[message.channel_id]
 
         async with message.channel.typing():
             try:
-                # 呼叫 Gemini (非同步)
+                # 呼叫 Gemini (使用 run_in_executor 避免阻塞)
                 response = await self.bot.loop.run_in_executor(
                     None, lambda: chat_session.send_message(message.content)
                 )
                 
                 if response.text:
+                    # Discord 限制 2000 字元，超過會報錯，所以強制截斷
                     await message.reply(response.text[:2000])
-                    # 存入資料庫
+                    # 只有成功回覆後才存入資料庫，確保記憶同步
                     self._save_db_history(message.channel.id, chat_session.history)
                     
             except Exception as e:
-                print(f"Gemini DB Error: {e}")
+                error_msg = str(e)
+                # 處理 429 速率限制
+                if "429" in error_msg:
+                    await message.reply("⚠️ **Gemini API 暫時忙不過來 **\n請稍等幾秒鐘後再試一次。")
+                # 處理內容過濾（AI 覺得這話題色情、暴力或敏感）
+                elif "finish_reason: SAFETY" in error_msg or "blocked" in error_msg:
+                    await message.reply("🛡️ **抱歉，根據安全準則，我無法針對這項內容進行回覆。**")
+                else:
+                    # 其他錯誤印在後台以便除錯
+                    print(f"❌ [Gemini Error] {error_msg}")
+                    await message.reply("😵 發生了預料之外的錯誤，請稍後再試。")
 
 async def setup(bot):
     await bot.add_cog(GeminiSystem(bot))
