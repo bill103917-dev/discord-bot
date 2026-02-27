@@ -104,6 +104,17 @@ class GeminiSystem(commands.Cog):
         await interaction.response.send_message("🧹 該頻道的 AI 記憶已完全清空。", ephemeral=True)
 
     # ==================== 監聽回覆 ====================
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot: return
+        
+        # 除錯追蹤
+        print(f"--- 收到訊息 ---")
+        print(f"內容: '{message.content}'")
+        print(f"頻道 ID: {message.channel.id}")
+        print(f"是否在 AI 監聽清單: {message.channel.id in self.ai_chats}")
+
+        if message.channel.id not in self.ai_chats: return
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
