@@ -1,3 +1,4 @@
+import os # 記得在最上面 import o
 import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
@@ -12,7 +13,8 @@ class GeminiSystem(commands.Cog):
         
         # --- Gemini 配置 ---
         # 請替換為你拿到的 API KEY
-        genai.configure(api_key="AIzaSyBryz8DoWxdxIikzm7M9QO5mgpTMzsa-sM")
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
         
         self.generation_config = {
             "temperature": 0.9,
