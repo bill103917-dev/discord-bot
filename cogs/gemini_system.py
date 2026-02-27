@@ -1,32 +1,69 @@
-import os # 記得在最上面 import o
 import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import google.generativeai as genai
-from typing import Optional
+import os
+import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 class GeminiSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 儲存每個頻道的對話 Session {channel_id: chat_session}
         self.ai_chats = {}
         
-        # --- Gemini 配置 ---
-        # 請替換為你拿到的 API KEY
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        # --- 資料庫設定 ---
+        self.db_url = os.getenv("DATABASE_URL")
+        self._init_db()
 
+        # --- Gemini 配置 ---
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+
+    def _init_db(self):
+        """初始化資料庫表格"""
+        conn = psycopg2.connect(self.db_url)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ai_memory (
+                channel_id BIGINT PRIMARY KEY,
+                history JSONB
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def _load_db_history(self, channel_id):
+        """從資料庫讀取歷史"""
+        conn = psycopg2.connect(self.db_url)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT history FROM ai_memory WHERE channel_id = %s", (channel_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row['history'] if row else []
+
+    def _save_db_history(self, channel_id, history):
+        """將歷史儲存至資料庫"""
+        serializable = []
+        for content in history:
+            serializable.append({
+                "role": content.role,
+                "parts": [{"text": part.text} for part in content.parts]
+            })
         
-        self.generation_config = {
-            "temperature": 0.9,
-            "top_p": 1,
-            "top_k": 1,
-            "max_output_tokens": 2048,
-        }
-        
-        self.model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            generation_config=self.generation_config
-        )
+        conn = psycopg2.connect(self.db_url)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO ai_memory (channel_id, history) 
+            VALUES (%s, %s)
+            ON CONFLICT (channel_id) 
+            DO UPDATE SET history = EXCLUDED.history;
+        """, (channel_id, json.dumps(serializable)))
+        conn.commit()
+        cur.close()
+        conn.close()
 
     @app_commands.command(name="ai_chat", description="開啟或關閉本頻道的 AI 自動對話功能")
     @app_commands.describe(action="選擇開啟或關閉")
@@ -35,62 +72,43 @@ class GeminiSystem(commands.Cog):
         app_commands.Choice(name="關閉", value="disable")
     ])
     async def ai_chat(self, interaction: Interaction, action: str):
-        # 權限檢查：管理員或 MIMIC_USER_IDS 名單
         is_special = interaction.user.id in getattr(self.bot, 'MIMIC_USER_IDS', [])
         if not interaction.user.guild_permissions.administrator and not is_special:
-            return await interaction.response.send_message("❌ 你沒有權限設定此功能", ephemeral=True)
+            return await interaction.response.send_message("❌ 權限不足", ephemeral=True)
 
         if action == "enable":
-            # 初始化該頻道的對話 (開啟新對話)
-            self.ai_chats[interaction.channel_id] = self.model.start_chat(history=[])
+            history = self._load_db_history(interaction.channel_id)
+            self.ai_chats[interaction.channel_id] = self.model.start_chat(history=history)
             
-            # 按照你的要求設定啟動訊息
+            status = "📚 已恢復永久記憶" if history else "🆕 已開啟新對話"
             await interaction.response.send_message(
-                "✨ **本頻道已啟用 AI 對話功能**\n"
-                "💡 說話會有 AI 回你，就像開啟一個新對話。\n"
-                "📌 若不想讓機器人回覆，請在訊息開頭使用 `-`。\n"
-                "🤖 AI 提供: `Gemini (Google AI)`"
+                f"✨ **本頻道已啟用 AI 對話功能 ({status})**\n"
+                f"📌 開頭使用 `-` 可跳過 AI 回覆。\n"
+                f"🤖 AI 提供: `Gemini (Google AI)`"
             )
         else:
-            if interaction.channel_id in self.ai_chats:
-                del self.ai_chats[interaction.channel_id]
-                await interaction.response.send_message("❌ 本頻道已停用 AI 對話功能。", ephemeral=True)
-            else:
-                await interaction.response.send_message("⚠️ 本頻道原本就未開啟 AI 功能。", ephemeral=True)
+            self.ai_chats.pop(interaction.channel_id, None)
+            await interaction.response.send_message("❌ 已停用 AI 對話 (記憶已安全存入資料庫)。", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # 1. 排除機器人自己
-        if message.author.bot:
-            return
-        
-        # 2. 檢查該頻道是否在啟用名單中
-        if message.channel.id not in self.ai_chats:
-            return
-        
-        # 3. 排除開頭為 "-" 的訊息
-        if message.content.startswith("-"):
+        if message.author.bot or message.channel.id not in self.ai_chats or message.content.startswith("-"):
             return
 
-        # 取得該頻道的 Session
         chat_session = self.ai_chats[message.channel_id]
 
-        # 顯示正在輸入中
         async with message.channel.typing():
             try:
-                # 呼叫 Gemini API (非同步執行避免卡頓)
                 response = await self.bot.loop.run_in_executor(
                     None, lambda: chat_session.send_message(message.content)
                 )
                 
                 if response.text:
-                    # 分割長訊息 (Discord 限制 2000 字)
-                    reply_text = response.text[:2000]
-                    await message.reply(reply_text)
-                    
+                    await message.reply(response.text[:2000])
+                    # 每次對話完同步更新資料庫
+                    self._save_db_history(message.channel.id, chat_session.history)
             except Exception as e:
-                # 錯誤處理 (例如 API 限制或內容過濾)
-                print(f"Gemini System Error: {e}")
+                print(f"PostgreSQL/Gemini Error: {e}")
 
 async def setup(bot):
     await bot.add_cog(GeminiSystem(bot))
