@@ -74,22 +74,7 @@ TOKEN = os.getenv("DISCORD_TOKEN") # 確保你的環境變數名稱是對應的
 if not TOKEN:
     raise ValueError("找不到 DISCORD_TOKEN 環境變數！")
 
-# =========================
-# -- Intents 設定 (必備權限)
-# =========================
-intents = discord.Intents.default()
 
-# 1. 客服系統需要：讀取用戶私訊與指令內容
-intents.message_content = True  
-
-# 2. 客服系統需要：取得用戶資訊 (如 ID、名稱)
-intents.members = True          
-
-# 3. 音樂系統需要：偵測語音頻道狀態 (進出頻道、播放狀態)
-intents.voice_states = True     
-
-# 4. 基礎運行需要：接收伺服器相關事件
-intents.guilds = True           
 
 # =========================
 # Utils & Shared State
@@ -122,18 +107,27 @@ HUNDRED_PERCENT_IDS = [1343900739407319070,1227927780231090177]
 SIXTY_NINE_IDS = [1358791121697898548] 
 ADMINISTRATOR_PERMISSION = 0x00000008  # administrator bit
 # =========================
-# Bot + Intents
+# Bot + Intents (修正版)
 # =========================
 intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
+
+# 1. 客服與 AI 系統需要：讀取訊息內容 (這行最重要！)
+intents.message_content = True  
+
+# 2. 客服系統需要：取得用戶資訊
+intents.members = True          
+
+# 3. 音樂系統需要：偵測語音頻道狀態
+intents.voice_states = True     
+
+# 4. 基礎運行需要：接收伺服器相關事件
+intents.guilds = True
+
+# 🔴 確保 bot 的初始化放在所有 intents 設定的「最後面」
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
-
-# We'll keep a reference to asyncio loop for Flask -> Discord threadsafe calls
-discord_loop = None
 
 # =========================
 # Helper: safe send DM
