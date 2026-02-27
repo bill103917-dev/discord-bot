@@ -14,6 +14,7 @@ from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
 from utils.config_manager import load_support_config, save_support_config
 import discord
+from cogs.gemini_system import GeminiSystem 
 from discord.ext import commands, tasks
 from discord import app_commands, ui, Interaction, TextChannel
 from flask import Flask, session, request, render_template, redirect, url_for, jsonify
@@ -1343,7 +1344,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-         ImageDrawCog, ScheduledUploadCog, BackupSystem
+         ImageDrawCog, ScheduledUploadCog, BackupSystem, GeminiSystem
     ]
 #暫時刪除VoiceCog
 
