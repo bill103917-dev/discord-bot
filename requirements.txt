@@ -12,3 +12,4 @@ cryptography>=41.0.0
 google-genai
 typing-extensions
 psycopg2-binary
+PyNaCl
