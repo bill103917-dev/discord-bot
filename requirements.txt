@@ -13,3 +13,4 @@ google-genai
 typing-extensions
 psycopg2-binary
 PyNaCl
+discord.py
