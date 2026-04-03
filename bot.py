@@ -1338,9 +1338,9 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-         ImageDrawCog, ScheduledUploadCog, BackupSystem, VoiceCog
+         ImageDrawCog, ScheduledUploadCog, BackupSystem
     ]
-#暫時刪除GeminiSystem
+#暫時刪除GeminiSystem, VoiceCog
 
     for cog in cog_list:
         try:
