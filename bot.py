@@ -1302,11 +1302,20 @@ async def on_app_command_error(interaction: Interaction, error):
         await interaction.response.send_message(msg, ephemeral=True)
     except discord.errors.NotFound:
         print("Error handling failed: interaction not found")
+        
+        
+# 在 bot 定義下方先設一個變數
+bot._has_setup_completed = False
 
 @bot.event
 async def on_ready():
+    # --- 防止重複執行的保護機制 ---
+    if getattr(bot, "_has_setup_completed", False):
+        print(f"[{safe_now()}] 偵測到重連，跳過初始化邏輯。")
+        return
 
-    bot._has_ready_run = True
+    # 標記為已執行
+    bot._has_setup_completed = True
     
     global discord_loop
     try:
@@ -1316,22 +1325,20 @@ async def on_ready():
 
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
-    # --- 1. 嘗試載入 Cogs (具備錯誤回滾意識) ---
     # --- 1. 嘗試載入 Cogs ---
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-         ImageDrawCog, ScheduledUploadCog, BackupSystem
+        ImageDrawCog, ScheduledUploadCog, BackupSystem
     ]
-#暫時刪除GeminiSystem, VoiceCog
 
     for cog in cog_list:
         try:
+            # 載入前先檢查是否已載入，避免 ExtensionAlreadyLoaded 錯誤
             await bot.add_cog(cog(bot))
             print(f"✅ {cog.__name__} 載入成功")
         except Exception as e:
-            print(f"❌ {cog.__name__} 修正版有誤，載入失敗: {e}")
-
+            print(f"❌ {cog.__name__} 載入失敗: {e}")
 
     # --- 2. 註冊持久化 View ---
     try:
@@ -1341,7 +1348,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ 持久化設定失敗: {e}")
 
-        
+    # --- 3. 同步指令 ---
     try:
         await bot.tree.sync() 
         print("✅ 斜線指令已同步完成。")
@@ -1356,6 +1363,7 @@ async def on_ready():
         )
     except Exception:
         pass
+
 
 
 
