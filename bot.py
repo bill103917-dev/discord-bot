@@ -699,20 +699,6 @@ class UtilityCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ 執行失敗: {e}", ephemeral=True)
 
-        
-        
-    @app_commands.command(name="sync", description="手動同步指令（僅管理員）")
-    async def sync_tree(self, interaction: Interaction):
-        if interaction.user.id not in SPECIAL_USER_IDS:
-             return await interaction.response.send_message("❌ 你沒有權限", ephemeral=True)
-        
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await self.bot.tree.sync()
-            await interaction.followup.send("✅ 指令同步完成！")
-        except Exception as e:
-            await interaction.followup.send(f"❌ 同步失敗: {e}")
-
 
     @app_commands.command(name="announce", description="發布公告（管理員限定）")
     async def announce(self, interaction: Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
@@ -1319,9 +1305,7 @@ async def on_app_command_error(interaction: Interaction, error):
 
 @bot.event
 async def on_ready():
-    # 避免重複觸發初始化
-    if getattr(bot, "_has_ready_run", False):
-        return
+
     bot._has_ready_run = True
     
     global discord_loop
@@ -1347,7 +1331,7 @@ async def on_ready():
             print(f"✅ {cog.__name__} 載入成功")
         except Exception as e:
             print(f"❌ {cog.__name__} 修正版有誤，載入失敗: {e}")
-            traceback.print_exc()
+
 
     # --- 2. 註冊持久化 View ---
     try:
