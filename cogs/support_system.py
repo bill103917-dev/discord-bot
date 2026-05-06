@@ -201,15 +201,37 @@ class SupportCog(commands.Cog):
 
     async def init_db(self):
         try:
-            self.pool = await asyncpg.create_pool(self.db_url, min_size=1, max_size=3)
+            # 修正 Render 的資料庫網址格式
+            if not self.db_url:
+                print("❌ 錯誤: 找不到環境變數 DATABASE_URL")
+                return
+                
+            url = self.db_url.replace("postgres://", "postgresql://", 1)
+            
+            # 建立連線池
+            self.pool = await asyncpg.create_pool(
+                url, 
+                min_size=1, 
+                max_size=3,
+                command_timeout=60
+            )
+            
             async with self.pool.acquire() as conn:
                 await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
                 await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
+                
                 rows = await conn.fetch('SELECT * FROM support_configs')
-                for r in rows: self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
+                for r in rows: 
+                    self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
+                
                 t_rows = await conn.fetch('SELECT * FROM user_targets')
-                for tr in t_rows: self.user_target_guild[tr['user_id']] = tr['guild_id']
-        except Exception as e: print(f"❌ DB Error: {e}")
+                for tr in t_rows: 
+                    self.user_target_guild[tr['user_id']] = tr['guild_id']
+            print("✅ 資料庫初始化成功並已載入設定")
+        except Exception as e: 
+            print(f"❌ 資料庫初始化失敗: {e}")
+            self.pool = None
+
 
     async def reply_view_stop_callback(self, interaction: Interaction):
         """處理管理端按下已處理的確認邏輯"""
