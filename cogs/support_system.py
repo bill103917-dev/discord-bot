@@ -289,23 +289,44 @@ class SupportCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or message.guild: return
-        if self._cd_mapping.get_bucket(message).update_rate_limit(): return
+        # 排除機器人與群組訊息
+        if message.author.bot or message.guild: 
+            return
+            
+        # 冷卻檢查
+        bucket = self._cd_mapping.get_bucket(message)
+        if bucket.update_rate_limit(): 
+            return
+            
         uid = message.author.id
         tid = self.user_target_guild.get(uid)
-        if tid in self.support_config:
+        
+        # 檢查是否有對應伺服器設定
+        if tid and tid in self.support_config:
             guild = self.bot.get_guild(tid)
             config = self.support_config.get(tid)
-            if not guild or not (chan := guild.get_channel(config[0])): return
-            embed = discord.Embed(title=f"❓ 來自 {message.author.name}", description=f"**訊息內容:**\n```\n{message.content[:1500]}\n```", color=0xf1c40f)
+            if not guild: return
+            
+            chan = guild.get_channel(config[0])
+            if not chan: return
+            
+            embed = discord.Embed(
+                title=f"❓ 來自 {message.author.name}", 
+                description=f"**訊息內容:**\n```\n{message.content[:1500]}\n```", 
+                color=0xf1c40f
+            )
             embed.set_footer(text=f"User ID: {uid} | {safe_now()}")
-            view = ReplyView(self)
+            
+            # 這裡強烈建議在 main.py 註冊 ReplyView 為持久化視圖
+            view = ReplyView(self) 
             mention = f"<@&{config[1]}>" if config[1] else "@here"
             await chan.send(content=mention, embed=embed, view=view)
-            await message.author.send(f"✅ 已送達 **{guild.name}**。")
+            await message.author.send(f"✅ 訊息已送達 **{guild.name}** 管理端。")
         else:
+            # 如果還沒選擇過伺服器
             view = ServerSelectView(self.bot, uid, self)
-            if view.children: await message.channel.send("📞 請選擇伺服器：", view=view)
+            if len(view.children) > 0:
+                await message.channel.send("📞 請選擇您要聯絡的伺服器：", view=view)
 
 class ServerSelectView(ui.View):
     def __init__(self, bot, user_id, cog):
