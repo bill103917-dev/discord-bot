@@ -200,37 +200,58 @@ class SupportCog(commands.Cog):
         await self.init_db()
 
     async def init_db(self):
+        """初始化資料庫連線池並建立必要的資料表"""
+        if not self.db_url:
+            print("❌ [錯誤] 找不到環境變數 DATABASE_URL。請在 Render 的 Environment Variables 設定它。")
+            return
+
         try:
-            # 修正 Render 的資料庫網址格式
-            if not self.db_url:
-                print("❌ 錯誤: 找不到環境變數 DATABASE_URL")
-                return
-                
-            url = self.db_url.replace("postgres://", "postgresql://", 1)
-            
-            # 建立連線池
+            # 1. 修正網址格式 (Render 預設是 postgres://，但 asyncpg 只認 postgresql://)
+            adjusted_url = self.db_url.replace("postgres://", "postgresql://", 1)
+
+            # 2. 建立連線池 (加入 ssl='require' 以確保能連上 Render 的資料庫)
             self.pool = await asyncpg.create_pool(
-                url, 
-                min_size=1, 
+                adjusted_url,
+                min_size=1,
                 max_size=3,
+                ssl='require', # Render 資料庫通常需要 SSL
                 command_timeout=60
             )
-            
+
+            # 3. 測試連線並確保資料表存在
             async with self.pool.acquire() as conn:
-                await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
-                await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
+                # 建立設定表 (儲存轉發頻道與身份組)
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS support_configs (
+                        guild_id BIGINT PRIMARY KEY,
+                        channel_id BIGINT,
+                        role_id BIGINT
+                    )
+                ''')
                 
-                rows = await conn.fetch('SELECT * FROM support_configs')
-                for r in rows: 
+                # 建立目標表 (儲存使用者對應的伺服器)
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS user_targets (
+                        user_id BIGINT PRIMARY KEY,
+                        guild_id BIGINT
+                    )
+                ''')
+                
+                # 4. 預載數據到記憶體 (優化 Bot 反應速度)
+                config_rows = await conn.fetch('SELECT * FROM support_configs')
+                for r in config_rows:
                     self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
                 
-                t_rows = await conn.fetch('SELECT * FROM user_targets')
-                for tr in t_rows: 
+                target_rows = await conn.fetch('SELECT * FROM user_targets')
+                for tr in target_rows:
                     self.user_target_guild[tr['user_id']] = tr['guild_id']
-            print("✅ 資料庫初始化成功並已載入設定")
-        except Exception as e: 
-            print(f"❌ 資料庫初始化失敗: {e}")
-            self.pool = None
+                    
+            print("✅ [資料庫] 初始化成功，設定已載入記憶體。")
+
+        except Exception as e:
+            print(f"❌ [資料庫] 初始化失敗：{e}")
+            self.pool = None  # 確保失敗時 pool 為 None，避免後續指令發生 AttributeError
+
 
 
     async def reply_view_stop_callback(self, interaction: Interaction):
@@ -303,11 +324,32 @@ class SupportCog(commands.Cog):
     @app_commands.command(name="set_support_channel", description="設定轉發頻道")
     @app_commands.default_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
+        # 1. 先讓 Discord 知道我們正在處理中，避免 3 秒過期
+        await interaction.response.defer(ephemeral=True)
+
+        # 2. 檢查連線池狀態
+        if self.pool is None:
+            await self.init_db()
+            if self.pool is None:
+                # 這裡要用 followup，因為前面 defer 過了
+                return await interaction.followup.send("❌ 無法連線至資料庫，請檢查 Render 環境變數。", ephemeral=True)
+
         gid, cid, rid = interaction.guild.id, channel.id, (role.id if role else None)
         self.support_config[gid] = (cid, rid)
-        async with self.pool.acquire() as conn:
-            await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', gid, cid, rid)
-        await interaction.response.send_message(f"✅ 已設定 {channel.mention}為轉發頻道", ephemeral=True)
+        
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    'INSERT INTO support_configs (guild_id, channel_id, role_id) VALUES ($1,$2,$3) '
+                    'ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', 
+                    gid, cid, rid
+                )
+            # 3. 成功後使用 followup 發送結果
+            await interaction.followup.send(f"✅ 已設定 {channel.mention} 為轉發頻道", ephemeral=True)
+        except Exception as e:
+            print(f"❌ 寫入資料庫失敗: {e}")
+            await interaction.followup.send(f"❌ 寫入資料庫失敗，錯誤已記錄在 Log。", ephemeral=True)
+
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
