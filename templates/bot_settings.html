@@ -1,57 +1,199 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
-    <title>機器人核心設定</title>
+    <meta charset="UTF-8">
+    <title>機器人核心控制台 - 我是機器人</title>
     <style>
-        .control-panel { background: #2c2f33; padding: 20px; border-radius: 8px; color: white; margin-bottom: 20px; }
-        .log-box { background: #000; color: #0f0; padding: 15px; height: 300px; overflow-y: auto; font-family: monospace; }
-        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; color: white; }
-        .btn-green { background: #43b581; }
-        .btn-yellow { background: #faa61a; }
-        .btn-red { background: #f04747; }
-        .btn-gray { background: #747f8d; }
+        /* 基礎設置 - 沿用你的 Dashboard 風格 */
+        body {
+            font-family: 'Noto Sans CJK TC', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2f3136;
+            color: #dcddde;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 左側邊欄 */
+        .sidebar {
+            width: 280px;
+            background-color: #202225;
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+        
+        .logo-section {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; margin-right: 10px; }
+        .logo-icon img { width: 100%; height: 100%; object-fit: cover; }
+        .logo-text { font-size: 24px; font-weight: bold; color: #fff; }
+
+        .sidebar-nav ul { list-style-type: none; padding: 0; margin: 0; }
+        .sidebar-nav li { margin-bottom: 10px; }
+        .sidebar-nav a {
+            display: flex; align-items: center; padding: 12px 15px; text-decoration: none;
+            color: #b9bbbe; border-radius: 6px; transition: 0.2s; font-size: 16px;
+        }
+        .sidebar-nav a:hover { background-color: #36393f; color: #fff; }
+        .sidebar-nav .icon { margin-right: 15px; font-size: 20px; width: 24px; text-align: center; }
+
+        /* 底部用戶面板 */
+        .user-panel {
+            background-color: #23272a; padding: 15px; border-radius: 8px;
+            display: flex; align-items: center; margin-top: 20px;
+        }
+        .user-avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; }
+        .user-details h3 { margin: 0; font-size: 15px; color: #fff; }
+        .user-details p { margin: 0; font-size: 13px; color: #b9bbbe; }
+        .logout-btn { background: none; border: none; color: #dcddde; font-size: 18px; cursor: pointer; text-decoration: none; margin-left: 10px; }
+
+        /* 主內容區 */
+        .main-content { flex-grow: 1; padding: 40px; overflow-y: auto; }
+
+        /* 區塊卡片樣式 */
+        .card {
+            background-color: #36393f;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .card h2 { margin-top: 0; color: #fff; font-size: 22px; display: flex; align-items: center; gap: 10px; }
+
+        /* 狀態按鈕群組 */
+        .status-group { display: flex; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+        
+        .btn {
+            padding: 12px 20px; border-radius: 6px; border: none; cursor: pointer;
+            font-weight: bold; font-size: 15px; transition: 0.2s; color: white;
+        }
+        .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+
+        .btn-online { background-color: #43b581; }
+        .btn-idle { background-color: #faa61a; }
+        .btn-dnd { background-color: #f04747; }
+        .btn-offline { background-color: #747f8d; }
+        .btn-primary { background-color: #5865f2; }
+
+        /* 輸入框樣式 */
+        .input-box {
+            width: 100%; max-width: 500px; padding: 12px; border-radius: 6px;
+            border: 1px solid #202225; background-color: #202225; color: #fff;
+            font-size: 16px; margin-right: 10px;
+        }
+
+        /* 日誌區域 */
+        .log-area {
+            background-color: #000; color: #00ff00; padding: 15px;
+            border-radius: 8px; height: 300px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 13px; line-height: 1.5;
+            border: 1px solid #4f545c;
+        }
+
+        .flex-row { display: flex; align-items: center; gap: 10px; margin-top: 15px; }
     </style>
 </head>
 <body>
-    <div class="control-panel">
-        <h2>🎮 機器人狀態控制</h2>
+    <div class="sidebar">
         <div>
-            狀態：
-            <button onclick="updateStatus('online')" class="btn btn-green">線上</button>
-            <button onclick="updateStatus('idle')" class="btn btn-yellow">閒置</button>
-            <button onclick="updateStatus('dnd')" class="btn btn-red">請勿打擾</button>
-            <button onclick="updateStatus('offline')" class="btn btn-gray">離線</button>
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <img src="{{ url_for('static', filename='flork_logo.png') }}" alt="Logo">
+                </div>
+                <div class="logo-text">我是機器人</div>
+            </div>
+            <div class="sidebar-nav">
+                <ul>
+                    <li><a href="{{ url_for('index') }}"><span class="icon">🏠</span> 選擇伺服器</a></li>
+                    <li><a href="https://discord.com/oauth2/authorize?client_id={{ DISCORD_CLIENT_ID }}&permissions=8&scope=bot" target="_blank"><span class="icon">➕</span> 邀請機器人</a></li>
+                    {% if is_special_user %}
+                    <li><a href="{{ url_for('bot_settings_page') }}" style="background-color: #36393f; color: #fff;"><span class="icon">🤖</span> 機器人設定</a></li>
+                    <li><a href="{{ url_for('all_guild_logs') }}"><span class="icon">📜</span> 全域日誌</a></li>
+                    {% endif %}
+                </ul>
+            </div>
         </div>
-        <br>
-        <div>
-            正在玩：<input type="text" id="activity_input" placeholder="例如：聽 /help">
-            <button onclick="updateStatus('online')" class="btn" style="background:#5865F2">更新文字</button>
+
+        <div class="user-panel">
+            {% if user.avatar %}
+                <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" alt="Avatar" class="user-avatar">
+            {% else %}
+                <img src="https://cdn.discordapp.com/embed/avatars/0.png" alt="Default Avatar" class="user-avatar">
+            {% endif %}
+            <div class="user-details">
+                <h3>{{ user.username }}</h3>
+                <p>#{{ user.discriminator }}</p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="logout-btn">✕</a>
         </div>
     </div>
 
-    <div class="control-panel">
-        <h2>📜 Render 運行日誌</h2>
-        <div id="log_content" class="log-box">正在讀取日誌...</div>
+    <div class="main-content">
+        <h1 style="color: #fff; margin-bottom: 30px;">⚙️ 機器人核心控制面板</h1>
+
+        <div class="card">
+            <h2>🔮 機器人燈號與活動狀態</h2>
+            <p style="color: #b9bbbe;">選取機器人在 Discord 上顯示的燈號：</p>
+            <div class="status-group">
+                <button onclick="updateBot('online')" class="btn btn-online">🟢 線上 (Online)</button>
+                <button onclick="updateBot('idle')" class="btn btn-idle">🟡 閒置 (Idle)</button>
+                <button onclick="updateBot('dnd')" class="btn btn-dnd">🔴 請勿打擾 (DnD)</button>
+                <button onclick="updateBot('offline')" class="btn btn-offline">⚪ 隱身 (Invisible)</button>
+            </div>
+
+            <p style="color: #b9bbbe; margin-top: 25px;">自定義動態文字（例如：聽 /help）：</p>
+            <div class="flex-row">
+                <input type="text" id="activity_input" class="input-box" placeholder="輸入要顯示的內容...">
+                <button onclick="updateBot('current')" class="btn btn-primary">更新文字</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📜 系統運行日誌 (Live Logs)</h2>
+            <div id="log-screen" class="log-area">正在連線至伺服器讀取日誌...</div>
+        </div>
     </div>
 
     <script>
-        function updateStatus(status) {
-            const activity = document.getElementById('activity_input').value;
+        // 更新狀態與文字
+        function updateBot(statusType) {
+            const actText = document.getElementById('activity_input').value;
             fetch('/api/bot/update_status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({status: status, activity: activity})
-            }).then(res => res.json()).then(data => alert(data.message));
+                body: JSON.stringify({ status: statusType, activity: actText })
+            })
+            .then(res => res.json())
+            .then(data => alert("✅ " + data.message))
+            .catch(err => alert("❌ 錯誤: " + err));
         }
 
-        // 自動刷新日誌邏輯 (每 3 秒抓一次)
-        setInterval(() => {
-            fetch('/get_raw_logs').then(res => res.text()).then(data => {
-                const box = document.getElementById('log_content');
-                box.textContent = data;
-                box.scrollTop = box.scrollHeight;
-            });
-        }, 3000);
+        // 即時讀取日誌
+        function fetchLogs() {
+            fetch('/get_raw_logs')
+                .then(res => res.text())
+                .then(data => {
+                    const logScreen = document.getElementById('log-screen');
+                    logScreen.textContent = data;
+                    logScreen.scrollTop = logScreen.scrollHeight; // 自動滾動到底部
+                });
+        }
+
+        // 每 3 秒更新一次日誌
+        setInterval(fetchLogs, 3000);
+        window.onload = fetchLogs;
     </script>
 </body>
 </html>
