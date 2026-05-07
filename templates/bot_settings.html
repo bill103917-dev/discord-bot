@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>機器人核心設定</title>
+    <style>
+        .control-panel { background: #2c2f33; padding: 20px; border-radius: 8px; color: white; margin-bottom: 20px; }
+        .log-box { background: #000; color: #0f0; padding: 15px; height: 300px; overflow-y: auto; font-family: monospace; }
+        .btn { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; color: white; }
+        .btn-green { background: #43b581; }
+        .btn-yellow { background: #faa61a; }
+        .btn-red { background: #f04747; }
+        .btn-gray { background: #747f8d; }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <h2>🎮 機器人狀態控制</h2>
+        <div>
+            狀態：
+            <button onclick="updateStatus('online')" class="btn btn-green">線上</button>
+            <button onclick="updateStatus('idle')" class="btn btn-yellow">閒置</button>
+            <button onclick="updateStatus('dnd')" class="btn btn-red">請勿打擾</button>
+            <button onclick="updateStatus('offline')" class="btn btn-gray">離線</button>
+        </div>
+        <br>
+        <div>
+            正在玩：<input type="text" id="activity_input" placeholder="例如：聽 /help">
+            <button onclick="updateStatus('online')" class="btn" style="background:#5865F2">更新文字</button>
+        </div>
+    </div>
+
+    <div class="control-panel">
+        <h2>📜 Render 運行日誌</h2>
+        <div id="log_content" class="log-box">正在讀取日誌...</div>
+    </div>
+
+    <script>
+        function updateStatus(status) {
+            const activity = document.getElementById('activity_input').value;
+            fetch('/api/bot/update_status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: status, activity: activity})
+            }).then(res => res.json()).then(data => alert(data.message));
+        }
+
+        // 自動刷新日誌邏輯 (每 3 秒抓一次)
+        setInterval(() => {
+            fetch('/get_raw_logs').then(res => res.text()).then(data => {
+                const box = document.getElementById('log_content');
+                box.textContent = data;
+                box.scrollTop = box.scrollHeight;
+            });
+        }, 3000);
+    </script>
+</body>
+</html>
