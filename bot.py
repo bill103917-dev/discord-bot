@@ -1736,6 +1736,41 @@ def notifications_modal(guild_id):
         # 捕獲所有其他非預期錯誤
         return f"❌ 載入設定失敗！錯誤：在處理資料時發生意外錯誤。訊息: {e}", 500
 
+# --------------------------
+# 🤖 機器人控制路由
+# --------------------------
+
+@app.route("/bot/settings")
+def bot_settings_page():
+    user_data = session.get("discord_user")
+    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+        return "❌ 權限不足：只有指定開發者可以存取此頁面。", 403
+    return render_template('bot_settings.html')
+
+@app.route("/api/bot/update_status", methods=['POST'])
+def update_bot_status():
+    data = request.json
+    status_type = data.get('status') # online, idle, dnd, offline
+    activity_text = data.get('activity') # 想要顯示的文字
+    
+    # 轉換狀態
+    status_map = {
+        'online': discord.Status.online,
+        'idle': discord.Status.idle,
+        'dnd': discord.Status.dnd,
+        'offline': discord.Status.invisible
+    }
+    
+    selected_status = status_map.get(status_type, discord.Status.online)
+    activity = discord.Game(name=activity_text)
+    
+    # 使用 run_coroutine_threadsafe 讓 Bot 執行動作
+    asyncio.run_coroutine_threadsafe(
+        bot.change_presence(status=selected_status, activity=activity),
+        discord_loop
+    )
+    return jsonify({"success": True, "message": "狀態已更新"})
+
 # 日誌
 @app.route("/logs/all")
 def all_guild_logs():
