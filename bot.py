@@ -1859,29 +1859,12 @@ def keep_web_alive():
     t.start()
     print("Flask Web 已啟動於背景線程。")
 
-import traceback
-import logging
 
-import asyncio
-import discord
-from discord.ext import commands
-import logging
-import aiohttp
-import os
-import sys
-
-# ==========================================
-# 1. 強化版日誌配置 (精確追蹤握手)
-# ==========================================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('HandshakeDiagnose')
-
-# ==========================================
-# 2. 完整 start_bot 函式
-# ==========================================
-async def start_bot():
+# =========================
+# 📡 精確診斷版啟動函式
+# =========================
+async def start_bot_diagnose():
     """
-    精確診斷版啟動函式
     追蹤流程：TCP建立 -> HTTP握手 -> Token驗證 -> Gateway連接
     """
     retry_count = 0
@@ -1889,41 +1872,37 @@ async def start_bot():
     
     while retry_count < max_retries:
         try:
-            # 🚨 A. 強制清理舊連線 (預防 1015/Unclosed Session)
+            # A. 清理舊連線防止 Session 殘留
             if bot.http.connector:
                 await bot.http.close()
-            await bot.close()
-            await asyncio.sleep(2)
-
+            
             logger.info(f"📡 [嘗試 {retry_count + 1}] 開始 Discord 握手流程...")
 
-            # 🚨 B. 建立追蹤配置 (捕捉 aiohttp 異常)
+            # B. 建立 aiohttp 追蹤配置
             trace_config = aiohttp.TraceConfig()
             
             async def on_request_start(session, context, params):
-                logger.info(f"🚀 [步驟 1/3] 發送 HTTP 請求至 Discord: {params.method} {params.url}")
+                logger.info(f"🚀 [步驟 1/3] 發送 HTTP 請求: {params.method} {params.url}")
             
             async def on_request_exception(session, context, params):
-                logger.error(f"❌ [握手中斷] 請求發生異常: {params.exception}")
+                logger.error(f"❌ [握手中斷] 請求異常: {params.exception}")
             
             trace_config.on_request_start.append(on_request_start)
             trace_config.on_request_exception.append(on_request_exception)
 
-            # 🚨 C. 嘗試登入 (Token 驗證階段)
+            # C. Token 驗證階段 (Login)
             logger.info("🔑 [步驟 2/3] 正在驗證 Token...")
             await bot.login(TOKEN)
             logger.info("✅ Token 驗證成功！")
 
-            # 🚨 D. 建立 Gateway 連線 (WebSocket 階段)
+            # D. WebSocket 連接階段 (Connect)
             logger.info("🌐 [步驟 3/3] 嘗試連接 Discord Gateway...")
             await bot.connect()
             break
 
         except discord.errors.HTTPException as e:
-            # 這裡能精確捕捉 1015 (Rate Limit)
             if e.status == 1015 or e.status == 429:
                 logger.error(f"🛑 [連線拒絕] 錯誤 1015: Render IP 被 Discord 限速。")
-                logger.error(f"具體訊息: {e.text}")
                 wait_time = 300 * (retry_count + 1)
                 logger.warning(f"⏰ 等待 {wait_time} 秒後重試...")
                 await asyncio.sleep(wait_time)
@@ -1933,36 +1912,46 @@ async def start_bot():
                 break
                 
         except aiohttp.ClientConnectorError as e:
-            logger.error(f"❌ [網路錯誤] 無法建立連線 (可能是 DNS 或網路阻斷): {e}")
+            logger.error(f"❌ [網路錯誤] 連線失敗 (DNS 或網路阻斷): {e}")
             await asyncio.sleep(20)
             retry_count += 1
             
         except Exception as e:
             logger.error(f"💥 [崩潰] 發生未預期錯誤: {type(e).__name__}: {e}")
-            import traceback
             logger.error(traceback.format_exc())
             await asyncio.sleep(20)
             retry_count += 1
 
-# ==========================================
-# 修正後的進入點：將隨機延遲與連線優化
-# ==========================================
+# =========================
+# 🚀 程式進入點
+# =========================
 if __name__ == "__main__":
-    # 1. 啟動 Flask (保持不變)
+    # 1. 檢查 Token 是否存在
+    if not TOKEN:
+        logger.critical("❌ 找不到 TOKEN 環境變數，請在 Render 設定中添加。")
+        sys.exit(1)
+
+    # 2. 啟動 Flask
     keep_web_alive() 
 
-    # 2. 給環境一點「呼吸時間」
-    # 讓 Flask 先穩定下來並通過 Render 的初步檢測
-    import time
+    # 3. 給環境一點「呼吸時間」以通過 Render 的 Port 檢測
     time.sleep(5) 
 
+    # 4. 執行非同步啟動
+    loop = asyncio.get_event_loop()
     try:
-        # 3. 直接使用 bot.run，內建了自動重連與更穩定的連線管理
-        # bot.run 會自動處理 login 和 connect，且出錯時的重連機制更符合 Discord 規範
-        bot.run(TOKEN)
-    except discord.errors.HTTPException as e:
-        if e.status == 1015:
-            logger.error("🛑 偵測到 1015！目前的 IP 已被暫時封鎖。")
-            logger.error("建議：請將 Render 服務暫停 1 小時，或更換 Region。")
+        # 使用你定義的診斷函式取代 bot.run()
+        loop.run_until_complete(start_bot_diagnose())
+    except KeyboardInterrupt:
+        logger.info("🛑 收到停止訊號，正在關閉機器人...")
+        loop.run_until_complete(bot.close())
     except Exception as e:
-        logger.critical(f"🚨 啟動失敗: {e}")
+        logger.critical(f"🚨 啟動過程發生嚴重錯誤: {e}")
+        traceback.print_exc()
+    finally:
+        # 確保清理資源
+        if not bot.is_closed():
+            loop.run_until_complete(bot.close())
+        loop.close()
+        logger.info("👋 系統已安全退出。")
+
