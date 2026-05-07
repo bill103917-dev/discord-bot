@@ -7,6 +7,7 @@ import asyncio
 import re
 from typing import Dict, Tuple, Optional
 from datetime import datetime
+import aiohttp
 
 # =========================
 # -- 工具與基礎設定
