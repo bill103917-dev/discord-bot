@@ -5,6 +5,7 @@ import json
 import time
 import random
 import threading
+import aiohttp
 import asyncio
 import traceback
 import discord
