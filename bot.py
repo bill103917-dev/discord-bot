@@ -1754,6 +1754,26 @@ def bot_settings_page():
                            is_special_user=True, 
                            DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
+
+@app.route("/get_raw_logs")
+def get_raw_logs():
+    user_data = session.get("discord_user")
+    # 安全檢查：只有你（開發者）可以看日誌
+    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+        return "權限不足", 403
+
+    log_path = "bot.log"  # 👈 這裡要填入你機器人產生日誌的檔名
+    
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as f:
+            # 讀取最後 100 行，避免檔案太大讀不動
+            lines = f.readlines()
+            last_lines = lines[-100:] 
+            return "".join(last_lines)
+    else:
+        return "找不到日誌檔案 (bot.log)，請確認機器人是否有設定 logging 到檔案。"
+
+
 @app.route("/api/bot/update_status", methods=['POST'])
 def update_bot_status():
     data = request.json
