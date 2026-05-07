@@ -353,26 +353,21 @@ class SupportCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # 排除機器人與群組訊息
-        if message.author.bot or message.guild: 
-            return
-            
-        # 冷卻檢查
-        bucket = self._cd_mapping.get_bucket(message)
-        if bucket.update_rate_limit(): 
-            return
-            
+        if message.author.bot or message.guild: return
+        if self._cd_mapping.get_bucket(message).update_rate_limit(): return
+        
         uid = message.author.id
         tid = self.user_target_guild.get(uid)
         
-        # 檢查是否有對應伺服器設定
-        if tid and tid in self.support_config:
+        if tid in self.support_config:
             guild = self.bot.get_guild(tid)
             config = self.support_config.get(tid)
-            if not guild: return
+            if not guild or not (chan := guild.get_channel(config[0])): return
             
-            chan = guild.get_channel(config[0])
-            if not chan: return
+            # --- 新增：偵測訊息中的連結 ---
+            # 這個正規表示法會抓取訊息中的第一個網址
+            url_pattern = r'https?://[^\s]+'
+            found_url = re.search(url_pattern, message.content)
             
             embed = discord.Embed(
                 title=f"❓ 來自 {message.author.name}", 
@@ -381,16 +376,23 @@ class SupportCog(commands.Cog):
             )
             embed.set_footer(text=f"User ID: {uid} | {safe_now()}")
             
-            # 這裡強烈建議在 main.py 註冊 ReplyView 為持久化視圖
-            view = ReplyView(self) 
+            # 建立管理端按鈕
+            view = ReplyView(self)
+            
+            # 如果有找到連結，動態在 View 裡面加上一個跳轉按鈕
+            if found_url:
+                jump_url = found_url.group(0)
+                # 這裡將按鈕插入到最前面
+                link_button = ui.Button(label="點我開啟連結", url=jump_url, emoji="🔗", row=1)
+                view.add_item(link_button)
+            
             mention = f"<@&{config[1]}>" if config[1] else "@here"
             await chan.send(content=mention, embed=embed, view=view)
-            await message.author.send(f"✅ 訊息已送達 **{guild.name}** 管理端。")
+            await message.author.send(f"✅ 您的訊息已送達 **{guild.name}** 管理端。")
         else:
-            # 如果還沒選擇過伺服器
             view = ServerSelectView(self.bot, uid, self)
-            if len(view.children) > 0:
-                await message.channel.send("📞 請選擇您要聯絡的伺服器：", view=view)
+            if view.children: 
+                await message.channel.send("📞 請選擇伺服器：", view=view)
 
 class ServerSelectView(ui.View):
     def __init__(self, bot, user_id, cog):
