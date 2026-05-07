@@ -1743,9 +1743,16 @@ def notifications_modal(guild_id):
 @app.route("/bot/settings")
 def bot_settings_page():
     user_data = session.get("discord_user")
+    
+    # 檢查是否登入，且是否為特殊用戶
     if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
-        return "❌ 權限不足：只有指定開發者可以存取此頁面。", 403
-    return render_template('bot_settings.html')
+        return "❌ 權限不足", 403
+    
+    # 🚨 關鍵：必須要把 user 傳進去，HTML 才能顯示頭像跟名字
+    return render_template('bot_settings.html', 
+                           user=user_data, 
+                           is_special_user=True, 
+                           DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
 @app.route("/api/bot/update_status", methods=['POST'])
 def update_bot_status():
