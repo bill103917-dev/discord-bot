@@ -350,6 +350,29 @@ class SupportCog(commands.Cog):
             print(f"❌ 寫入資料庫失敗: {e}")
             await interaction.followup.send(f"❌ 寫入資料庫失敗，錯誤已記錄在 Log。", ephemeral=True)
 
+    @app_commands.command(name="select_server", description="選擇或切換您要發送問題的目標伺服器")
+    @app_commands.guild_only(False) # 允許在私訊使用
+    async def select_server(self, interaction: discord.Interaction):
+        # 確保指令是在私訊中使用
+        if interaction.guild is not None:
+            return await interaction.response.send_message("❌ 此指令只能在機器人私訊中使用。", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        
+        # 找出用戶所在的伺服器，且該伺服器有設定客服頻道
+        user_id = interaction.user.id
+        shared_guilds = [
+            g for g in self.bot.guilds 
+            if g.get_member(user_id) and g.id in self.support_config
+        ]
+
+        if not shared_guilds:
+            return await interaction.followup.send("❌ 找不到您加入且有開啟客服系統的伺服器。", ephemeral=True)
+
+        # 呼叫你原本就有的 ServerSelectView
+        view = ServerSelectView(self.bot, user_id, self)
+        await interaction.followup.send("📞 請從下方選單選擇目標伺服器：", view=view, ephemeral=True)
+
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -393,6 +416,7 @@ class SupportCog(commands.Cog):
             view = ServerSelectView(self.bot, uid, self)
             if view.children: 
                 await message.channel.send("📞 請選擇伺服器：", view=view)
+
 
 class ServerSelectView(ui.View):
     def __init__(self, bot, user_id, cog):
