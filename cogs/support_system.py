@@ -310,26 +310,63 @@ class SupportCog(commands.Cog):
             await self.execute_final_close(interaction.message, user_id_str, closer_name=interaction.user.display_name)
 
     async def execute_final_close(self, origin_msg, user_id, channel=None, closer_name="系統"):
+        """一則訊息到底：更新所有資訊並加上產檔連結 (完整詳細資訊版)"""
         try:
-            file_path = os.path.join(self.transcript_dir, f"transcript_{user_id}.txt")
+            file_name = f"transcript_{user_id}.txt"
+            file_path = os.path.join(self.transcript_dir, file_name)
+            
+            # 1. 產檔紀錄對話
             if channel:
-                msgs = [f"[{m.created_at}] {m.author}: {m.content}" async for m in channel.history(limit=1000, oldest_first=True)]
-                with open(file_path, "w", encoding="utf-8") as f: f.write("\n".join(msgs))
+                msgs = []
+                async for m in channel.history(limit=1000, oldest_first=True):
+                    # 過濾掉系統提示訊息，保留對話內容
+                    if m.author.bot and not m.content.startswith("✨"): continue
+                    msgs.append(f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {m.author.display_name}: {m.content}")
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(f"--- Chat Log (User ID: {user_id}) ---\n" + "\n".join(msgs))
+                
                 await channel.delete()
-            
+
+            # 2. 從原始 Embed 獲取數據 (確保資訊不遺失)
             old_embed = origin_msg.embeds[0]
+            user_name = old_embed.title.replace("❓ 來自 ", "")
+            # 解析原始內容
+            content_match = re.search(r"```\n?(.*?)\n?```", old_embed.description, re.DOTALL)
+            content = content_match.group(1) if content_match else "無法解析內容"
+            # 解析原本的發送時間
+            send_time = old_embed.footer.text.split("|")[1].strip() if "|" in old_embed.footer.text else "未知時間"
+
+            # 3. 構建「完整詳細資訊」總結 Embed
             summary_embed = discord.Embed(title="✅ 案件已處理", color=discord.Color.dark_gray())
-            summary_embed.description = f"處理人：{closer_name}\n時間：{safe_now()}"
-            summary_embed.set_footer(text=f"ID: {user_id}")
+            summary_embed.description = f"**處理人員：** {closer_name}\n**處理時間：** `{safe_now()}`"
             
-            view = ui.View()
+            summary_embed.add_field(name="👤 用戶資訊", value=f"名稱：**{user_name}**\nID：`{user_id}`", inline=True)
+            summary_embed.add_field(name="🏢 伺服器資訊", value=f"目標：**{origin_msg.guild.name}**\nID：`{origin_msg.guild.id}`", inline=True)
+            summary_embed.add_field(name="📊 案件統計", value=f"發送時間：`{send_time}`\n狀態：`已結案`", inline=False)
+            summary_embed.add_field(name="📝 原始問題回顧", value=f"```\n{content[:800]}\n```", inline=False)
+            
+            summary_embed.set_footer(text=f"處理者：{closer_name} | 案件 ID：{origin_msg.id}")
+
+            # 4. 建立按鈕 View
+            view = ui.View(timeout=None)
+            # 加上跳轉原始訊息的連結按鈕
+            jump_url = f"https://discord.com/channels/{origin_msg.guild.id}/{origin_msg.channel.id}/{origin_msg.id}"
+            view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
+
+            # 5. 上傳紀錄檔並提供下載按鈕
             if os.path.exists(file_path):
-                log_chan = self.bot.get_channel(1470291339118641253) # 請改 ID
+                log_chan = self.bot.get_channel(1470291339118641253) # 確保這裡 ID 正確
                 if log_chan:
-                    f_msg = await log_chan.send(file=discord.File(file_path))
-                    view.add_item(ui.Button(label="查看紀錄", url=f_msg.attachments[0].url))
+                    file_msg = await log_chan.send(content=f"📁 案件結案紀錄: `{user_name}` (`{user_id}`)", file=discord.File(file_path))
+                    # 將附件網址做成按鈕
+                    view.add_item(ui.Button(label="📄 下載對話紀錄", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url))
+            
+            # 最後更新原始的管理端訊息
             await origin_msg.edit(embed=summary_embed, view=view)
-        except Exception as e: print(f"❌ 結案出錯: {e}")
+            
+        except Exception as e:
+            print(f"❌ 執行結案詳細程序失敗: {e}")
 
 async def setup(bot): 
     await bot.add_cog(SupportCog(bot))
