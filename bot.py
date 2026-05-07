@@ -99,6 +99,15 @@ async def log_command(interaction, command_name: str):
     except Exception:
         print(f"[LOG] {safe_now()} - {command_name} executed (no interaction details).")
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s:%(levelname)s:%(name)s: %(message)s',
+    handlers=[
+        logging.FileHandler(filename='bot.log', encoding='utf-8', mode='a'), # 寫入檔案
+        logging.StreamHandler() # 同時顯示在終端機
+    ]
+)
+
 # Shared globals
 COMMAND_LOGS: List[Dict] = []
 SPECIAL_USER_IDS = [1238436456041676853]
