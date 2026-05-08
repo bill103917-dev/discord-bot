@@ -1282,6 +1282,13 @@ class MinesweeperTextCog(commands.Cog):
 # =========================
 # Error handling
 # =========================
+@bot.event
+async def on_message(message):
+    # 如果說話的人在黑名單裡，直接無視
+    if message.author.id in BLACKLIST_USERS:
+        return 
+    
+    await bot.process_commands(message)
 
 @bot.tree.error
 async def on_app_command_error(interaction: Interaction, error):
@@ -1748,21 +1755,41 @@ def notifications_modal(guild_id):
 # --------------------------
 # 🤖 機器人控制路由
 # --------------------------
+# 在 bot.py 最上方定義一個黑名單集合（重啟後會重置，建議之後存入檔案）
+BLACKLIST_USERS = set()
 
 @app.route("/bot/settings")
 def bot_settings_page():
     user_data = session.get("discord_user")
-    
-    # 檢查是否登入，且是否為特殊用戶
     if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
         return "❌ 權限不足", 403
-    
-    # 🚨 關鍵：必須要把 user 傳進去，HTML 才能顯示頭像跟名字
-    return render_template('bot_settings.html', 
-                           user=user_data, 
-                           is_special_user=True, 
-                           DISCORD_CLIENT_ID=DISCORD_CLIENT_ID)
 
+    # --- 📊 準備數據統計 ---
+    total_guilds = len(bot.guilds)
+    total_users = sum(g.member_count for g in bot.guilds)
+    
+    return render_template(
+        'bot_settings.html', 
+        user=user_data, 
+        is_special_user=True,
+        total_guilds=total_guilds, # 傳送數據
+        total_users=total_users,   # 傳送數據
+        DISCORD_CLIENT_ID=DISCORD_CLIENT_ID
+    )
+
+# --- 🛡️ 黑名單 API ---
+@app.route("/api/blacklist/add", methods=['POST'])
+def add_to_blacklist():
+    user_data = session.get("discord_user")
+    if not user_data or int(user_data['id']) not in SPECIAL_USER_IDS:
+        return jsonify({"success": False, "message": "權限不足"}), 403
+    
+    data = request.json
+    target_id = data.get('user_id')
+    if target_id and target_id.isdigit():
+        BLACKLIST_USERS.add(int(target_id))
+        return jsonify({"success": True, "message": f"已成功封鎖用戶 ID: {target_id}"})
+    return jsonify({"success": False, "message": "請輸入正確的數字 ID"})
 
 @app.route("/get_raw_logs")
 def get_raw_logs():
