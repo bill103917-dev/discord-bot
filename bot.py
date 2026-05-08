@@ -106,6 +106,16 @@ logging.basicConfig(
 
 logger = logging.getLogger('bot')
 
+def log_command(ctx):
+    """
+    這是一個小工具，用來格式化日誌內容。
+    它會紀錄：時間、使用者名稱、執行的指令、所在的伺服器。
+    """
+    user = ctx.author
+    command = ctx.command.name
+    guild = ctx.guild.name if ctx.guild else "私訊"
+    logging.info(f"使用者 {user} (ID: {user.id}) 在 [{guild}] 執行了指令: !{command}")
+
 
 # Shared globals
 COMMAND_LOGS: List[Dict] = []
