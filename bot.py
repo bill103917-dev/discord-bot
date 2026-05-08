@@ -86,27 +86,26 @@ def to_thread(func):
         return await asyncio.to_thread(func, *args, **kwargs)
     return wrapper
 
-async def log_command(interaction, command_name: str):
-    try:
-        guild_name = interaction.guild.name if interaction.guild else "DM"
-        guild_id = interaction.guild.id if interaction.guild else None
-        entry = {"time": safe_now(), "text": f"{interaction.user} 在 {guild_name}({guild_id}) 執行 {command_name}"}
-        COMMAND_LOGS.append(entry)
-        # keep max 200 logs
-        if len(COMMAND_LOGS) > 200:
-            COMMAND_LOGS.pop(0)
-        print(f"[LOG] {entry['time']} - {entry['text']}")
-    except Exception:
-        print(f"[LOG] {safe_now()} - {command_name} executed (no interaction details).")
 
+
+# 確保 log 檔案路徑正確
+basedir = os.path.abspath(os.path.dirname(__file__))
+log_path = os.path.join(basedir, "bot.log")
+
+# 設定 Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s:%(levelname)s:%(name)s: %(message)s',
     handlers=[
-        logging.FileHandler(filename='bot.log', encoding='utf-8', mode='a'), # 寫入檔案
-        logging.StreamHandler() # 同時顯示在終端機
+        # 1. 輸出到檔案，供網頁讀取
+        logging.FileHandler(filename=log_path, encoding='utf-8', mode='a'),
+        # 2. 輸出到控制台，供 Render 後台查看
+        logging.StreamHandler()
     ]
 )
+
+logger = logging.getLogger('bot')
+
 
 # Shared globals
 COMMAND_LOGS: List[Dict] = []
