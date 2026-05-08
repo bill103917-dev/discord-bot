@@ -10,6 +10,7 @@
             --bg-dark: #2f3136;
             --bg-sidebar: #202225;
             --discord-blue: #5865f2;
+            --text-gray: #b9bbbe;
         }
 
         * { box-sizing: border-box; }
@@ -42,7 +43,6 @@
             align-items: center;
             gap: 12px;
             margin-bottom: 30px;
-            overflow: hidden;
         }
 
         .logo-icon {
@@ -54,9 +54,10 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            overflow: hidden;
         }
         
-        .logo-icon img { width: 100%; height: 100%; border-radius: 50%; }
+        .logo-icon img { width: 100%; height: 100%; object-fit: cover; }
 
         .logo-text { font-size: 20px; font-weight: bold; color: #fff; white-space: nowrap; }
 
@@ -65,7 +66,7 @@
             display: flex;
             align-items: center;
             padding: 12px;
-            color: #b9bbbe;
+            color: var(--text-gray);
             text-decoration: none;
             border-radius: 8px;
             margin-bottom: 8px;
@@ -88,13 +89,11 @@
             background-color: #36393f;
         }
 
-        .dashboard-header { color: #fff; margin-bottom: 25px; }
-
         /* --- 數據統計卡片 --- */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
             margin-bottom: 25px;
         }
 
@@ -105,8 +104,8 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
         }
 
-        .stat-card h3 { margin: 0; font-size: 14px; opacity: 0.8; }
-        .stat-card p { margin: 10px 0 0 0; font-size: 28px; font-weight: bold; }
+        .stat-card h3 { margin: 0; font-size: 13px; opacity: 0.8; }
+        .stat-card p { margin: 8px 0 0 0; font-size: 28px; font-weight: bold; }
 
         /* --- 通用卡片 --- */
         .card {
@@ -122,12 +121,13 @@
         
         .input-box {
             flex: 1;
-            min-width: 180px;
+            min-width: 200px;
             padding: 12px;
             border-radius: 6px;
             border: 1px solid #202225;
             background: #202225;
             color: #fff;
+            font-size: 14px;
         }
 
         .btn {
@@ -137,50 +137,48 @@
             cursor: pointer;
             font-weight: bold;
             color: #fff;
+            transition: opacity 0.2s;
         }
+
+        .btn:hover { opacity: 0.8; }
+        .btn-green { background: #43b581; }
+        .btn-yellow { background: #faa61a; }
+        .btn-red { background: #f04747; }
+        .btn-gray { background: #747f8d; }
+        .btn-blue { background: var(--discord-blue); }
 
         /* --- 用戶面板 --- */
         .user-panel {
             background: #23272a;
-            padding: 15px;
+            padding: 12px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             margin: 15px;
-            border-radius: 10px;
+            border-radius: 8px;
         }
 
-        .user-avatar { width: 35px; height: 35px; border-radius: 50%; }
+        .user-avatar { width: 32px; height: 32px; border-radius: 50%; }
         .user-info { overflow: hidden; }
-        .user-name { font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .user-name { font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        /* --- 📱 響應式關鍵代碼 --- */
-        
-        /* 平板版：縮小側邊欄 */
+        /* --- 📱 響應式佈局 --- */
         @media (max-width: 992px) {
-            :root { --sidebar-width: 80px; }
+            :root { --sidebar-width: 70px; }
             .logo-text, .nav-text, .user-info { display: none; }
-            .sidebar-top, .sidebar-nav a { display: flex; justify-content: center; }
-            .logo-section { margin-bottom: 20px; justify-content: center; }
-            .user-panel { justify-content: center; padding: 10px; }
+            .sidebar-top, .sidebar-nav a, .user-panel { justify-content: center; padding: 10px; }
+            .logo-section { margin-bottom: 20px; }
         }
 
-        /* 手機版：側邊欄隱藏或內容堆疊 */
         @media (max-width: 576px) {
             body { flex-direction: column; }
-            .sidebar {
-                width: 100%;
-                height: auto;
-                flex-direction: row;
-                padding: 10px;
-            }
-            .sidebar-top { padding: 0; display: flex; align-items: center; }
+            .sidebar { width: 100%; height: auto; flex-direction: row; }
+            .sidebar-top { padding: 10px; width: 100%; }
             .logo-section { margin-bottom: 0; }
-            .sidebar-nav ul { display: flex; gap: 5px; }
-            .sidebar-nav a { margin-bottom: 0; padding: 8px; }
-            .user-panel { display: none; } /* 手機版隱藏底端用戶面板節省空間 */
+            .sidebar-nav ul { display: flex; }
+            .sidebar-nav a { margin-bottom: 0; margin-right: 5px; }
+            .user-panel { display: none; }
             .main-content { padding: 15px; }
-            .stat-card p { font-size: 22px; }
         }
     </style>
 </head>
@@ -193,7 +191,6 @@
                 </div>
                 <div class="logo-text">我是機器人</div>
             </div>
-
             <nav class="sidebar-nav">
                 <ul>
                     <li><a href="{{ url_for('index') }}"><span>🏠</span><span class="nav-text">選擇伺服器</span></a></li>
@@ -202,22 +199,21 @@
                 </ul>
             </nav>
         </div>
-
         <div class="user-panel">
             <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" class="user-avatar" onerror="this.src='https://cdn.discordapp.com/embed/avatars/1.png'">
             <div class="user-info">
                 <div class="user-name">{{ user.username }}</div>
-                <div style="font-size: 12px; color: #b9bbbe;">開發者</div>
+                <div style="font-size: 11px; color: var(--text-gray);">開發者權限</div>
             </div>
         </div>
     </div>
 
     <div class="main-content">
-        <h1 class="dashboard-header">⚙️ 核心控制面板</h1>
+        <h1 style="color: #fff; margin-bottom: 25px;">⚙️ 控制面板</h1>
 
         <div class="stats-grid">
             <div class="stat-card" style="background: linear-gradient(135deg, #5865f2, #4752c4);">
-                <h3>總服務伺服器</h3>
+                <h3>服務伺服器數</h3>
                 <p>{{ total_guilds }} <small style="font-size: 14px;">個</small></p>
             </div>
             <div class="stat-card" style="background: linear-gradient(135deg, #43b581, #3ca374);">
@@ -227,51 +223,79 @@
         </div>
 
         <div class="card">
+            <h2>🔮 機器人狀態與燈號</h2>
+            <div class="flex-row" style="margin-bottom: 15px;">
+                <button onclick="updateBotStatus('online')" class="btn btn-green">線上</button>
+                <button onclick="updateBotStatus('idle')" class="btn btn-yellow">閒置</button>
+                <button onclick="updateBotStatus('dnd')" class="btn btn-red">請勿打擾</button>
+                <button onclick="updateBotStatus('offline')" class="btn btn-gray">隱身</button>
+            </div>
+            <div class="flex-row">
+                <input type="text" id="activity_input" class="input-box" placeholder="正在玩的遊戲/自定義文字...">
+                <button onclick="updateActivity()" class="btn btn-blue">更新文字</button>
+            </div>
+        </div>
+
+        <div class="card">
             <h2>🛡️ 黑名單管理</h2>
             <div class="flex-row">
-                <input type="text" id="blacklist_id" class="input-box" placeholder="輸入用戶 ID...">
-                <button onclick="addToBlacklist()" class="btn" style="background: #f04747;">確認封鎖</button>
+                <input type="text" id="blacklist_id" class="input-box" placeholder="輸入要封鎖的 User ID...">
+                <button onclick="handleBlacklist()" class="btn btn-red">確認封鎖</button>
             </div>
         </div>
 
         <div class="card">
-            <h2>🔮 機器人狀態</h2>
-            <div class="flex-row" style="margin-bottom: 15px;">
-                <button onclick="updateStatus('online')" class="btn" style="background: #43b581;">線上</button>
-                <button onclick="updateStatus('idle')" class="btn" style="background: #faa61a;">閒置</button>
-                <button onclick="updateStatus('dnd')" class="btn" style="background: #f04747;">請勿打擾</button>
-            </div>
-            <div class="flex-row">
-                <input type="text" id="activity_text" class="input-box" placeholder="更新狀態文字...">
-                <button onclick="updateActivity()" class="btn" style="background: #5865f2;">更新</button>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>📜 運行日誌</h2>
-            <div id="log-screen" style="background: #000; color: #0f0; padding: 15px; border-radius: 6px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;">正在讀取日誌...</div>
+            <h2>📜 系統運行日誌 (Live)</h2>
+            <div id="log-screen" style="background: #000; color: #0f0; padding: 15px; border-radius: 6px; height: 250px; overflow-y: auto; font-family: monospace; font-size: 12px; border: 1px solid #444;">讀取中...</div>
         </div>
     </div>
 
     <script>
-        function addToBlacklist() {
+        // 更新狀態 (對接 /api/bot/update_status)
+        function updateBotStatus(status) {
+            const text = document.getElementById('activity_input').value || "我是機器人";
+            fetch('/api/bot/update_status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status: status, activity: text })
+            })
+            .then(res => res.json())
+            .then(data => alert(data.message));
+        }
+
+        // 單獨更新文字
+        function updateActivity() {
+            updateBotStatus('online');
+        }
+
+        // 黑名單 (對接 /api/blacklist/add)
+        function handleBlacklist() {
             const uid = document.getElementById('blacklist_id').value;
             if(!uid) return alert("請輸入 ID");
             fetch('/api/blacklist/add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ user_id: uid })
-            }).then(res => res.json()).then(data => alert(data.message));
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message);
+                document.getElementById('blacklist_id').value = "";
+            });
         }
 
+        // 讀取日誌 (對接 /get_raw_logs)
         function fetchLogs() {
             fetch('/get_raw_logs').then(res => res.text()).then(data => {
                 const screen = document.getElementById('log-screen');
-                screen.innerText = data;
-                screen.scrollTop = screen.scrollHeight;
+                if(screen) {
+                    screen.innerText = data;
+                    screen.scrollTop = screen.scrollHeight;
+                }
             });
         }
         setInterval(fetchLogs, 3000);
+        fetchLogs(); // 初始化讀取一次
     </script>
 </body>
 </html>
