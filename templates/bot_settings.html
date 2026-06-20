@@ -147,6 +147,33 @@
         .btn-gray { background: #747f8d; }
         .btn-blue { background: var(--discord-blue); }
 
+        /* --- 拖曳列樣式 --- */
+        .status-drag-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #202225;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #202225;
+            transition: transform 0.2s, background-color 0.2s;
+        }
+        .status-drag-row.dragging {
+            opacity: 0.4;
+            background: #4f545c;
+        }
+        .drag-handle {
+            cursor: grab;
+            font-size: 18px;
+            color: var(--text-gray);
+            user-select: none;
+            padding: 0 5px;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
         /* --- 用戶面板 --- */
         .user-panel {
             background: #23272a;
@@ -230,13 +257,22 @@
                 <button onclick="updateBotStatus('dnd')" class="btn btn-red">請勿打擾</button>
                 <button onclick="updateBotStatus('offline')" class="btn btn-gray">隱身</button>
             </div>
-            <div class="flex-row">
-                <select id="activity_type" class="input-box" style="flex: 0 0 130px; background: #202225; color: #fff; border: 1px solid #202225;">
-                    <option value="custom">💬 自訂狀態</option>
-                    <option value="game">🎮 正在玩</option>
-                </select>
-                <input type="text" id="activity_input" class="input-box" placeholder="輸入要顯示的自訂狀態或遊戲名稱...">
-                <button onclick="updateActivity()" class="btn btn-blue">更新文字</button>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div class="flex-row">
+                    <select id="activity_type" class="input-box" style="flex: 0 0 130px; background: #202225; color: #fff; border: 1px solid #202225;">
+                        <option value="custom">💬 自訂狀態</option>
+                        <option value="game">🎮 正在玩</option>
+                    </select>
+                    <button onclick="updateActivity()" class="btn btn-blue">更新狀態至 Bot</button>
+                </div>
+
+                <div id="carousel_container" style="margin-top: 5px;">
+                    </div>
+
+                <div>
+                    <button type="button" onclick="addInputRow()" class="btn btn-gray" style="padding: 6px 15px; font-size: 13px;">➕ 增加文字框</button>
+                </div>
             </div>
         </div>
 
@@ -255,30 +291,94 @@
     </div>
 
     <script>
-        // 更新狀態 (對接 /api/bot/update_status)
+        const container = document.getElementById('carousel_container');
+        let draggedItem = null;
+
+        // 動態新增輸入框
+        function addInputRow(textValue = "") {
+            const row = document.createElement('div');
+            row.className = 'status-drag-row';
+            row.draggable = true;
+
+            row.innerHTML = `
+                <span class="drag-handle">☰</span>
+                <input type="text" class="input-box status-sub-input" value="${textValue}" placeholder="輸入狀態文字..." style="margin: 0;">
+                <button type="button" onclick="removeInputRow(this)" class="btn btn-red" style="padding: 8px 12px; margin: 0;">❌</button>
+            `;
+
+            row.addEventListener('dragstart', () => {
+                draggedItem = row;
+                row.classList.add('dragging');
+            });
+
+            row.addEventListener('dragend', () => {
+                row.classList.remove('dragging');
+                draggedItem = null;
+            });
+
+            row.addEventListener('dragover', (e) => e.preventDefault());
+
+            row.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                if (row !== draggedItem) {
+                    const allRows = Array.from(container.children);
+                    const draggedIndex = allRows.indexOf(draggedItem);
+                    const targetIndex = allRows.indexOf(row);
+                    
+                    if (draggedIndex < targetIndex) {
+                        container.insertBefore(draggedItem, row.nextSibling);
+                    } else {
+                        container.insertBefore(draggedItem, row);
+                    }
+                }
+            });
+
+            container.appendChild(row);
+        }
+
+        function removeInputRow(button) {
+            if (container.children.length > 1) {
+                button.parentElement.remove();
+            } else {
+                alert("最少要留下一個文字框喔！");
+            }
+        }
+
+        // 初始化一兩個框框供使用
+        addInputRow("咕咕嘎嘎");
+        addInputRow("巴巴博弈");
+
+        // 傳送設定給後端
         function updateBotStatus(status) {
-            const text = document.getElementById('activity_input').value || "我是機器人";
-            const type = document.getElementById('activity_type').value; // 👈 抓取下拉選單選了什麼類型
+            const type = document.getElementById('activity_type').value;
             
+            // 抓取所有的輸入文字
+            const inputElements = document.querySelectorAll('.status-sub-input');
+            let textArray = [];
+            inputElements.forEach(input => {
+                if(input.value.trim()) textArray.push(input.value.trim());
+            });
+
+            // 💡 不管選什麼，前端都直接把格子用逗號接起來發送，交給後端自動去算格子數量
+            const finalText = textArray.join(',');
+
             fetch('/api/bot/update_status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
                     status: status, 
-                    activity: text,
-                    type: type // 👈 把類型一起打包傳給後端 bot.py
+                    activity: finalText,
+                    type: type 
                 })
             })
             .then(res => res.json())
             .then(data => alert(data.message));
         }
 
-        // 單獨更新文字
         function updateActivity() {
             updateBotStatus('online');
         }
 
-        // 黑名單 (對接 /api/blacklist/add)
         function handleBlacklist() {
             const uid = document.getElementById('blacklist_id').value;
             if(!uid) return alert("請輸入 ID");
@@ -294,7 +394,6 @@
             });
         }
 
-        // 讀取日誌 (對接 /get_raw_logs)
         function fetchLogs() {
             fetch('/get_raw_logs').then(res => res.text()).then(data => {
                 const screen = document.getElementById('log-screen');
@@ -305,7 +404,7 @@
             });
         }
         setInterval(fetchLogs, 3000);
-        fetchLogs(); // 初始化讀取一次
+        fetchLogs();
     </script>
 </body>
 </html>
