@@ -231,7 +231,11 @@
                 <button onclick="updateBotStatus('offline')" class="btn btn-gray">隱身</button>
             </div>
             <div class="flex-row">
-                <input type="text" id="activity_input" class="input-box" placeholder="正在玩的遊戲/自定義文字...">
+                <select id="activity_type" class="input-box" style="flex: 0 0 130px; background: #202225; color: #fff; border: 1px solid #202225;">
+                    <option value="custom">💬 自訂狀態</option>
+                    <option value="game">🎮 正在玩</option>
+                </select>
+                <input type="text" id="activity_input" class="input-box" placeholder="輸入要顯示的自訂狀態或遊戲名稱...">
                 <button onclick="updateActivity()" class="btn btn-blue">更新文字</button>
             </div>
         </div>
@@ -254,10 +258,16 @@
         // 更新狀態 (對接 /api/bot/update_status)
         function updateBotStatus(status) {
             const text = document.getElementById('activity_input').value || "我是機器人";
+            const type = document.getElementById('activity_type').value; // 👈 抓取下拉選單選了什麼類型
+            
             fetch('/api/bot/update_status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ status: status, activity: text })
+                body: JSON.stringify({ 
+                    status: status, 
+                    activity: text,
+                    type: type // 👈 把類型一起打包傳給後端 bot.py
+                })
             })
             .then(res => res.json())
             .then(data => alert(data.message));
