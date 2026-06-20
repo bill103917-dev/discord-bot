@@ -1813,8 +1813,9 @@ def get_raw_logs():
 @app.route("/api/bot/update_status", methods=['POST'])
 def update_bot_status():
     data = request.json
-    status_type = data.get('status') # online, idle, dnd, offline
-    activity_text = data.get('activity') # 想要顯示的文字
+    status_type = data.get('status')      # online, idle, dnd, offline
+    activity_text = data.get('activity')  # 想要顯示的文字
+    activity_type = data.get('type')      # 👈 新增：接收網頁傳過來的類型 (custom 或 game)
     
     # 轉換狀態
     status_map = {
@@ -1825,14 +1826,19 @@ def update_bot_status():
     }
     
     selected_status = status_map.get(status_type, discord.Status.online)
-    activity = discord.Game(name=activity_text)
+    
+    # 💡 判斷網頁選單選了什麼，切換對應的 Discord 顯示模式
+    if activity_type == 'custom':
+        activity = discord.CustomActivity(name=activity_text) # 💬 自訂狀態 (像一般用戶的想法)
+    else:
+        activity = discord.Game(name=activity_text)           # 🎮 原本的「正在玩...」
     
     # 使用 run_coroutine_threadsafe 讓 Bot 執行動作
     asyncio.run_coroutine_threadsafe(
         bot.change_presence(status=selected_status, activity=activity),
         discord_loop
     )
-    return jsonify({"success": True, "message": "狀態已更新"})
+    return jsonify({"success": True, "message": "狀態與類型已成功更新！"})
 
 # 日誌
 @app.route("/logs/all")
