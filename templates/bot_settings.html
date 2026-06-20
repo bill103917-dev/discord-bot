@@ -294,6 +294,19 @@
         const container = document.getElementById('carousel_container');
         let draggedItem = null;
 
+        // 💡 智慧檢查：用來控制 ❌ 按鈕要不要隱藏
+        function checkDeleteButtons() {
+            const rows = container.querySelectorAll('.status-drag-row');
+            rows.forEach(row => {
+                const deleteBtn = row.querySelector('.btn-delete-row');
+                if (rows.length === 1) {
+                    deleteBtn.style.display = 'none';   // 只有一格就隱藏
+                } else {
+                    deleteBtn.style.display = 'block';  // 超過一格就顯示
+                }
+            });
+        }
+
         // 動態新增輸入框
         function addInputRow(textValue = "") {
             const row = document.createElement('div');
@@ -301,14 +314,16 @@
             row.draggable = true;
 
             row.innerHTML = `
-                <span class="drag-handle">☰</span>
-                <input type="text" class="input-box status-sub-input" value="${textValue}" placeholder="輸入狀態文字..." style="margin: 0;">
-                <button type="button" onclick="removeInputRow(this)" class="btn btn-red" style="padding: 8px 12px; margin: 0;">❌</button>
+                <span class="drag-handle" title="按著拖曳順序">☰</span>
+                <button type="button" onclick="moveUp(this)" class="btn btn-gray" style="padding: 4px 8px; margin: 0; font-size: 11px;" title="上移">▲</button>
+                <button type="button" onclick="moveDown(this)" class="btn btn-gray" style="padding: 4px 8px; margin: 0; font-size: 11px;" title="下移">▼</button>
+                <input type="text" class="input-box status-sub-input" value="${textValue}" placeholder="輸入狀態文字..." style="margin: 0; flex: 1;">
+                <button type="button" onclick="removeInputRow(this)" class="btn btn-red btn-delete-row" style="padding: 8px 12px; margin: 0;">❌</button>
             `;
 
             row.addEventListener('dragstart', () => {
                 draggedItem = row;
-                row.classList.add('dragging');
+                setTimeout(() => row.classList.add('dragging'), 0);
             });
 
             row.addEventListener('dragend', () => {
@@ -316,58 +331,89 @@
                 draggedItem = null;
             });
 
-            row.addEventListener('dragover', (e) => e.preventDefault());
-
-            row.addEventListener('dragenter', (e) => {
-                e.preventDefault();
-                if (row !== draggedItem) {
-                    const allRows = Array.from(container.children);
-                    const draggedIndex = allRows.indexOf(draggedItem);
-                    const targetIndex = allRows.indexOf(row);
-                    
-                    if (draggedIndex < targetIndex) {
-                        container.insertBefore(draggedItem, row.nextSibling);
-                    } else {
-                        container.insertBefore(draggedItem, row);
-                    }
-                }
-            });
-
             container.appendChild(row);
+
+            // 💡 每次新增格子後，都檢查一次數量
+            checkDeleteButtons();
         }
 
-        function removeInputRow(button) {
-            if (container.children.length > 1) {
-                button.parentElement.remove();
-            } else {
-                alert("最少要留下一個文字框喔！");
+        // 讓大容器自己去算滑鼠現在在哪一格
+        container.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(container, e.clientY);
+            const draggable = document.querySelector('.dragging');
+            if (draggable) {
+                if (afterElement == null) {
+                    container.appendChild(draggable);
+                } else {
+                    container.insertBefore(draggable, afterElement);
+                }
+            }
+        });
+
+        function getDragAfterElement(container, y) {
+            const draggableElements = [...container.querySelectorAll('.status-drag-row:not(.dragging)')];
+            return draggableElements.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                if (offset < 0 && offset > closest.offset) {
+                    return { offset: offset, element: child };
+                } else {
+                    return closest;
+                }
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
+        }
+
+        // 🔼 向上移動一格
+        function moveUp(button) {
+            const row = button.parentElement;
+            const previous = row.previousElementSibling;
+            if (previous) {
+                container.insertBefore(row, previous);
             }
         }
 
-        // 初始化一兩個框框供使用
+        // 🔽 向下移動一格
+        function moveDown(button) {
+            const row = button.parentElement;
+            const next = row.nextElementSibling;
+            if (next) {
+                container.insertBefore(next, row);
+            }
+        }
+
+        // 刪除格子
+        function removeInputRow(button) {
+            const rows = container.querySelectorAll('.status-drag-row');
+            if (rows.length > 1) {
+                button.parentElement.remove();
+                // 💡 刪除成功後，重新檢查數量
+                checkDeleteButtons();
+            }
+        }
+
+        // 初始化自動生出兩個預設框
         addInputRow("咕咕嘎嘎");
         addInputRow("巴巴博弈");
 
         // 傳送設定給後端
         function updateBotStatus(status) {
             const type = document.getElementById('activity_type').value;
-            
-            // 抓取所有的輸入文字
             const inputElements = document.querySelectorAll('.status-sub-input');
             let textArray = [];
+            
             inputElements.forEach(input => {
                 if(input.value.trim()) textArray.push(input.value.trim());
             });
 
-            // 💡 不管選什麼，前端都直接把格子用逗號接起來發送，交給後端自動去算格子數量
-            const finalText = textArray.join(',');
+            const SnowyText = textArray.join(',');
 
             fetch('/api/bot/update_status', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ 
                     status: status, 
-                    activity: finalText,
+                    activity: SnowyText,
                     type: type 
                 })
             })
