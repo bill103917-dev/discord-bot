@@ -1342,6 +1342,7 @@ async def on_ready():
 
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
 
+
     # --- 1. 嘗試載入 Cogs ---
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
@@ -1810,35 +1811,87 @@ def get_raw_logs():
         return "找不到日誌檔案 (bot.log)，請確認機器人是否有設定 logging 到檔案。"
 
 
+# --- 智慧輪播專用設定 ---
+carousel_words = []
+carousel_index = 0
+is_carousel_enabled = False
+current_activity_type = 'custom'  # 紀錄目前是 'custom'(自訂) 還是 'game'(正在玩)
+
+@tasks.loop(seconds=5)  # 每 5 秒自動切換一次
+async def status_carousel_task():
+    global carousel_index
+    if not is_carousel_enabled or not carousel_words:
+        return
+    
+    current_word = carousel_words[carousel_index]
+    
+    # 💡 根據目前設定的類型，決定秀出哪種圖標
+    if current_activity_type == 'custom':
+        activity = discord.CustomActivity(name=current_word)
+    else:
+        activity = discord.Game(name=current_word)
+        
+    await bot.change_presence(activity=activity)
+    carousel_index = (carousel_index + 1) % len(carousel_words)
+
+
+
+
 @app.route("/api/bot/update_status", methods=['POST'])
 def update_bot_status():
+    global carousel_words, is_carousel_enabled, carousel_index, current_activity_type
     data = request.json
     status_type = data.get('status')      # online, idle, dnd, offline
-    activity_text = data.get('activity')  # 想要顯示的文字
-    activity_type = data.get('type')      # 👈 新增：接收網頁傳過來的類型 (custom 或 game)
+    activity_text = data.get('activity')  # 網頁傳過來用逗號組合的文字
+    activity_type = data.get('type')      # custom 或 game
     
-    # 轉換狀態
+    # 轉換燈號
     status_map = {
         'online': discord.Status.online,
         'idle': discord.Status.idle,
         'dnd': discord.Status.dnd,
         'offline': discord.Status.invisible
     }
-    
     selected_status = status_map.get(status_type, discord.Status.online)
     
-    # 💡 判斷網頁選單選了什麼，切換對應的 Discord 顯示模式
-    if activity_type == 'custom':
-        activity = discord.CustomActivity(name=activity_text) # 💬 自訂狀態 (像一般用戶的想法)
-    else:
-        activity = discord.Game(name=activity_text)           # 🎮 原本的「正在玩...」
+    # 把網頁傳過來的多個文字拆解開來
+    words = [w.strip() for w in activity_text.split(',') if w.strip()]
     
-    # 使用 run_coroutine_threadsafe 讓 Bot 執行動作
-    asyncio.run_coroutine_threadsafe(
-        bot.change_presence(status=selected_status, activity=activity),
-        discord_loop
-    )
-    return jsonify({"success": True, "message": "狀態與類型已成功更新！"})
+    if len(words) > 1:
+        # 🌟 超過一個文字框：自動開啟輪播模式！
+        is_carousel_enabled = True
+        carousel_words = words
+        carousel_index = 0
+        current_activity_type = activity_type
+        
+        # 讓第一個狀態立刻生效
+        if current_activity_type == 'custom':
+            act = discord.CustomActivity(name=carousel_words[0])
+        else:
+            act = discord.Game(name=carousel_words[0])
+            
+        asyncio.run_coroutine_threadsafe(
+            bot.change_presence(status=selected_status, activity=act),
+            discord_loop
+        )
+        msg = "偵測到多個文字，已自動啟動狀態輪播！"
+    else:
+        # 🌟 只有一個文字框（或沒填）：關閉輪播，顯示單一狀態
+        is_carousel_enabled = False
+        single_text = words[0] if words else "我是機器人"
+        
+        if activity_type == 'custom':
+            act = discord.CustomActivity(name=single_text)
+        else:
+            act = discord.Game(name=single_text)
+            
+        asyncio.run_coroutine_threadsafe(
+            bot.change_presence(status=selected_status, activity=act),
+            discord_loop
+        )
+        msg = "狀態已成功更新！"
+        
+    return jsonify({"success": True, "message": msg})
 
 # 日誌
 @app.route("/logs/all")
