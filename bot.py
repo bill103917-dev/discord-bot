@@ -1341,6 +1341,12 @@ async def on_ready():
         discord_loop = None
 
     print(f"[{safe_now()}] Bot logged in as {bot.user} ({bot.user.id})")
+    
+    # 💡 這裡就是啟動輪播的核心程式碼！
+    if not status_carousel_task.is_running():
+        status_carousel_task.start()
+        print("▶️ 狀態輪播任務已成功啟動！")
+
 
 
     # --- 1. 嘗試載入 Cogs ---
