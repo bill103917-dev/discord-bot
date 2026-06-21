@@ -14,6 +14,7 @@ import aiohttp
 # =========================
 from utils.time_utils import safe_now
 
+DATA_STORAGE_CHANNEL_ID = 1518065055466262649  
 # =========================
 # -- 1. 回覆彈窗 (Modal)
 # =========================
@@ -68,19 +69,15 @@ class ServerSelectView(ui.View):
             self.add_item(select)
 
     async def select_callback(self, interaction: Interaction):
-        if self.cog.pool is None:
-            return await interaction.response.send_message("❌ 資料庫未連線，請稍後再試。", ephemeral=True)
-
         sid = int(interaction.data['values'][0])
         guild_name = self.bot.get_guild(sid).name
         
+        # 儲存在記憶體
         self.cog.user_target_guild[self.user_id] = sid
-        async with self.cog.pool.acquire() as conn:
-            await conn.execute(
-                'INSERT INTO user_targets (user_id, guild_id) VALUES ($1, $2) '
-                'ON CONFLICT (user_id) DO UPDATE SET guild_id = $2', 
-                self.user_id, sid
-            )
+        
+        # 💡 自動備份：將最新的對照資料傳送到你的私人頻道
+        await self.cog.save_config_to_discord()
+        
         await interaction.response.edit_message(content=f"✅ 已成功將目標設定為：**{guild_name}**\n現在您可以直接發送私訊，我會幫您轉發。", view=None)
 
 # =========================
@@ -219,54 +216,68 @@ class ChatInviteView(ui.View):
 class SupportCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db_url = os.getenv("DATABASE_URL")
-        self.support_config = {}
-        self.user_target_guild = {}
-        self.pool = None
+        self.support_config = {}      # 記憶體轉發設定
+        self.user_target_guild = {}   # 記憶體用戶選擇目標
         self.transcript_dir = "transcripts"
         self._cd_mapping = commands.CooldownMapping.from_cooldown(1, 7.0, commands.BucketType.user)
 
     async def cog_load(self):
         if not os.path.exists(self.transcript_dir):
             os.makedirs(self.transcript_dir)
-        await self.init_db()
+        # 💡 每次開機時，自動去你的私人頻道下載最新的一份備份檔
+        await self.load_config_from_discord()
 
+    # 📤 雲端備份：將資料包成 JSON 檔，傳送到你的私人頻道 1518065055466262649
     async def save_config_to_discord(self):
-        if self.pool:
-            try:
-                async with self.pool.acquire() as conn:
-                    for gid, config_data in self.support_config.items():
-                        cid, rid = config_data[0], config_data[1]
-                        await conn.execute(
-                            'INSERT INTO support_configs (guild_id, channel_id, role_id) '
-                            'VALUES ($1, $2, $3) '
-                            'ON CONFLICT (guild_id) DO UPDATE SET channel_id = $2, role_id = $3',
-                            gid, cid, rid
-                        )
-                print("✅ [SQL] 客服設定已成功同步至 PostgreSQL 資料庫")
-            except Exception as e:
-                print(f"❌ [SQL] 同步至 PostgreSQL 失敗: {e}")
-                raise e
+        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
+        if not channel:
+            print(f"❌ 錯誤：找不到私人儲存頻道 {DATA_STORAGE_CHANNEL_ID}，無法備份！")
+            return
+        try:
+            # 整理要備份的資料（將 int 轉成 str 避免 JSON 格式報錯）
+            payload = {
+                "support_config": {str(k): v for k, v in self.support_config.items()},
+                "user_target_guild": {str(k): v for k, v in self.user_target_guild.items()}
+            }
+            data_str = json.dumps(payload, ensure_ascii=False, indent=4)
+            data_file = discord.File(io.StringIO(data_str), filename="bot_config_backup.json")
+            
+            # 直接發送到你的私人頻道
+            await channel.send(content="🔄 [系統設定備份] 已更新客服轉發設定與用戶選擇目標", file=data_file)
+            print("✅ 設定與用戶資料已成功傳送至私人頻道備份！")
+        except Exception as e:
+            print(f"❌ 備份至私人頻道時發生錯誤: {e}")
 
-        # 2. 將設定導出為 JSON 檔案，備份到 Discord 私密頻道中
-        log_channel_id = 1518065055466262649  # 您指定的 Log 頻道
-        log_chan = self.bot.get_channel(log_channel_id)
-        if log_chan:
-            try:
-                # 序列化記憶體中的設定
-                config_json_str = json.dumps(self.support_config, indent=4, ensure_ascii=False)
-                # 使用 io.BytesIO 直接在記憶體生成虛擬檔案物件
-                file_data = io.BytesIO(config_json_str.encode('utf-8'))
-                backup_file = discord.File(file_data, filename="support_config_backup.json")
+    # 📥 雲端還原：開機時自動從你的私人頻道讀取最新的備份檔
+    async def load_config_from_discord(self):
+        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
+        if not channel:
+            print(f"❌ 錯誤：找不到私人儲存頻道 {DATA_STORAGE_CHANNEL_ID}，無法還原設定！")
+            return
+        
+        print("🔍 正在從您的私人頻道讀取歷史備份...")
+        try:
+            # 搜尋私人頻道最近的 50 則訊息，找到最新的備份檔案
+            async for message in channel.history(limit=50):
+                if message.author == self.bot.user and message.attachments:
+                    for attachment in message.attachments:
+                        if attachment.filename == "bot_config_backup.json":
+                            file_bytes = await attachment.read()
+                            data = json.loads(file_bytes.decode('utf-8'))
+                            
+                            # 還原回 int 格式，讓機器人可以正常讀取
+                            self.support_config = {int(k): v for k, v in data.get("support_config", {}).items()}
+                            self.user_target_guild = {int(k): v for k, v in data.get("user_target_guild", {}).items()}
+                            
+                            print(f"==== 💾 私人頻道設定還原成功 ====")
+                            print(f"已載入 {len(self.support_config)} 筆伺服器轉發設定")
+                            print(f"已載入 {len(self.user_target_guild)} 筆用戶目標設定")
+                            print(f"=====================================")
+                            return
+            print("ℹ️ 提示：私人頻道中沒有找到任何設定檔，將使用全新設定。")
+        except Exception as e:
+            print(f"❌ 還原雲端設定時發生錯誤: {e}")
 
-                await log_chan.send(
-                    content=f"📦 **[雲端備份] 客服轉發設定已更新**\n更新時間：`{safe_now()}`",
-                    file=backup_file
-                )
-                print("✅ [Backup] 備份 JSON 檔案已成功送至 Discord 頻道")
-            except Exception as e:
-                print(f"❌ [Backup] 發送 Discord 備份失敗: {e}")
-                
                 
     async def init_db(self):
         if not self.db_url: return
@@ -290,14 +301,14 @@ class SupportCog(commands.Cog):
 
         gid, cid, rid = interaction.guild.id, channel.id, (role.id if role else None)
         
-        # 💡 直接寫入記憶體字典 (改用 list 格式方便之後 JSON 轉換)
+        # 寫入記憶體中
         self.support_config[gid] = [cid, rid]
         
-        # 💡 呼叫雲端備份，直接把最新的設定打包傳送到私密 Discord 頻道存起來
+        # 💡 自動備份：立刻傳送一份最新的檔案到你的私人頻道
         await self.save_config_to_discord()
         
-        await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已同步永久儲存！", ephemeral=True)
-
+        await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已自動傳送至私人頻道備份！", ephemeral=True)
+        
     @app_commands.command(name="select_server", description="選擇或切換您要發送問題的目標伺服器")
     async def select_server(self, interaction: Interaction):
         if interaction.guild is not None:
