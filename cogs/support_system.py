@@ -231,6 +231,43 @@ class SupportCog(commands.Cog):
             os.makedirs(self.transcript_dir)
         await self.init_db()
 
+    async def save_config_to_discord(self):
+        if self.pool:
+            try:
+                async with self.pool.acquire() as conn:
+                    for gid, config_data in self.support_config.items():
+                        cid, rid = config_data[0], config_data[1]
+                        await conn.execute(
+                            'INSERT INTO support_configs (guild_id, channel_id, role_id) '
+                            'VALUES ($1, $2, $3) '
+                            'ON CONFLICT (guild_id) DO UPDATE SET channel_id = $2, role_id = $3',
+                            gid, cid, rid
+                        )
+                print("✅ [SQL] 客服設定已成功同步至 PostgreSQL 資料庫")
+            except Exception as e:
+                print(f"❌ [SQL] 同步至 PostgreSQL 失敗: {e}")
+                raise e
+
+        # 2. 將設定導出為 JSON 檔案，備份到 Discord 私密頻道中
+        log_channel_id = 1470291339118641253  # 您指定的 Log 頻道
+        log_chan = self.bot.get_channel(log_channel_id)
+        if log_chan:
+            try:
+                # 序列化記憶體中的設定
+                config_json_str = json.dumps(self.support_config, indent=4, ensure_ascii=False)
+                # 使用 io.BytesIO 直接在記憶體生成虛擬檔案物件
+                file_data = io.BytesIO(config_json_str.encode('utf-8'))
+                backup_file = discord.File(file_data, filename="support_config_backup.json")
+
+                await log_chan.send(
+                    content=f"📦 **[雲端備份] 客服轉發設定已更新**\n更新時間：`{safe_now()}`",
+                    file=backup_file
+                )
+                print("✅ [Backup] 備份 JSON 檔案已成功送至 Discord 頻道")
+            except Exception as e:
+                print(f"❌ [Backup] 發送 Discord 備份失敗: {e}")
+                
+                
     async def init_db(self):
         if not self.db_url: return
         try:
