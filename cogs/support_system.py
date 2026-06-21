@@ -249,7 +249,7 @@ class SupportCog(commands.Cog):
                 raise e
 
         # 2. 將設定導出為 JSON 檔案，備份到 Discord 私密頻道中
-        log_channel_id = 1470291339118641253  # 您指定的 Log 頻道
+        log_channel_id = 1518065055466262649  # 您指定的 Log 頻道
         log_chan = self.bot.get_channel(log_channel_id)
         if log_chan:
             try:
