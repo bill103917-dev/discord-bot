@@ -38,7 +38,24 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
             description=f"**管理員說：**\n>>> {reply_content}",
             color=discord.Color.green()
         )
-        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}"\n```, inline=False)
+            async def on_submit(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_obj = interaction.client.get_user(self.original_user_id)
+        admin_name = interaction.user.display_name
+        reply_content = str(self.response_content).strip()
+        response_title = str(self.response_title).strip() or "管理員回覆"
+
+        embed = discord.Embed(
+            title=f"💬 {response_title}",
+            description=f"**管理員說：**\n>>> {reply_content}",
+            color=discord.Color.green()
+        )
+        
+        # 💡 這裡已經幫你把 3 個反引號 ``` 完美關閉，既不會報錯，Discord 灰色框框也最漂亮！
+        embed.add_field(
+            name="您的原始問題:", 
+            value=f"
+        )
         embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}")
 
         if user_obj:
