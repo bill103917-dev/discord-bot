@@ -250,14 +250,16 @@ class SupportCog(commands.Cog):
     @app_commands.default_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
         await interaction.response.defer(ephemeral=True)
-        if self.pool is None: await self.init_db()
-        if self.pool is None: return await interaction.followup.send("❌ 資料庫連線失敗。", ephemeral=True)
 
         gid, cid, rid = interaction.guild.id, channel.id, (role.id if role else None)
-        self.support_config[gid] = (cid, rid)
-        async with self.pool.acquire() as conn:
-            await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', gid, cid, rid)
-        await interaction.followup.send(f"✅ 已設定 {channel.mention} 為轉發頻道", ephemeral=True)
+        
+        # 💡 直接寫入記憶體字典 (改用 list 格式方便之後 JSON 轉換)
+        self.support_config[gid] = [cid, rid]
+        
+        # 💡 呼叫雲端備份，直接把最新的設定打包傳送到私密 Discord 頻道存起來
+        await self.save_config_to_discord()
+        
+        await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已同步永久儲存！", ephemeral=True)
 
     @app_commands.command(name="select_server", description="選擇或切換您要發送問題的目標伺服器")
     async def select_server(self, interaction: Interaction):
