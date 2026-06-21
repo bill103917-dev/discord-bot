@@ -1,21 +1,17 @@
 import discord
 from discord import app_commands, Interaction, ui
 from discord.ext import commands
+import asyncpg
 import os
 import asyncio
 import re
 from typing import Dict, Tuple, Optional
 from datetime import datetime
 import aiohttp
-import json
-import io
 
 # =========================
 # -- 工具與基礎設定
 # =========================
-# 儲存設定資料頻道
-DATA_STORAGE_CHANNEL_ID = 1470291339118641253  
-
 from utils.time_utils import safe_now
 
 # =========================
@@ -42,8 +38,7 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
             description=f"**管理員說：**\n>>> {reply_content}",
             color=discord.Color.green()
         )
-        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}\n
-```", inline=False)
+        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}"\n```, inline=False)
         embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}")
 
         if user_obj:
@@ -71,15 +66,19 @@ class ServerSelectView(ui.View):
             self.add_item(select)
 
     async def select_callback(self, interaction: Interaction):
+        if self.cog.pool is None:
+            return await interaction.response.send_message("❌ 資料庫未連線，請稍後再試。", ephemeral=True)
+
         sid = int(interaction.data['values'][0])
         guild_name = self.bot.get_guild(sid).name
         
-        # 儲存到記憶體
         self.cog.user_target_guild[self.user_id] = sid
-        
-        # 💡 變更：捨棄資料庫，直接同步備份到 Discord 頻道
-        await self.cog.save_config_to_discord()
-        
+        async with self.cog.pool.acquire() as conn:
+            await conn.execute(
+                'INSERT INTO user_targets (user_id, guild_id) VALUES ($1, $2) '
+                'ON CONFLICT (user_id) DO UPDATE SET guild_id = $2', 
+                self.user_id, sid
+            )
         await interaction.response.edit_message(content=f"✅ 已成功將目標設定為：**{guild_name}**\n現在您可以直接發送私訊，我會幫您轉發。", view=None)
 
 # =========================
@@ -218,79 +217,45 @@ class ChatInviteView(ui.View):
 class SupportCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 💡 變更：拔除所有資料庫 URL 與 Pool 設定
+        self.db_url = os.getenv("DATABASE_URL")
         self.support_config = {}
         self.user_target_guild = {}
+        self.pool = None
         self.transcript_dir = "transcripts"
         self._cd_mapping = commands.CooldownMapping.from_cooldown(1, 7.0, commands.BucketType.user)
 
     async def cog_load(self):
         if not os.path.exists(self.transcript_dir):
             os.makedirs(self.transcript_dir)
-        # 💡 變更：開機加載時，直接改為從 Discord 頻道下載歷史紀錄
-        await self.load_config_from_discord()
+        await self.init_db()
 
-    # 📤 雲端備份：將記憶體設定轉成 JSON，發送到私密頻道
-    async def save_config_to_discord(self):
-        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
-        if not channel:
-            print("❌ 錯誤：找不到資料儲存頻道，無法備份客服設定！")
-            return
+    async def init_db(self):
+        if not self.db_url: return
         try:
-            # 轉換成可序列化的字典（JSON 鍵名必須是字串，所以把 int 轉為 str）
-            payload = {
-                "support_config": {str(k): v for k, v in self.support_config.items()},
-                "user_target_guild": {str(k): v for k, v in self.user_target_guild.items()}
-            }
-            data_str = json.dumps(payload, ensure_ascii=False, indent=4)
-            data_file = discord.File(io.StringIO(data_str), filename="bot_config_backup.json")
-            await channel.send(content="🔄 [系統設定備份] 已更新客服轉發設定與用戶選擇目標", file=data_file)
-            print("✅ 客服設定與用戶資料已成功備份至 Discord 頻道！")
-        except Exception as e:
-            print(f"❌ 備份至 Discord 頻道時發生錯誤: {e}")
-
-    # 📥 雲端還原：從私密頻道尋找最新的備份檔，抓回機器人
-    async def load_config_from_discord(self):
-        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
-        if not channel:
-            print("❌ 錯誤：找不到資料儲存頻道，無法讀取客服設定！")
-            return
-        
-        print("🔍 正在從 Discord 雲端頻道尋找客服歷史設定...")
-        try:
-            async for message in channel.history(limit=50):
-                if message.author == self.bot.user and message.attachments:
-                    for attachment in message.attachments:
-                        if attachment.filename == "bot_config_backup.json":
-                            file_bytes = await attachment.read()
-                            data = json.loads(file_bytes.decode('utf-8'))
-                            
-                            # 讀取出來後，把字串鍵名還原回 int 格式，讓機器人可以正常讀取
-                            self.support_config = {int(k): v for k, v in data.get("support_config", {}).items()}
-                            self.user_target_guild = {int(k): v for k, v in data.get("user_target_guild", {}).items()}
-                            
-                            print(f"==== 💾 Discord 雲端設定還原成功 ====")
-                            print(f"已載入 {len(self.support_config)} 筆伺服器轉發設定")
-                            print(f"已載入 {len(self.user_target_guild)} 筆用戶目標設定")
-                            print(f"=====================================")
-                            return
-            print("ℹ️ 提示：儲存頻道中沒有找到任何設定檔，將使用全新設定。")
-        except Exception as e:
-            print(f"❌ 還原雲端設定時發生錯誤: {e}")
+            adj_url = self.db_url.replace("postgres://", "postgresql://", 1)
+            self.pool = await asyncpg.create_pool(adj_url, min_size=1, max_size=3, ssl='require')
+            async with self.pool.acquire() as conn:
+                await conn.execute('CREATE TABLE IF NOT EXISTS support_configs (guild_id BIGINT PRIMARY KEY, channel_id BIGINT, role_id BIGINT)')
+                await conn.execute('CREATE TABLE IF NOT EXISTS user_targets (user_id BIGINT PRIMARY KEY, guild_id BIGINT)')
+                rows = await conn.fetch('SELECT * FROM support_configs')
+                for r in rows: self.support_config[r['guild_id']] = (r['channel_id'], r['role_id'])
+                t_rows = await conn.fetch('SELECT * FROM user_targets')
+                for tr in t_rows: self.user_target_guild[tr['user_id']] = tr['guild_id']
+            print("✅ 資料庫初始化成功")
+        except Exception as e: print(f"❌ 資料庫初始化失敗：{e}")
 
     @app_commands.command(name="set_support_channel", description="設定轉發頻道")
     @app_commands.default_permissions(manage_guild=True)
     async def set_support_channel(self, interaction: Interaction, channel: discord.TextChannel, role: Optional[discord.Role] = None):
         await interaction.response.defer(ephemeral=True)
+        if self.pool is None: await self.init_db()
+        if self.pool is None: return await interaction.followup.send("❌ 資料庫連線失敗。", ephemeral=True)
 
         gid, cid, rid = interaction.guild.id, channel.id, (role.id if role else None)
-        # 存入記憶體
-        self.support_config[gid] = [cid, rid]
-        
-        # 💡 變更：捨棄資料庫，直接備份到 Discord 頻道
-        await self.save_config_to_discord()
-        
-        await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已同步永久儲存！", ephemeral=True)
+        self.support_config[gid] = (cid, rid)
+        async with self.pool.acquire() as conn:
+            await conn.execute('INSERT INTO support_configs VALUES ($1,$2,$3) ON CONFLICT (guild_id) DO UPDATE SET channel_id=$2, role_id=$3', gid, cid, rid)
+        await interaction.followup.send(f"✅ 已設定 {channel.mention} 為轉發頻道", ephemeral=True)
 
     @app_commands.command(name="select_server", description="選擇或切換您要發送問題的目標伺服器")
     async def select_server(self, interaction: Interaction):
@@ -316,8 +281,7 @@ class SupportCog(commands.Cog):
             if not (guild and (chan := guild.get_channel(config[0]))): return
             
             url_match = re.search(r'https?://[^\s]+', message.content)
-            embed = discord.Embed(title=f"❓ 來自 {message.author.name}", description=f"```\n{message.content[:1500]}\n
-```", color=0xf1c40f)
+            embed = discord.Embed(title=f"❓ 來自 {message.author.name}", description=f"```\n{message.content[:1500]}\n```", color=0xf1c40f)
             embed.set_footer(text=f"User ID: {uid} | {safe_now()}")
             
             view = ReplyView(self)
@@ -355,6 +319,7 @@ class SupportCog(commands.Cog):
             if channel:
                 msgs = []
                 async for m in channel.history(limit=1000, oldest_first=True):
+                    # 過濾掉系統提示訊息，保留對話內容
                     if m.author.bot and not m.content.startswith("✨"): continue
                     msgs.append(f"[{m.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {m.author.display_name}: {m.content}")
                 
@@ -363,11 +328,13 @@ class SupportCog(commands.Cog):
                 
                 await channel.delete()
 
-            # 2. 從原始 Embed 獲取數據
+            # 2. 從原始 Embed 獲取數據 (確保資訊不遺失)
             old_embed = origin_msg.embeds[0]
             user_name = old_embed.title.replace("❓ 來自 ", "")
+            # 解析原始內容
             content_match = re.search(r"```\n?(.*?)\n?```", old_embed.description, re.DOTALL)
             content = content_match.group(1) if content_match else "無法解析內容"
+            # 解析原本的發送時間
             send_time = old_embed.footer.text.split("|")[1].strip() if "|" in old_embed.footer.text else "未知時間"
 
             # 3. 構建「完整詳細資訊」總結 Embed
@@ -377,23 +344,25 @@ class SupportCog(commands.Cog):
             summary_embed.add_field(name="👤 用戶資訊", value=f"名稱：**{user_name}**\nID：`{user_id}`", inline=True)
             summary_embed.add_field(name="🏢 伺服器資訊", value=f"目標：**{origin_msg.guild.name}**\nID：`{origin_msg.guild.id}`", inline=True)
             summary_embed.add_field(name="📊 案件統計", value=f"發送時間：`{send_time}`\n狀態：`已結案`", inline=False)
-            summary_embed.add_field(name="📝 原始問題回顧", value=f"```\n{content[:800]}\n
-```", inline=False)
+            summary_embed.add_field(name="📝 原始問題回顧", value=f"```\n{content[:800]}\n```", inline=False)
             
             summary_embed.set_footer(text=f"處理者：{closer_name} | 案件 ID：{origin_msg.id}")
 
             # 4. 建立按鈕 View
             view = ui.View(timeout=None)
+            # 加上跳轉原始訊息的連結按鈕
             jump_url = f"https://discord.com/channels/{origin_msg.guild.id}/{origin_msg.channel.id}/{origin_msg.id}"
             view.add_item(ui.Button(label="查看訊息紀錄", style=discord.ButtonStyle.link, url=jump_url))
 
             # 5. 上傳紀錄檔並提供下載按鈕
             if os.path.exists(file_path):
-                log_chan = self.bot.get_channel(1470291339118641253)
+                log_chan = self.bot.get_channel(1470291339118641253) # 確保這裡 ID 正確
                 if log_chan:
                     file_msg = await log_chan.send(content=f"📁 案件結案紀錄: `{user_name}` (`{user_id}`)", file=discord.File(file_path))
+                    # 將附件網址做成按鈕
                     view.add_item(ui.Button(label="📄 下載對話紀錄", style=discord.ButtonStyle.link, url=file_msg.attachments[0].url))
             
+            # 最後更新原始的管理端訊息
             await origin_msg.edit(embed=summary_embed, view=view)
             
         except Exception as e:
