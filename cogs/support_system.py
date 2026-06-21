@@ -40,7 +40,7 @@ class ReplyModal(ui.Modal, title='回覆用戶問題'):
         )
         
         # 💡 這裡已經幫你把 3 個反引號 ``` 完美關閉，既不會報錯，Discord 灰色框框也最漂亮！
-        embed.add_field(name="您的原始問題:", value=f")
+        embed.add_field(name="您的原始問題:", value=f"```\n{self.original_content[:1000]}\n```", inline=False)
         embed.set_footer(text=f"回覆者：{admin_name} | {safe_now()}")
 
         if user_obj:
