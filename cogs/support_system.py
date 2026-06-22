@@ -226,8 +226,15 @@ class SupportCog(commands.Cog):
     async def cog_load(self):
         if not os.path.exists(self.transcript_dir):
             os.makedirs(self.transcript_dir)
-        # 💡 每次開機時，自動去你的私人頻道下載最新的一份備份檔
+        
+        # 建立一個背景任務，等機器人準備好（快取載入完畢）再執行還原
+        self.bot.loop.create_task(self.safe_load_config())
+
+    async def safe_load_config(self):
+        # 等待機器人完全 Ready
+        await self.bot.wait_until_ready()
         await self.load_config_from_discord()
+
 
      
     async def save_config_to_discord(self, guild_id: int) -> tuple[bool, str]:
