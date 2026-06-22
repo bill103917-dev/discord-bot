@@ -8,7 +8,6 @@ import re
 from typing import Dict, Tuple, Optional
 from datetime import datetime
 import aiohttp
-
 # =========================
 # -- 工具與基礎設定
 # =========================
@@ -227,7 +226,7 @@ class SupportCog(commands.Cog):
         # 💡 每次開機時，自動去你的私人頻道下載最新的一份備份檔
         await self.load_config_from_discord()
 
-    # 📤 雲端備份：將資料包成 JSON 檔，傳送到你的私人頻道 1518065055466262649
+     
     async def save_config_to_discord(self):
         channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
         if not channel:
