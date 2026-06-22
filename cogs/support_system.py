@@ -219,6 +219,7 @@ class SupportCog(commands.Cog):
         self.user_target_guild = {}   # 記憶體用戶選擇目標
         self.transcript_dir = "transcripts"
         self._cd_mapping = commands.CooldownMapping.from_cooldown(1, 7.0, commands.BucketType.user)
+        self.temp_file_cache = {}
 
     async def cog_load(self):
         if not os.path.exists(self.transcript_dir):
@@ -227,56 +228,104 @@ class SupportCog(commands.Cog):
         await self.load_config_from_discord()
 
      
-    async def save_config_to_discord(self):
-        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
-        if not channel:
-            print(f"❌ 錯誤：找不到私人儲存頻道 {DATA_STORAGE_CHANNEL_ID}，無法備份！")
-            return
+    async def save_config_to_discord(self, guild_id: int) -> tuple[bool, str]:
+        """
+        自動將設定備份到指定的私人頻道。
+        流程：
+        1. 先產生檔案內容並儲存到記憶體中
+        2. 嘗試發送到私人頻道
+        3. 成功則刪除記憶體的檔案快取
+        4. 失敗則啟動第二重救援，從記憶體拿出檔案重試
+        5. 二次失敗則回報並寫入 Render 日誌
+        """
+        # 💡 步驟 1：先產生檔案內容，把檔案暫存到記憶體中
         try:
-            # 整理要備份的資料（將 int 轉成 str 避免 JSON 格式報錯）
             payload = {
                 "support_config": {str(k): v for k, v in self.support_config.items()},
                 "user_target_guild": {str(k): v for k, v in self.user_target_guild.items()}
             }
             data_str = json.dumps(payload, ensure_ascii=False, indent=4)
-            data_file = discord.File(io.StringIO(data_str), filename="bot_config_backup.json")
             
-            # 直接發送到你的私人頻道
-            await channel.send(content="🔄 [系統設定備份] 已更新客服轉發設定與用戶選擇目標", file=data_file)
-            print("✅ 設定與用戶資料已成功傳送至私人頻道備份！")
+            # 將產生的檔案內容寫入記憶體暫存 (temp_file_cache)
+            self.temp_file_cache[guild_id] = data_str
+            print(f"📦 [記憶體快取] 已成功將設定檔備份封包儲存至記憶體暫存區。")
         except Exception as e:
-            print(f"❌ 備份至私人頻道時發生錯誤: {e}")
+            err_msg = f"記憶體包裝設定檔失敗: {e}"
+            print(f"❌ [Render 日誌] {err_msg}")
+            return False, err_msg
 
-    # 📥 雲端還原：開機時自動從你的私人頻道讀取最新的備份檔
-    async def load_config_from_discord(self):
+        # 💡 步驟 2：嘗試傳送到你的私人頻道
         channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
         if not channel:
-            print(f"❌ 錯誤：找不到私人儲存頻道 {DATA_STORAGE_CHANNEL_ID}，無法還原設定！")
-            return
-        
-        print("🔍 正在從您的私人頻道讀取歷史備份...")
-        try:
-            # 搜尋私人頻道最近的 50 則訊息，找到最新的備份檔案
-            async for message in channel.history(limit=50):
-                if message.author == self.bot.user and message.attachments:
-                    for attachment in message.attachments:
-                        if attachment.filename == "bot_config_backup.json":
-                            file_bytes = await attachment.read()
-                            data = json.loads(file_bytes.decode('utf-8'))
-                            
-                            # 還原回 int 格式，讓機器人可以正常讀取
-                            self.support_config = {int(k): v for k, v in data.get("support_config", {}).items()}
-                            self.user_target_guild = {int(k): v for k, v in data.get("user_target_guild", {}).items()}
-                            
-                            print(f"==== 💾 私人頻道設定還原成功 ====")
-                            print(f"已載入 {len(self.support_config)} 筆伺服器轉發設定")
-                            print(f"已載入 {len(self.user_target_guild)} 筆用戶目標設定")
-                            print(f"=====================================")
-                            return
-            print("ℹ️ 提示：私人頻道中沒有找到任何設定檔，將使用全新設定。")
-        except Exception as e:
-            print(f"❌ 還原雲端設定時發生錯誤: {e}")
+            try:
+                # 快取沒有就強制向 Discord API 撈取
+                channel = await self.bot.fetch_channel(DATA_STORAGE_CHANNEL_ID)
+            except Exception as e:
+                # 第一次嘗試讀取頻道就失敗，立刻觸發「從記憶體拿出檔案重試」救援機制
+                return await self.handle_backup_retry(guild_id, f"無法定位私人頻道: {e}")
 
+        try:
+            # 從記憶體中讀取快取好的檔案字串
+            file_data = self.temp_file_cache.get(guild_id)
+            if not file_data:
+                raise ValueError("記憶體暫存區中找不到資料")
+
+            # 建立虛擬檔案
+            data_file = discord.File(io.StringIO(file_data), filename="bot_config_backup.json")
+            
+            # 發送檔案與文字
+            await channel.send(
+                content="🧪 **[連線與備份測試]** 機器人已成功連線，正在將最新的設定備份檔案發送至此頻道！",
+                file=data_file
+            )
+            
+            # 💡 步驟 3：如果傳送成功，就刪除記憶體中的暫存檔案
+            self.temp_file_cache.pop(guild_id, None)
+            print("✅ [Render 日誌] 備份檔案傳送成功！已將記憶體暫存檔案刪除並清空快取。")
+            return True, ""
+
+        except Exception as e:
+            # 💡 步驟 4：首次傳送失敗，立刻將檔案從記憶體中拿出來進行第二次備份嘗試
+            return await self.handle_backup_retry(guild_id, f"首次發送失敗: {e}")
+
+    async def handle_backup_retry(self, guild_id: int, first_error_msg: str) -> tuple[bool, str]:
+        """救援機制：當首次備份失敗時，將檔案從記憶體中拿出來，嘗試第二次傳送"""
+        print(f"⚠️ [Render 日誌] 備份傳送意外中斷（原因：{first_error_msg}）。正在從記憶體拿出檔案，執行二次救援嘗試...")
+        
+        # 💡 從記憶體保險箱中拿出剛才暫存的檔案資料
+        cached_data = self.temp_file_cache.get(guild_id)
+        if not cached_data:
+            err_msg = "記憶體救援失敗：暫存快取中找不到可用的檔案封包！"
+            print(f"❌ [Render 日誌] {err_msg}")
+            return False, err_msg
+
+        try:
+            # 重新強制撈取頻道連線
+            channel = await self.bot.fetch_channel(DATA_STORAGE_CHANNEL_ID)
+            
+            # 重新建立虛擬檔案
+            data_file = discord.File(io.StringIO(cached_data), filename="bot_config_backup.json")
+            
+            # 進行二次發送
+            await channel.send(
+                content="🔄 **[備份救援重試]** 首次備份因意外中斷，已從記憶體中復原設定檔並重新上傳成功！",
+                file=data_file
+            )
+            
+            # 重試成功，刪除記憶體中的檔案暫存
+            self.temp_file_cache.pop(guild_id, None)
+            print("✅ [Render 日誌] 備份救援成功！記憶體中的暫存檔案已安全刪除。")
+            return True, ""
+            
+        except Exception as retry_error:
+            # 💡 步驟 5：如果還是儲存失敗，直接回報詳細錯誤日誌，並印到 Render 控制台中
+            final_err_msg = f"第二次備份重試依然失敗。首次錯誤: {first_error_msg} | 二次重試錯誤: {retry_error}"
+            
+            # 印到 Render 控制台日誌（方便你去後台查看）
+            print(f"❌ [Render 日誌] 客服系統備份徹底失敗！這將導致重開機後設定流失！詳細錯誤日誌: {final_err_msg}")
+            
+            # 傳回 False 與完整錯誤原因
+            return False, final_err_msg
                 
     async def init_db(self):
         if not self.db_url: return
@@ -299,14 +348,22 @@ class SupportCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         gid, cid, rid = interaction.guild.id, channel.id, (role.id if role else None)
-        
-        # 寫入記憶體中
         self.support_config[gid] = [cid, rid]
         
-        # 💡 自動備份：立刻傳送一份最新的檔案到你的私人頻道
-        await self.save_config_to_discord()
+        # 💡 呼叫備份並傳入當前伺服器 ID，執行我們設計的記憶體救援流程
+        success, err = await self.save_config_to_discord(gid)
         
-        await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已自動傳送至私人頻道備份！", ephemeral=True)
+        if success:
+            await interaction.followup.send(f"✅ 已成功將 {channel.mention} 設定為轉發頻道，並已同步永久儲存於私人頻道！", ephemeral=True)
+        else:
+            # 💡 如果第二次也儲存失敗，直接跟用戶（管理員）報告錯誤，告知去 Render 日誌查看詳細細節
+            await interaction.followup.send(
+                f"❌ 轉發設定完成，但**二次備份嘗試皆失敗**，設定無法永久保存！\n"
+                f"**錯誤報告：** `{err}`\n"
+                f"⚠️ 請檢查機器人在私人頻道中是否被關閉了「檢視頻道」、「傳送訊息」或「嵌入連結與發送檔案」權限！詳細崩潰資訊已同步紀錄至 Render 控制台日誌中。", 
+                ephemeral=True
+            )
+
         
     @app_commands.command(name="select_server", description="選擇或切換您要發送問題的目標伺服器")
     async def select_server(self, interaction: Interaction):
