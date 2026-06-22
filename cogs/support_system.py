@@ -8,6 +8,8 @@ import re
 from typing import Dict, Tuple, Optional
 from datetime import datetime
 import aiohttp
+import io
+import json
 # =========================
 # -- 工具與基礎設定
 # =========================
