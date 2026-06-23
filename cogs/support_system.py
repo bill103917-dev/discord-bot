@@ -235,7 +235,39 @@ class SupportCog(commands.Cog):
         await self.bot.wait_until_ready()
         await self.load_config_from_discord()
 
-
+    # 📥 雲端還原：開機時自動從你的私人頻道讀取最新的備份檔
+    async def load_config_from_discord(self):
+        channel = self.bot.get_channel(DATA_STORAGE_CHANNEL_ID)
+        if not channel:
+            try:
+                channel = await self.bot.fetch_channel(DATA_STORAGE_CHANNEL_ID)
+            except Exception as e:
+                print(f"❌ 還原設定失敗：無法定位私人頻道 ({e})")
+                return
+        
+        print("🔍 正在從您的私人頻道讀取歷史備份...")
+        try:
+            # 搜尋私人頻道最近的 50 則訊息，找到最新的備份檔案
+            async for message in channel.history(limit=50):
+                if message.author == self.bot.user and message.attachments:
+                    for attachment in message.attachments:
+                        if attachment.filename == "bot_config_backup.json":
+                            file_bytes = await attachment.read()
+                            data = json.loads(file_bytes.decode('utf-8'))
+                            
+                            # 還原回 int 格式，讓機器人可以正常讀取
+                            self.support_config = {int(k): v for k, v in data.get("support_config", {}).items()}
+                            self.user_target_guild = {int(k): v for k, v in data.get("user_target_guild", {}).items()}
+                            
+                            print(f"==== 💾 私人頻道設定還原成功 ====")
+                            print(f"已載入 {len(self.support_config)} 筆伺服器轉發設定")
+                            print(f"已載入 {len(self.user_target_guild)} 筆用戶目標設定")
+                            print(f"=====================================")
+                            return
+            print("ℹ️ 提示：私人頻道中沒有找到任何設定檔，將使用全新設定。")
+        except Exception as e:
+            print(f"❌ 還原雲端設定時發生錯誤: {e}")
+     
      
     async def save_config_to_discord(self, guild_id: int) -> tuple[bool, str]:
         """
@@ -296,6 +328,8 @@ class SupportCog(commands.Cog):
         except Exception as e:
             # 💡 步驟 4：首次傳送失敗，立刻將檔案從記憶體中拿出來進行第二次備份嘗試
             return await self.handle_backup_retry(guild_id, f"首次發送失敗: {e}")
+
+
 
     async def handle_backup_retry(self, guild_id: int, first_error_msg: str) -> tuple[bool, str]:
         """救援機制：當首次備份失敗時，將檔案從記憶體中拿出來，嘗試第二次傳送"""
