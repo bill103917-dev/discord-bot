@@ -76,8 +76,8 @@ class ServerSelectView(ui.View):
         # 儲存在記憶體
         self.cog.user_target_guild[self.user_id] = sid
         
-        # 💡 自動備份：將最新的對照資料傳送到你的私人頻道
-        await self.cog.save_config_to_discord()
+        # 💡 修正：傳入 sid (即 guild_id)，配合新版備份機制的參數要求
+        await self.cog.save_config_to_discord(sid)
         
         await interaction.response.edit_message(content=f"✅ 已成功將目標設定為：**{guild_name}**\n現在您可以直接發送私訊，我會幫您轉發。", view=None)
 
