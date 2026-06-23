@@ -314,8 +314,7 @@ class SupportCog(commands.Cog):
             
             # 💡 修改處：將發送內容改成顯示目標伺服器的名稱與 ID
             await channel.send(
-                content=f"🧪 **[連線與備份測試]**\n"
-                        f"• 來源伺服器：**{guild_name}**\n"
+                content=f"• 來源伺服器：**{guild_name}**\n"
                         f"• 伺服器 ID：`{guild_id}`\n"
                         f"機器人已成功連線，正在將最新的設定備份檔案發送至此頻道！",
                 file=data_file
