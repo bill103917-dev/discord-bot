@@ -1195,7 +1195,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-        BackupSystem, ImageDrawCog, ScheduledUploadCog
+        BackupSystem, ImageDrawCog
     ]
 
     for cog in cog_list:
