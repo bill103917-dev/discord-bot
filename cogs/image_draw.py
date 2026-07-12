@@ -18,7 +18,7 @@ except ImportError:
 # ==========================================
 # ⚙️ 預設環境設定（若環境變數中無設定則使用此預設值）
 # ==========================================
-DEFAULT_TARGET_CHANNEL_ID = 1518065055466262649  # 您的圖庫頻道 ID
+DEFAULT_TARGET_CHANNEL_ID = 1446781237422198855  # 您的圖庫頻道 ID
 DEFAULT_TEMP_UPLOAD_FOLDER = "temp_uploads"       # 本地暫存上傳資料夾
 
 class ImageDrawCog(commands.Cog):
