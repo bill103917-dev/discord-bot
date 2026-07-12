@@ -10,7 +10,7 @@ import asyncio
 import traceback
 import discord
 from cogs.support_system import SupportCog
-from cogs.image_draw import ImageDrawCog, ScheduledUploadCog
+from cogs.image_draw import ImageDrawCog
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
