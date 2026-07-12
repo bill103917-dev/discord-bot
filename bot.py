@@ -691,6 +691,7 @@ class ModerationCog(commands.Cog):
 class FunCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        
     @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
     async def gay_probability(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         # 紀錄指令使用
@@ -761,7 +762,7 @@ class FunCog(commands.Cog):
     @app_commands.command(name="氣泡紙", description="發送一個巨大的氣泡紙，來戳爆它吧！")
     async def bubble_wrap_command(self, interaction: Interaction):
         await log_command(interaction, "/氣泡紙")
-        bubble = "||啪|| " * 200
+        bubble = "||啪||" * 199
         await interaction.response.send_message(f"點擊這些氣泡來戳爆它們！\n{bubble}")
 
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
