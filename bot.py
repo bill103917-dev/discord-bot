@@ -1277,27 +1277,22 @@ LOG_VIEWER_IDS = [1238436456041676853]
 # --------------------------
 
 
+
 # ===============================================
-# 🖼️ 圖片上傳與抽圖服務 (統一區塊)
+# 🖼️ 圖片即時上傳與代理服務 (已修改為直接發送)
 # ===============================================
 
-# 🚨 配置區塊 - 請務必替換 TARGET_CHANNEL_ID
-# 暫存區：用於存放網頁上傳後、Bot 尚未轉發前的圖片
+# 🚨 你的專屬私人備份頻道 ID (已替換為您指定的私人頻道)
+TARGET_CHANNEL_ID = 1518065055466262649  
+
+# 暫存區：圖片上傳後暫存，發送至 Discord 成功後會立刻自動刪除
 TEMP_UPLOAD_FOLDER = 'static/temp_uploads' 
-
-# 💡 內部通訊 URL：Bot 服務的 HTTP 代理端口 (Render 服務間通常為 localhost:8080)
-BOT_API_URL = "http://localhost:8080/api/upload_proxy" 
-
-# 🚨 替換成您希望圖片發送到的 Discord 頻道 ID
-TARGET_CHANNEL_ID = "1446781237422198855" 
-
-# 設定 Flask 檔案儲存路徑為暫存區
 app.config['UPLOAD_FOLDER'] = os.path.join(basedir, TEMP_UPLOAD_FOLDER) 
 
-# 建立暫存資料夾
+# 確保臨時暫存資料夾存在
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-    print(f"✅ 已建立暫存資料夾: {app.config['UPLOAD_FOLDER']}")
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    print(f"✅ 已建立臨時暫存資料夾: {app.config['UPLOAD_FOLDER']}")
 
 
 def allowed_file(filename):
@@ -1305,56 +1300,84 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- 路由: 網頁上傳處理 (完整替換) ---
+
+# 💡 [非同步發送輔助函式]：負責實際將檔案送上 Discord 私人頻道
+async def send_file_to_discord_async(file_path: str, filename: str):
+    """在 Bot 的事件循環中非同步發送檔案，並在發送完成後刪除本地檔案"""
+    # 這裡的 bot 變數請對應您 bot.py 中的 Bot 實體名稱 (例如 bot 或 client)
+    channel = bot.get_channel(TARGET_CHANNEL_ID)
+    if not channel:
+        channel = await bot.fetch_channel(TARGET_CHANNEL_ID)
+        
+    if not channel:
+        raise ValueError(f"無法找到指定的 Discord 頻道 ID: {TARGET_CHANNEL_ID}")
+
+    # 建立 Discord 檔案物件並發送
+    discord_file = discord.File(file_path, filename=filename)
+    await channel.send(
+        content=f"📤 **[網頁即時上傳]** 有人從管理網頁成功上傳了新圖片！\n• 檔名：`{filename}`", 
+        file=discord_file
+    )
+
+
+# --- 路由: 網頁即時上傳處理 (已修改為即時發送並清空暫存) ---
 @app.route('/upload_web', methods=['GET', 'POST'])
 def upload_file_from_web():
     if request.method == 'POST':
-        # 1. 檢查是否有檔案上傳
+        # 1. 檢查是否有選擇檔案
         if 'file' not in request.files:
-            # 如果使用者提交表單但沒有選擇檔案
             return render_template('upload.html', message="❌ 請選擇檔案", status="error")
         
-        # 2. 使用 getlist('input_name') 獲取所有檔案 (支援多檔案)
         uploaded_files = request.files.getlist('file')
-        
         saved_count = 0
         error_count = 0
         
         for file in uploaded_files:
-            # 檢查檔案是否有效且檔名不為空
             if file.filename == '':
                 continue
                 
             if file and allowed_file(file.filename):
+                temp_path = None
                 try:
                     extension = file.filename.rsplit('.', 1)[1].lower()
-                    # 使用 UUID 作為檔名，確保唯一性
                     random_filename = f"{uuid.uuid4().hex}.{extension}"
                     temp_path = os.path.join(app.config['UPLOAD_FOLDER'], random_filename)
                     
-                    # 儲存到本地暫存資料夾
+                    # A. 先將上傳的圖片儲存至本地臨時位置
                     file.save(temp_path)
+                    
+                    # B. 💡 關鍵步驟：跨執行緒呼叫 Discord Bot 的 asyncio 循環，執行「即時發送」
+                    # 使用 run_coroutine_threadsafe 將協程交給 Bot 執行，並等待其完成
+                    future = asyncio.run_coroutine_threadsafe(
+                        send_file_to_discord_async(temp_path, random_filename),
+                        bot.loop  # 確保與 Bot 使用同一個事件循環
+                    )
+                    
+                    # 等待 Discord 發送成功 (逾時設為 15 秒避免卡住網頁)
+                    future.result(timeout=15)
                     saved_count += 1
                     
                 except Exception as e:
-                    # 儲存時發生錯誤
-                    print(f"儲存檔案時發生錯誤: {e}")
+                    print(f"❌ 圖片即時發送至 Discord 失敗: {e}")
                     error_count += 1
+                finally:
+                    # C. 💡 傳送完成後，不論成功或失敗，立刻把本地臨時檔案刪除，絕不留垃圾在伺服器上！
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception as delete_error:
+                            print(f"⚠️ 無法刪除臨時檔案 {temp_path}: {delete_error}")
             else:
-                # 檔案格式不支援
                 error_count += 1
 
-        # 3. 根據結果返回訊息
+        # 3. 根據結果返回網頁訊息
         if saved_count > 0:
-            message = f"✅ 成功接收 {saved_count} 張圖片！預計 10 分鐘內會同步至 Discord 頻道 ({TARGET_CHANNEL_ID})。"
+            message = f"✅ 成功即時同步 {saved_count} 張圖片至 Discord 私人頻道 ({TARGET_CHANNEL_ID})！"
             status = "success"
-
         elif error_count > 0 and saved_count == 0:
-            # 雖然選擇了檔案，但所有檔案都不符合要求
-            message = "❌ 所有選擇的檔案都無效或格式不支援 (僅限 png, jpg, jpeg, gif)。"
+            message = "❌ 圖片上傳失敗，可能是不支援的格式，或機器人尚未啟動完畢。"
             status = "error"
         else:
-            # 理論上不應該發生，但作為 fallback
             message = "❌ 請選擇檔案"
             status = "error"
             
@@ -1364,10 +1387,11 @@ def upload_file_from_web():
     return render_template('upload.html')
 
 
-# --- 路由: 棄用舊的圖片服務 API (替換您的 /random_image 函式) ---
+# --- 路由: 棄用舊的隨機圖片 API ---
 @app.route('/random_image', methods=['GET'])
 def get_random_image_deprecated():
-    return jsonify({'success': False, 'message': '圖片服務已改為定時排程上傳，請使用 Bot 的 /抽圖 指令。'}), 404
+    return jsonify({'success': False, 'message': '網頁即時上傳已啟用。上傳後圖片會立刻傳送至私人頻道，本機暫存已自動清空。'}), 404
+
 
 
 # ===============================================
