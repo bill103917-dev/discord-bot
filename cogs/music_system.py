@@ -354,4 +354,4 @@ class MusicCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(MusicCog(bot)
+    await bot.add_cog(MusicCog(bot))
