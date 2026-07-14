@@ -5,6 +5,17 @@ import asyncio
 import yt_dlp
 import os
 import random
+import shutil
+import traceback
+
+# ==========================================
+# 🔍 系統相依性檢查 (自動尋找 ffmpeg)
+# ==========================================
+FFMPEG_PATH = shutil.which("ffmpeg")
+if FFMPEG_PATH:
+    print(f"✅ [音樂系統] 成功在系統路徑找到 FFmpeg: {FFMPEG_PATH}")
+else:
+    print("❌ [音樂系統 警告] 在系統中找不到 FFmpeg！機器人將無法播放任何語音！")
 
 # ==========================================
 # ⚙️ YouTube Cookie 安全載入機制
@@ -16,8 +27,8 @@ if YT_COOKIES_CONTENT:
     COOKIE_FILE_PATH = "temp_youtube_cookies.txt"
     try:
         with open(COOKIE_FILE_PATH, "w", encoding="utf-8") as f:
-            f.write(YT_COOKIES_CONTENT)
-        print("✅ [音樂系統] 已成功從環境變數載入 YouTube Cookie！")
+            f.write(YT_COOKIES_CONTENT.strip())
+        print("✅ [音樂系統] 已成功從環境變數載入 YouTube Cookie 檔案！")
     except Exception as e:
         print(f"❌ [音樂系統] 寫入 Cookie 失敗: {e}")
         COOKIE_FILE_PATH = None
@@ -26,7 +37,7 @@ if YT_COOKIES_CONTENT:
 # ⚙️ yt-dlp 與 FFmpeg 終極安全配置
 # ==========================================
 YTDL_FORMAT_OPTIONS = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio/best',  
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
@@ -37,7 +48,6 @@ YTDL_FORMAT_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    # 🚀 【核心修正】模擬 iOS 與 Android 用戶端，繞過網頁版 PoToken 與 IP 限制！
     'extractor_args': {
         'youtube': {
             'player_client': ['ios', 'android'],
@@ -45,16 +55,16 @@ YTDL_FORMAT_OPTIONS = {
     },
 }
 
-# 備用降級配置
 FALLBACK_FORMAT_OPTIONS = YTDL_FORMAT_OPTIONS.copy()
-FALLBACK_FORMAT_OPTIONS['format'] = 'best'
+if 'format' in FALLBACK_FORMAT_OPTIONS:
+    del FALLBACK_FORMAT_OPTIONS['format']
 
 if COOKIE_FILE_PATH:
     YTDL_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
     FALLBACK_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 1048576',
     'options': '-vn',
 }
 
@@ -66,16 +76,13 @@ ytdl_fallback = yt_dlp.YoutubeDL(FALLBACK_FORMAT_OPTIONS)
 # 🛡️ 雙重安全解析輔助函式
 # ==========================================
 async def safe_extract_info(loop, url, download=False, process=False):
-    """
-    安全解析 YouTube 影片資訊。
-    採用 iOS/Android 用戶端模擬，並在極端情況下自動進行格式降級。
-    """
     def _extract():
         try:
             return ytdl.extract_info(url, download=download, process=process)
-        except yt_dlp.utils.DownloadError as e:
-            if "Requested format is not available" in str(e):
-                print(f"⚠️ [音樂系統] 偵測到特殊限制，啟動安全備用降級解析...")
+        except Exception as e:
+            err_str = str(e)
+            if "Requested format is not available" in err_str or "format" in err_str.lower():
+                print(f"⚠️ [音樂系統] 格式受限，啟動『無限制格式』備用解析協定...")
                 return ytdl_fallback.extract_info(url, download=download, process=process)
             raise e
 
@@ -86,7 +93,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
         self.data = data
-        self.title = data.get('title')
+        self.title = data.get('title', '未知歌曲')
         self.url = data.get('url')
         self.duration = data.get('duration', 0)
         self.thumbnail = data.get('thumbnail')
@@ -101,7 +108,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
             data = data['entries'][0]
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
+        
+        ffmpeg_exe = FFMPEG_PATH if FFMPEG_PATH else "ffmpeg"
+        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_exe, **FFMPEG_OPTIONS), data=data)
 
 
 # ==========================================
@@ -124,7 +133,6 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="⏪", style=ButtonStyle.secondary, custom_id="btn_replay", row=0)
     async def replay_button(self, interaction: Interaction, button: discord.ui.Button):
-        """重播當前歌曲"""
         await interaction.response.defer()
         vc = interaction.guild.voice_client
         if vc and self.cog.current_track.get(self.guild_id):
@@ -135,7 +143,6 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="⏸️", style=ButtonStyle.primary, custom_id="btn_pause", row=0)
     async def pause_button(self, interaction: Interaction, button: discord.ui.Button):
-        """暫停 / 恢復播放"""
         vc = interaction.guild.voice_client
         if not vc:
             return await interaction.response.send_message("❌ 機器人未連線！", ephemeral=True)
@@ -155,7 +162,6 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="⏩", style=ButtonStyle.secondary, custom_id="btn_skip", row=0)
     async def skip_button(self, interaction: Interaction, button: discord.ui.Button):
-        """跳過歌曲"""
         await interaction.response.defer()
         vc = interaction.guild.voice_client
         if vc and (vc.is_playing() or vc.is_paused()):
@@ -163,7 +169,6 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="🔀", style=ButtonStyle.secondary, custom_id="btn_shuffle", row=0)
     async def shuffle_button(self, interaction: Interaction, button: discord.ui.Button):
-        """隨機打亂歌單"""
         queue = self.cog.get_queue(self.guild_id)
         if len(queue) < 2:
             return await interaction.response.send_message("❌ 佇列內歌曲太少，無法打亂！", ephemeral=True)
@@ -173,7 +178,6 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="⏹️", style=ButtonStyle.danger, custom_id="btn_stop", row=0)
     async def stop_button(self, interaction: Interaction, button: discord.ui.Button):
-        """停止播放並退出"""
         await interaction.response.defer()
         vc = interaction.guild.voice_client
         queue = self.cog.get_queue(self.guild_id)
@@ -204,7 +208,6 @@ class MusicCog(commands.Cog):
         return self.music_queues[guild_id]
 
     def create_progress_bar(self, duration: int) -> str:
-        """建立極簡風格的進度條"""
         if duration == 0:
             return "🔴 直播中"
             
@@ -218,7 +221,6 @@ class MusicCog(commands.Cog):
         return f"00:00 {bar} {time_str}"
 
     def build_now_playing_embed(self, player, user_mention: str) -> discord.Embed:
-        """建立中文化且不帶粉色調的高質感音樂卡片"""
         embed = discord.Embed(
             title="▶️ 正在播放：",
             description=f"**[{player.title}]({player.webpage_url})**\n\n🕒 **歌曲長度：** {self.create_progress_bar(player.duration)}\n👤 **點歌者：** {user_mention}",
@@ -231,7 +233,6 @@ class MusicCog(commands.Cog):
         return embed
 
     def play_next(self, guild_id: int, channel):
-        """播放下一首歌曲"""
         vc = channel.guild.voice_client
         if not vc:
             return
@@ -244,9 +245,25 @@ class MusicCog(commands.Cog):
             coro = YTDLSource.from_url(next_song['url'], loop=self.bot.loop, stream=True)
             future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
             
+            # 💡 動態字串拼接定義，防範 markdown 溢出問題
+            ticks = "```"
+
             try:
                 player = future.result()
-                vc.play(player, after=lambda e: self.play_next(guild_id, channel))
+                
+                def after_playing_callback(error):
+                    if error:
+                        print(f"❌ [音樂系統] 播放中途發生錯誤: {error}")
+                        err_embed = discord.Embed(
+                            title="⚠️ 播放中途因錯誤中斷",
+                            description=f"歌曲: `{next_song['title']}`\n\n**詳細錯誤成因：**\n{ticks}text\n{str(error)[:1500]}\n{ticks}",
+                            color=discord.Color.red()
+                        )
+                        asyncio.run_coroutine_threadsafe(channel.send(embed=err_embed), self.bot.loop)
+                    
+                    self.play_next(guild_id, channel)
+
+                vc.play(player, after=after_playing_callback)
                 
                 embed = self.build_now_playing_embed(player, next_song['requester'])
                 view = MusicControlView(self, guild_id)
@@ -263,8 +280,17 @@ class MusicCog(commands.Cog):
                 asyncio.run_coroutine_threadsafe(send_panel(), self.bot.loop)
 
             except Exception as e:
-                print(f"❌ 播放下一首時出錯: {e}")
-                asyncio.run_coroutine_threadsafe(channel.send(f"❌ 播放歌曲 `{next_song['title']}` 失敗。自動播放下一首。"), self.bot.loop)
+                print(f"❌ [音樂系統] 播放加載失敗: {e}")
+                tb_str = traceback.format_exc()
+                
+                err_embed = discord.Embed(
+                    title="❌ 歌曲播放失敗 (加載階段)",
+                    description=f"無法加載並播送歌曲：`{next_song['title']}`\n\n**詳細錯誤日誌：**\n{ticks}text\n{tb_str[:1500]}\n{ticks}",
+                    color=discord.Color.red()
+                )
+                err_embed.set_footer(text="💡 提示：如果出現 403 Forbidden，請確認並更新 YT_COOKIES 環境變數")
+                
+                asyncio.run_coroutine_threadsafe(channel.send(embed=err_embed), self.bot.loop)
                 self.play_next(guild_id, channel)
         else:
             if guild_id in self.current_track:
@@ -272,7 +298,6 @@ class MusicCog(commands.Cog):
             asyncio.run_coroutine_threadsafe(self.auto_disconnect(channel.guild), self.bot.loop)
 
     async def auto_disconnect(self, guild):
-        """歌單播完後，自動退出頻道"""
         await asyncio.sleep(180)
         vc = guild.voice_client
         if vc and not vc.is_playing() and len(self.get_queue(guild.id)) == 0:
@@ -302,9 +327,11 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         queue = self.get_queue(guild_id)
 
+        # 💡 動態字串拼接定義，防範 markdown 溢出問題
+        ticks = "```"
+
         try:
             loop = self.bot.loop or asyncio.get_event_loop()
-            # 💡 這裡也全面採用手機 App 模擬安全解析通道！
             data = await safe_extract_info(loop, url, download=False, process=False)
             
             title = data.get('title', '未知歌曲')
@@ -337,7 +364,19 @@ class MusicCog(commands.Cog):
             else:
                 self.current_track[guild_id] = song_info
                 player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
-                vc.play(player, after=lambda e: self.play_next(guild_id, interaction.channel))
+                
+                def after_playing_callback(error):
+                    if error:
+                        print(f"❌ [音樂系統] 播放首首歌中途發生錯誤: {error}")
+                        err_embed = discord.Embed(
+                            title="⚠️ 播放中途因錯誤中斷",
+                            description=f"歌曲: `{title}`\n\n**詳細錯誤成因：**\n{ticks}text\n{str(error)[:1500]}\n{ticks}",
+                            color=discord.Color.red()
+                        )
+                        asyncio.run_coroutine_threadsafe(interaction.channel.send(embed=err_embed), self.bot.loop)
+                    self.play_next(guild_id, interaction.channel)
+
+                vc.play(player, after=after_playing_callback)
                 
                 embed = self.build_now_playing_embed(player, interaction.user.mention)
                 view = MusicControlView(self, guild_id)
@@ -346,7 +385,13 @@ class MusicCog(commands.Cog):
                 self.control_messages[guild_id] = msg
 
         except Exception as e:
-            await interaction.followup.send(f"❌ 播放失敗，原因：`{e}`", ephemeral=True)
+            tb_str = traceback.format_exc()
+            err_embed = discord.Embed(
+                title="❌ 指令解析失敗",
+                description=f"無法解析此網址：`{url}`\n\n**錯誤原因：**\n{ticks}text\n{tb_str[:1500]}\n{ticks}",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=err_embed, ephemeral=False)
 
 
 async def setup(bot):
