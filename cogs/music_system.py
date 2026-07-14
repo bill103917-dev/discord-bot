@@ -26,7 +26,7 @@ if YT_COOKIES_CONTENT:
 # ⚙️ yt-dlp 與 FFmpeg 配置
 # ==========================================
 YTDL_FORMAT_OPTIONS = {
-    'format': 'bestaudio/best/ba/b',
+    'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
