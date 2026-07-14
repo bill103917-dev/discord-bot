@@ -6,6 +6,23 @@ import yt_dlp
 import os
 
 # ==========================================
+# ⚙️ YouTube Cookie 安全載入機制
+# ==========================================
+COOKIE_FILE_PATH = None
+YT_COOKIES_CONTENT = os.getenv("YT_COOKIES")
+
+# 如果在環境變數中有找到 Cookie 內容，則寫入臨時檔案
+if YT_COOKIES_CONTENT:
+    COOKIE_FILE_PATH = "temp_youtube_cookies.txt"
+    try:
+        with open(COOKIE_FILE_PATH, "w", encoding="utf-8") as f:
+            f.write(YT_COOKIES_CONTENT)
+        print("✅ [音樂系統] 已成功從環境變數載入 YouTube Cookie 檔案！")
+    except Exception as e:
+        print(f"❌ [音樂系統] 寫入 Cookie 檔案失敗: {e}")
+        COOKIE_FILE_PATH = None
+
+# ==========================================
 # ⚙️ yt-dlp 與 FFmpeg 配置
 # ==========================================
 YTDL_FORMAT_OPTIONS = {
@@ -22,11 +39,16 @@ YTDL_FORMAT_OPTIONS = {
     'source_address': '0.0.0.0',  # 綁定 IPv4
 }
 
+# 💡 如果有偵測到安全 Cookie，就將其注入 yt-dlp 設定中
+if COOKIE_FILE_PATH:
+    YTDL_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
+
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn',
 }
 
+# 建立預設的 yt-dlp 實體
 ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
 
 class YTDLSource(discord.PCMVolumeTransformer):
