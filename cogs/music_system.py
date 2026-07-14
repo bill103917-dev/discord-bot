@@ -1,111 +1,111 @@
 import discord
-from discord import app_commands, Interaction, ButtonStyle
 from discord.ext import commands
-import asyncio
-import yt_dlp
-import os
-import shutil
-import traceback
-import io
-import random
+from typing import Optional
+from utils.yt import YT
+from utils.queueSys import music_queue, channelQueue
+from cogs.utils import next_song
+from utils.logger import setup_logger
 
-# ==========================================
-# ⚙️ 系統初始化與配置
-# ==========================================
-FFMPEG_PATH = shutil.which("ffmpeg")
-YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'default_search': 'scsearch:', # 強制使用 SoundCloud 搜尋
-    'quiet': True,
-    'no_warnings': True,
-}
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+log = setup_logger(__name__)
 
-# ==========================================
-# 🎛️ 音樂控制台按鈕介面 (恢復完整功能)
-# ==========================================
-class MusicControlView(discord.ui.View):
-    def __init__(self, cog, guild_id: int):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
-
-    @discord.ui.button(emoji="⏸️", style=ButtonStyle.primary, custom_id="btn_pause")
-    async def pause_button(self, interaction: Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
-        if vc.is_playing():
-            vc.pause()
-            button.emoji = "▶️"
-            await interaction.response.edit_message(view=self)
-        elif vc.is_paused():
-            vc.resume()
-            button.emoji = "⏸️"
-            await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(emoji="⏩", style=ButtonStyle.secondary, custom_id="btn_skip")
-    async def skip_button(self, interaction: Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
-        vc.stop()
-        await interaction.response.send_message("⏭️ 已跳過歌曲", ephemeral=True)
-
-    @discord.ui.button(emoji="⏹️", style=ButtonStyle.danger, custom_id="btn_stop")
-    async def stop_button(self, interaction: Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
-        self.cog.queues[self.guild_id] = []
-        vc.stop()
-        await vc.disconnect()
-        await interaction.message.delete()
-
-# ==========================================
-# 🎵 音樂主核心 (恢復完整邏輯)
-# ==========================================
-class MusicCog(commands.Cog):
-    def __init__(self, bot):
+class Music(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.queues = {}
+        self.yt = YT()
 
-    def get_queue(self, guild_id):
-        if guild_id not in self.queues:
-            self.queues[guild_id] = []
-        return self.queues[guild_id]
+    @discord.app_commands.command(name="play", description="播放一首歌")
+    async def play(self, ctx: discord.Interaction, song: str, channel: Optional[discord.VoiceChannel] = None):
+        await ctx.response.defer()
+        
+        # 取得語音頻道
+        voice_channel = channel or (ctx.user.voice.channel if ctx.user.voice else None)
+        if not voice_channel:
+            return await ctx.followup.send("❌ 你必須先進入語音頻道！")
 
-    @app_commands.command(name="play", description="播放 Spotify 連結或歌曲名稱")
-    async def play(self, interaction: Interaction, url: str):
-        if "youtube.com" in url or "youtu.be" in url:
-            return await interaction.response.send_message("❌ YouTube 連結目前受限。", ephemeral=True)
-        
-        await interaction.response.defer()
-        
-        # 強制關鍵字轉換，防止觸發 DRM
-        query = f"scsearch:{url.split('/')[-1].split('?')[0]}" if "spotify" in url else url
-        
+        # 搜尋音樂
+        videos = self.yt.search(song, max_results=1)
+        if not videos:
+            return await ctx.followup.send(f"❌ 找不到關於 '{song}' 的結果")
+
+        video = videos[0]
+        voice = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+
+        # 連線邏輯
+        if not voice:
+            voice = await voice_channel.connect()
+        elif voice.channel != voice_channel:
+            await voice.move_to(voice_channel)
+
+        if isinstance(voice, discord.StageChannel):
+            await voice.guild.me.edit(suppress=False)
+
+        # 隊列處理
+        if voice not in music_queue:
+            music_queue[voice] = channelQueue(None, ctx)
+
+        if voice.is_playing():
+            music_queue[voice].add(video)
+            await ctx.followup.send(f"➕ 已加入隊列: **{video.title}**")
+            return
+
+        # 播放邏輯
         try:
-            data = await asyncio.get_event_loop().run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
-            song = data['entries'][0]
+            audio = self.yt.stream(video.id)
+            if not audio:
+                return await ctx.followup.send("❌ 無法獲取音訊串流。")
             
-            queue = self.get_queue(interaction.guild_id)
-            queue.append(song)
+            music_queue[voice].set_current(audio)
+            await ctx.followup.send(f"▶️ 正在播放: **{video.title}**")
             
-            if not interaction.guild.voice_client or not interaction.guild.voice_client.is_playing():
-                await self.play_music(interaction)
-            else:
-                await interaction.followup.send(f"📥 已加入佇列: **{song['title']}**")
+            voice.play(
+                music_queue[voice].audio,
+                after=lambda e: self.bot.loop.create_task(next_song(ctx)) if not e else log.error(f"播放錯誤: {e}")
+            )
         except Exception as e:
-            await interaction.followup.send(f"❌ 錯誤: {str(e)}")
+            log.error(f"播放時發生未預期錯誤: {e}")
+            await ctx.followup.send("❌ 播放過程中發生錯誤。")
 
-    async def play_music(self, interaction):
-        vc = await interaction.user.voice.channel.connect()
-        while self.get_queue(interaction.guild_id):
-            song = self.get_queue(interaction.guild_id).pop(0)
-            player = discord.FFmpegPCMAudio(song['url'], executable=FFMPEG_PATH, before_options='-reconnect 1 -reconnect_streamed 1')
-            vc.play(discord.PCMVolumeTransformer(player), after=lambda e: None)
-            
-            embed = discord.Embed(title="▶️ 正在播放", description=f"**{song['title']}**", color=discord.Color.blurple())
-            await interaction.followup.send(embed=embed, view=MusicControlView(self, interaction.guild_id))
-            
-            while vc.is_playing() or vc.is_paused():
-                await asyncio.sleep(1)
+    @play.autocomplete("song")
+    async def song_autocomplete(self, ctx: discord.Interaction, current: str):
+        if not current: return []
+        videos = self.yt.search(current, max_results=10)
+        return [discord.app_commands.Choice(name=v.title, value=v.url) for v in videos]
+
+    @discord.app_commands.command(name="playlist", description="播放播放清單連結")
+    async def playlist(self, ctx: discord.Interaction, url: str, channel: Optional[discord.VoiceChannel] = None, shuffle: bool = False):
+        await ctx.response.defer()
+        
+        voice_channel = channel or (ctx.user.voice.channel if ctx.user.voice else None)
+        if not voice_channel:
+            return await ctx.followup.send("❌ 你必須先進入語音頻道！")
+
+        result = self.yt.get_playlist_videos(url)
+        if not result or not result[1]:
+            return await ctx.followup.send("❌ 無法解析該播放清單。")
+
+        title, videos = result
+        voice = discord.utils.get(self.bot.voice_clients, guild=ctx.guild) or await voice_channel.connect()
+        
+        if voice not in music_queue:
+            music_queue[voice] = channelQueue(None, ctx)
+
+        for video in videos:
+            music_queue[voice].add(video)
+
+        if shuffle: music_queue[voice].shuffle()
+        
+        await ctx.followup.send(f"🎵 已加入播放清單: **{title}** ({len(videos)} 首)")
+
+        if not voice.is_playing():
+            await self._trigger_next(voice, ctx)
+
+    async def _trigger_next(self, voice, ctx):
+        next_video = music_queue[voice].next()
+        if next_video:
+            audio = self.yt.stream(next_video.id)
+            music_queue[voice].set_current(audio)
+            voice.play(music_queue[voice].audio, after=lambda e: self.bot.loop.create_task(next_song(ctx)))
 
 async def setup(bot):
-    await bot.add_cog(MusicCog(bot))
+    await bot.add_cog(Music(bot))
 
