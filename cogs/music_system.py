@@ -23,9 +23,8 @@ if YT_COOKIES_CONTENT:
         COOKIE_FILE_PATH = None
 
 # ==========================================
-# ⚙️ yt-dlp 與 FFmpeg 配置
+# ⚙️ yt-dlp 與 FFmpeg 終極安全配置
 # ==========================================
-# 預設的高音質音訊配置
 YTDL_FORMAT_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -38,9 +37,15 @@ YTDL_FORMAT_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
+    # 🚀 【核心修正】模擬 iOS 與 Android 用戶端，繞過網頁版 PoToken 與 IP 限制！
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['ios', 'android'],
+        }
+    },
 }
 
-# 降級備用的安全配置 (當 bestaudio 報錯時自動調用此配置)
+# 備用降級配置
 FALLBACK_FORMAT_OPTIONS = YTDL_FORMAT_OPTIONS.copy()
 FALLBACK_FORMAT_OPTIONS['format'] = 'best'
 
@@ -58,20 +63,19 @@ ytdl_fallback = yt_dlp.YoutubeDL(FALLBACK_FORMAT_OPTIONS)
 
 
 # ==========================================
-# 🛡️ 雙重安全解析輔助函式 (核心修正點)
+# 🛡️ 雙重安全解析輔助函式
 # ==========================================
 async def safe_extract_info(loop, url, download=False, process=False):
     """
     安全解析 YouTube 影片資訊。
-    如果預設的高音質格式不被支援，將會自動降級並嘗試獲取任何可用的最佳媒體格式。
+    採用 iOS/Android 用戶端模擬，並在極端情況下自動進行格式降級。
     """
     def _extract():
         try:
             return ytdl.extract_info(url, download=download, process=process)
         except yt_dlp.utils.DownloadError as e:
-            # 當遇到 Requested format is not available 時，自動啟動備用降級解析
             if "Requested format is not available" in str(e):
-                print(f"⚠️ [音樂系統] 解析 {url} 時遭遇格式限制，正自動啟動安全備用解析...")
+                print(f"⚠️ [音樂系統] 偵測到特殊限制，啟動安全備用降級解析...")
                 return ytdl_fallback.extract_info(url, download=download, process=process)
             raise e
 
@@ -91,8 +95,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        
-        # 使用安全雙重解析機制
         data = await safe_extract_info(loop, url, download=not stream, process=True)
         
         if 'entries' in data:
@@ -107,7 +109,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 # ==========================================
 class MusicControlView(discord.ui.View):
     def __init__(self, cog, guild_id: int):
-        super().__init__(timeout=None)  # 保持按鈕長期有效
+        super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
 
@@ -192,9 +194,9 @@ class MusicControlView(discord.ui.View):
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.music_queues = {}   # 存放各伺服器的播放佇列
-        self.current_track = {}   # 記錄各伺服器當前播放的歌曲資料
-        self.control_messages = {} # 記錄控制面板訊息
+        self.music_queues = {}
+        self.current_track = {}
+        self.control_messages = {}
 
     def get_queue(self, guild_id: int):
         if guild_id not in self.music_queues:
@@ -202,7 +204,7 @@ class MusicCog(commands.Cog):
         return self.music_queues[guild_id]
 
     def create_progress_bar(self, duration: int) -> str:
-        """建立進度條"""
+        """建立極簡風格的進度條"""
         if duration == 0:
             return "🔴 直播中"
             
@@ -220,7 +222,7 @@ class MusicCog(commands.Cog):
         embed = discord.Embed(
             title="▶️ 正在播放：",
             description=f"**[{player.title}]({player.webpage_url})**\n\n🕒 **歌曲長度：** {self.create_progress_bar(player.duration)}\n👤 **點歌者：** {user_mention}",
-            color=discord.Color.blurple()  # Discord 經典深藍色
+            color=discord.Color.blurple()
         )
         if player.thumbnail:
             embed.set_thumbnail(url=player.thumbnail)
@@ -239,7 +241,6 @@ class MusicCog(commands.Cog):
             next_song = queue.pop(0)
             self.current_track[guild_id] = next_song
 
-            # 非同步載入並準備播放 (使用安全解析)
             coro = YTDLSource.from_url(next_song['url'], loop=self.bot.loop, stream=True)
             future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
             
@@ -247,7 +248,6 @@ class MusicCog(commands.Cog):
                 player = future.result()
                 vc.play(player, after=lambda e: self.play_next(guild_id, channel))
                 
-                # 發送精美控制面板 Embed
                 embed = self.build_now_playing_embed(player, next_song['requester'])
                 view = MusicControlView(self, guild_id)
                 
@@ -288,14 +288,12 @@ class MusicCog(commands.Cog):
     async def play(self, interaction: Interaction, url: str):
         await interaction.response.defer()
 
-        # 1. 檢查使用者語音狀態
         if not interaction.user.voice:
             return await interaction.followup.send("❌ 您必須先加入語音頻道！", ephemeral=True)
 
         user_channel = interaction.user.voice.channel
         vc = interaction.guild.voice_client
 
-        # 2. 連接或移動到目標語音頻道
         if not vc:
             vc = await user_channel.connect()
         elif vc.channel != user_channel:
@@ -305,8 +303,8 @@ class MusicCog(commands.Cog):
         queue = self.get_queue(guild_id)
 
         try:
-            # 3. 使用安全雙重解析機制預先取得歌曲資訊 (徹底修正點！)
             loop = self.bot.loop or asyncio.get_event_loop()
+            # 💡 這裡也全面採用手機 App 模擬安全解析通道！
             data = await safe_extract_info(loop, url, download=False, process=False)
             
             title = data.get('title', '未知歌曲')
@@ -323,7 +321,6 @@ class MusicCog(commands.Cog):
                 'requester': interaction.user.mention
             }
 
-            # 4. 如果目前正在播歌，則加進排隊佇列
             if vc.is_playing() or vc.is_paused():
                 queue.append(song_info)
                 
@@ -338,7 +335,6 @@ class MusicCog(commands.Cog):
                 
                 await interaction.followup.send(embed=queue_embed)
             else:
-                # 5. 直接開始播放
                 self.current_track[guild_id] = song_info
                 player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
                 vc.play(player, after=lambda e: self.play_next(guild_id, interaction.channel))
