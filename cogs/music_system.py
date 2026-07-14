@@ -252,7 +252,7 @@ class MusicCog(commands.Cog):
         if player.thumbnail:
             embed.set_thumbnail(url=player.thumbnail)
         
-        embed.set_footer(text="🎵 音樂系統 | 享受完美音質")
+        embed.set_footer(text="🎵 夜櫻音樂系統 | 享受完美音質")
         return embed
 
     def play_next(self, guild_id: int, channel):
@@ -409,7 +409,7 @@ class MusicCog(commands.Cog):
             tb_str = traceback.format_exc()
             err_embed = discord.Embed(
                 title="❌ 指令解析失敗",
-                description=f"無法解析此網址：`{url}`\n\n**錯誤原因：**\n`{ticks}text\n{tb_str[:1500]}\n{ticks}`",
+                description=f"無法解析此網址：`{url}`\n\n**錯誤原因：**\n{ticks}text\n{tb_str[:1500]}\n{ticks}",
                 color=discord.Color.red()
             )
             await interaction.followup.send(embed=err_embed, ephemeral=False)
