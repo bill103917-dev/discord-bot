@@ -9,6 +9,7 @@ import aiohttp
 import asyncio
 import traceback
 import discord
+from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
 import logging # 用於記錄錯誤
@@ -1196,7 +1197,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-        BackupSystem, ImageDrawCog
+        BackupSystem, ImageDrawCog, MusicCog
     ]
 
     for cog in cog_list:
