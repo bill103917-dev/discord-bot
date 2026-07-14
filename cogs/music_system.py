@@ -32,32 +32,42 @@ if YT_COOKIES_CONTENT:
     except Exception as e:
         print(f"❌ [音樂系統] 寫入 Cookie 失敗: {e}")
         COOKIE_FILE_PATH = None
+else:
+    print("⚠️ [音樂系統 警告] 未偵測到 YT_COOKIES 環境變數！")
 
 # ==========================================
 # ⚙️ yt-dlp 與 FFmpeg 終極安全配置
 # ==========================================
 YTDL_FORMAT_OPTIONS = {
-    'format': 'bestaudio/best',  
+    # 採用寬鬆的音軌優先格式，若無純音軌則自動相容複合格式
+    'format': 'bestaudio/best/ba/b',  
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
+    'ignoreerrors': True,  # 設為 True 避免中途解析直接拋異常中斷
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
+    # 🚀 終極混淆協議：混合使用行動裝置與創作者端 API 繞過 PoToken 驗證
     'extractor_args': {
         'youtube': {
-            'player_client': ['ios', 'android'],
+            'player_client': ['android', 'web_creator', 'mweb', 'ios'],
+            'skip': ['webpage', 'hls', 'dash'],
         }
     },
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
 }
 
+# 備用配置：完全放開限制
 FALLBACK_FORMAT_OPTIONS = YTDL_FORMAT_OPTIONS.copy()
-if 'format' in FALLBACK_FORMAT_OPTIONS:
-    del FALLBACK_FORMAT_OPTIONS['format']
+FALLBACK_FORMAT_OPTIONS['format'] = 'best'
 
 if COOKIE_FILE_PATH:
     YTDL_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
@@ -73,18 +83,31 @@ ytdl_fallback = yt_dlp.YoutubeDL(FALLBACK_FORMAT_OPTIONS)
 
 
 # ==========================================
-# 🛡️ 雙重安全解析輔助函式
+# 🛡️ 雙重安全解析輔助函式 (自動降級與空值防護)
 # ==========================================
 async def safe_extract_info(loop, url, download=False, process=False):
+    """
+    安全解析 YouTube 影片資訊，具備強大的空值與錯誤防護機制。
+    """
     def _extract():
         try:
-            return ytdl.extract_info(url, download=download, process=process)
+            data = ytdl.extract_info(url, download=download, process=process)
+            if data is None:
+                raise ValueError("YouTube 伺服器拒絕連線，回傳了空數據 (通常為 IP 被封鎖)。")
+            return data
         except Exception as e:
-            err_str = str(e)
-            if "Requested format is not available" in err_str or "format" in err_str.lower():
-                print(f"⚠️ [音樂系統] 格式受限，啟動『無限制格式』備用解析協定...")
-                return ytdl_fallback.extract_info(url, download=download, process=process)
-            raise e
+            print(f"⚠️ [音樂系統] 首次解析遭遇困難，正啟動極致降級解析... 原因: {e}")
+            try:
+                data = ytdl_fallback.extract_info(url, download=download, process=process)
+                if data is None:
+                    raise ValueError("降級解析後依然無法取得資料。")
+                return data
+            except Exception as fallback_error:
+                # 結合兩次錯誤拋出，方便診斷
+                raise RuntimeError(
+                    f"首輪解析錯誤: {e}\n次輪降級錯誤: {fallback_error}\n"
+                    f"💡 診斷提示: 這通常代表 Render IP 被封鎖。請務必在 Render 設定有效且新鮮的 'YT_COOKIES' 環境變數。"
+                )
 
     return await loop.run_in_executor(None, _extract)
 
@@ -245,7 +268,6 @@ class MusicCog(commands.Cog):
             coro = YTDLSource.from_url(next_song['url'], loop=self.bot.loop, stream=True)
             future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
             
-            # 💡 動態字串拼接定義，防範 markdown 溢出問題
             ticks = "```"
 
             try:
@@ -288,7 +310,7 @@ class MusicCog(commands.Cog):
                     description=f"無法加載並播送歌曲：`{next_song['title']}`\n\n**詳細錯誤日誌：**\n{ticks}text\n{tb_str[:1500]}\n{ticks}",
                     color=discord.Color.red()
                 )
-                err_embed.set_footer(text="💡 提示：如果出現 403 Forbidden，請確認並更新 YT_COOKIES 環境變數")
+                err_embed.set_footer(text="💡 提示：此狀況極高機率為 Render IP 被 YouTube 封鎖。請更新您的 YT_COOKIES 環境變數！")
                 
                 asyncio.run_coroutine_threadsafe(channel.send(embed=err_embed), self.bot.loop)
                 self.play_next(guild_id, channel)
@@ -327,7 +349,6 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         queue = self.get_queue(guild_id)
 
-        # 💡 動態字串拼接定義，防範 markdown 溢出問題
         ticks = "```"
 
         try:
