@@ -25,6 +25,7 @@ if YT_COOKIES_CONTENT:
 # ==========================================
 # ⚙️ yt-dlp 與 FFmpeg 配置
 # ==========================================
+# 預設的高音質音訊配置
 YTDL_FORMAT_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -39,8 +40,13 @@ YTDL_FORMAT_OPTIONS = {
     'source_address': '0.0.0.0',
 }
 
+# 降級備用的安全配置 (當 bestaudio 報錯時自動調用此配置)
+FALLBACK_FORMAT_OPTIONS = YTDL_FORMAT_OPTIONS.copy()
+FALLBACK_FORMAT_OPTIONS['format'] = 'best'
+
 if COOKIE_FILE_PATH:
     YTDL_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
+    FALLBACK_FORMAT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -48,6 +54,29 @@ FFMPEG_OPTIONS = {
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
+ytdl_fallback = yt_dlp.YoutubeDL(FALLBACK_FORMAT_OPTIONS)
+
+
+# ==========================================
+# 🛡️ 雙重安全解析輔助函式 (核心修正點)
+# ==========================================
+async def safe_extract_info(loop, url, download=False, process=False):
+    """
+    安全解析 YouTube 影片資訊。
+    如果預設的高音質格式不被支援，將會自動降級並嘗試獲取任何可用的最佳媒體格式。
+    """
+    def _extract():
+        try:
+            return ytdl.extract_info(url, download=download, process=process)
+        except yt_dlp.utils.DownloadError as e:
+            # 當遇到 Requested format is not available 時，自動啟動備用降級解析
+            if "Requested format is not available" in str(e):
+                print(f"⚠️ [音樂系統] 解析 {url} 時遭遇格式限制，正自動啟動安全備用解析...")
+                return ytdl_fallback.extract_info(url, download=download, process=process)
+            raise e
+
+    return await loop.run_in_executor(None, _extract)
+
 
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
@@ -62,7 +91,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+        
+        # 使用安全雙重解析機制
+        data = await safe_extract_info(loop, url, download=not stream, process=True)
         
         if 'entries' in data:
             data = data['entries'][0]
@@ -81,7 +112,6 @@ class MusicControlView(discord.ui.View):
         self.guild_id = guild_id
 
     async def interaction_check(self, interaction: Interaction) -> bool:
-        # 確保點擊按鈕的使用者跟機器人在同一個語音頻道
         if not interaction.user.voice or not interaction.guild.voice_client:
             await interaction.response.send_message("❌ 您必須與機器人在同一個語音頻道才能操作！", ephemeral=True)
             return False
@@ -172,7 +202,7 @@ class MusicCog(commands.Cog):
         return self.music_queues[guild_id]
 
     def create_progress_bar(self, duration: int) -> str:
-        """建立極簡風格的進度條"""
+        """建立進度條"""
         if duration == 0:
             return "🔴 直播中"
             
@@ -180,7 +210,6 @@ class MusicCog(commands.Cog):
         h, m = divmod(m, 60)
         time_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
         
-        # 繪製進度條 (經典風格)
         bar_length = 15
         filled_length = int(bar_length * 0.25)
         bar = "▬" * filled_length + "⚪" + "▬" * (bar_length - filled_length - 1)
@@ -191,7 +220,7 @@ class MusicCog(commands.Cog):
         embed = discord.Embed(
             title="▶️ 正在播放：",
             description=f"**[{player.title}]({player.webpage_url})**\n\n🕒 **歌曲長度：** {self.create_progress_bar(player.duration)}\n👤 **點歌者：** {user_mention}",
-            color=discord.Color.blurple()  # 改為 Discord 經典藍色（不使用粉色）
+            color=discord.Color.blurple()  # Discord 經典深藍色
         )
         if player.thumbnail:
             embed.set_thumbnail(url=player.thumbnail)
@@ -210,7 +239,7 @@ class MusicCog(commands.Cog):
             next_song = queue.pop(0)
             self.current_track[guild_id] = next_song
 
-            # 非同步載入歌曲
+            # 非同步載入並準備播放 (使用安全解析)
             coro = YTDLSource.from_url(next_song['url'], loop=self.bot.loop, stream=True)
             future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
             
@@ -276,9 +305,9 @@ class MusicCog(commands.Cog):
         queue = self.get_queue(guild_id)
 
         try:
-            # 3. 預先解析取得歌曲資訊
+            # 3. 使用安全雙重解析機制預先取得歌曲資訊 (徹底修正點！)
             loop = self.bot.loop or asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False, process=False))
+            data = await safe_extract_info(loop, url, download=False, process=False)
             
             title = data.get('title', '未知歌曲')
             thumbnail = data.get('thumbnail')
@@ -325,4 +354,4 @@ class MusicCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(MusicCog(bot))
+    await bot.add_cog(MusicCog(bot)
