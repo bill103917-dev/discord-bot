@@ -10,14 +10,17 @@ import os
 import re
 import logging
 import ffmpeg
-
 log = logging.getLogger("MusicBot")
 
 # ==========================================
-# ⚙️ FFmpeg 與系統環境偵測
+# ⚙️ FFmpeg 與系統環境偵測 (自動路徑優化)
 # ==========================================
-# 自動尋找系統中的 ffmpeg，若找不到則嘗試常見的 Linux 路徑
 FFMPEG_PATH = shutil.which("ffmpeg") or shutil.which("/usr/bin/ffmpeg") or shutil.which("/usr/local/bin/ffmpeg")
+
+if FFMPEG_PATH:
+    print(f"✅ [MusicBot] 成功偵測到 FFmpeg 執行檔！路徑為: {FFMPEG_PATH}")
+else:
+    print("❌ [MusicBot] 警告：系統環境中未偵測到 FFmpeg！音樂將完全無法播放，請確認主機（如 Render）已安裝 FFmpeg。")
 
 # ==========================================
 # ⚙️ yt-dlp 雙重配置與 Cookie 環境變數處理
@@ -37,7 +40,7 @@ else:
     COOKIE_FILE_PATH = None
     log.warning("未偵測到 YT_COOKIES 環境變數，YouTube 直接解析可能會受到限制，將自動啟用備用搜尋。")
 
-# 1. 優先配置：使用動態產生的 Cookie 檔案進行直接解析
+# 1. 優先配置
 YTDL_DIRECT_OPTIONS = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -48,7 +51,7 @@ YTDL_DIRECT_OPTIONS = {
 if COOKIE_FILE_PATH:
     YTDL_DIRECT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
-# 2. 備用配置：SoundCloud 多重搜尋（免 Cookie，防 IP 封鎖）
+# 2. 備用配置
 YTDL_SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
     'default_search': 'scsearch5',  # 預設搜出 5 個最匹配結果
@@ -82,6 +85,7 @@ class GuildPlayState:
         self.loop_mode = "off"     # "off", "single", "all"
         self.requester = None      # 點歌者
         self.volume = 0.5          # 預設音量 50%
+        self.stream_start_time = 0 # 用於偵測 FFmpeg 是否閃退
 
 # ==========================================
 # 🎛️ 音樂多結果手動選擇選單 (Dropdown)
@@ -688,7 +692,6 @@ class MusicCog(commands.Cog):
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
-        # 2. 強化 ffmpeg 串流協定白名單與 HTTP 請求安全設定，保證 SoundCloud 流能順暢載入
         ffmpeg_options = {
             'before_options': (
                 f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
@@ -712,14 +715,32 @@ class MusicCog(commands.Cog):
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
+        # 記錄本次 FFmpeg 啟動的精確時間
+        state.stream_start_time = time.time()
+
         # 播放歌曲後的狀態回呼
         def after_playing(error):
             if error:
                 log.error(f"FFmpeg 錯誤: {error}")
-                # 當遇到實質性的解碼或播放錯誤時，在聊天室回報，避免無聲瞬斷
-                self.bot.loop.create_task(
-                    interaction.channel.send(f"⚠️ 音訊播放中途異常中斷。錯誤資訊: `{str(error)}`")
+            
+            # 🕵️‍♂️ 核心黑科技：計算這次「播放持續了多少秒」
+            duration_played = time.time() - state.stream_start_time
+            
+            # 如果播放不到 2.5 秒就結束了，這在 99% 的情況下都是「FFmpeg 啟動崩潰/找不到執行檔」或「串流連線被 403 阻擋」
+            if duration_played < 2.5:
+                # 報警！通知聊天室這不是正常播完，而是啟動失敗
+                err_msg = (
+                    "🚨 **[播放異常中斷診斷]**\n"
+                    "偵測到音訊串流在啟動後 2 秒內瞬間崩潰！這通常代表以下兩種情況之一：\n"
+                    "1. **Render 伺服器未安裝 FFmpeg** (最常見，請確認設定頁面中已添加 FFmpeg Buildpack)。\n"
+                    "2. **音訊網址（如 SoundCloud）已失效或被 403 阻擋**。\n\n"
+                    "ℹ️ *為了防止無限循環崩潰，播放器已暫停。*"
                 )
+                self.bot.loop.create_task(interaction.channel.send(err_msg))
+                # 停止並清空，防止其不斷自動播放下一首造成卡死
+                self.bot.loop.create_task(self.cleanup_and_disconnect(guild_id, vc))
+                return
+
             self.bot.loop.create_task(self.handle_song_end(interaction, vc))
 
         try:
