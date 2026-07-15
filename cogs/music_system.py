@@ -9,18 +9,22 @@ import time
 import os
 import re
 import logging
+import ffmpeg
 
 log = logging.getLogger("MusicBot")
-FFMPEG_PATH = shutil.which("ffmpeg")
+
+# ==========================================
+# ⚙️ FFmpeg 與系統環境偵測
+# ==========================================
+# 自動尋找系統中的 ffmpeg，若找不到則嘗試常見的 Linux 路徑
+FFMPEG_PATH = shutil.which("ffmpeg") or shutil.which("/usr/bin/ffmpeg") or shutil.which("/usr/local/bin/ffmpeg")
 
 # ==========================================
 # ⚙️ yt-dlp 雙重配置與 Cookie 環境變數處理
 # ==========================================
-# 讀取與你之前設定完全一致的環境變數名稱：YT_COOKIES
 YT_COOKIES_CONTENT = os.getenv("YT_COOKIES")
 COOKIE_FILE_PATH = "temp_cookies.txt"
 
-# 如果環境變數存在，我們動態寫入一個暫存的 cookie 檔案供 yt-dlp 使用
 if YT_COOKIES_CONTENT:
     try:
         with open(COOKIE_FILE_PATH, "w", encoding="utf-8") as f:
@@ -343,7 +347,7 @@ class MusicControlView(discord.ui.View):
 # ==========================================
 # 🎵 音樂主核心 Cog
 # ==========================================
-class MusicCog(commands.Cog):
+class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.states = {}
@@ -351,7 +355,6 @@ class MusicCog(commands.Cog):
 
     def cog_unload(self):
         self.ui_update_loop.cancel()
-        # 清理動態生成的暫存 cookie 檔案
         if os.path.exists(COOKIE_FILE_PATH):
             try:
                 os.remove(COOKIE_FILE_PATH)
@@ -545,7 +548,6 @@ class MusicCog(commands.Cog):
     async def scout_music_dual_mode(self, query: str, interaction: Interaction) -> dict:
         loop = asyncio.get_event_loop()
 
-        # A. 如果是直接連結，優先嘗試「環境變數 Cookie 直接解析」
         if "youtube.com" in query or "youtu.be" in query or "soundcloud.com" in query:
             try:
                 log.info("偵查兵嘗試使用環境變數 Cookie 直接解析音軌...")
@@ -570,7 +572,6 @@ class MusicCog(commands.Cog):
                 }
 
             except Exception as e:
-                # ❗️ 直接解析失敗，啟動第二計畫：利用無阻礙 API 抓取 Metadata 並進行 SoundCloud 備用搜尋
                 log.warning(f"直接解析失敗 ({e})。偵查兵啟動 SoundCloud 備用重定向手動選歌計畫！")
                 await interaction.followup.send("⚠️ 原始連結遭平台阻擋或 Cookie 失效。正在為您搜尋備用音源...", ephemeral=True)
                 
@@ -578,12 +579,10 @@ class MusicCog(commands.Cog):
                 search_keyword = f"{title} {artist if artist else ''}"
                 return await self.search_and_select_song(search_keyword, interaction)
 
-        # B. 如果輸入的是一般關鍵字，直接進行手動搜尋與選取
         else:
             return await self.search_and_select_song(query, interaction)
 
     async def get_video_metadata_safely(self, url: str) -> tuple:
-        """透過無阻擋的官方 API 獲取影片基礎標題"""
         if "youtube.com" in url or "youtu.be" in url:
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             try:
@@ -597,7 +596,6 @@ class MusicCog(commands.Cog):
         return url, ""
 
     async def search_and_select_song(self, keyword: str, interaction: Interaction) -> dict:
-        """在 SoundCloud 搜尋 5 首並彈出選取選單供使用者決定"""
         loop = asyncio.get_event_loop()
         search_query = f"scsearch5:{keyword}"
         
@@ -650,7 +648,6 @@ class MusicCog(commands.Cog):
 
     @app_commands.command(name="play", description="播放音樂 (雙重 Cookie 解析 + SoundCloud 多結果手動選取)")
     async def play(self, interaction: Interaction, query: str):
-        # 1. 進入規則優先檢查
         if not interaction.user.voice or not interaction.user.voice.channel:
             return await interaction.response.send_message("❌ 你必須先加入一個語音頻道，才能使用播放指令！", ephemeral=True)
         
@@ -669,7 +666,6 @@ class MusicCog(commands.Cog):
             log.error(f"解析音源失敗: {e}")
             return await interaction.followup.send(f"❌ 點歌失敗：{str(e)}")
 
-        # 儲存到佇列
         state.queue.append(song)
         vc = interaction.guild.voice_client
         if not vc:
@@ -686,24 +682,53 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         state = self.get_state(guild_id)
 
+        # 1. 安全防禦：如果系統中根本沒有安裝 FFmpeg，在這裡直接報錯攔截
+        if not FFMPEG_PATH:
+            await interaction.channel.send("❌ 系統中未偵測到 FFmpeg 執行檔！音樂播放已遭系統攔截，請聯繫伺服器管理員安裝。")
+            await self.cleanup_and_disconnect(guild_id, vc)
+            return
+
+        # 2. 強化 ffmpeg 串流協定白名單與 HTTP 請求安全設定，保證 SoundCloud 流能順暢載入
         ffmpeg_options = {
-            'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {start_sec}',
+            'before_options': (
+                f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+                f'-protocol_whitelist file,subfile,http,https,tcp,tls,dns '
+                f'-user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" '
+                f'-ss {start_sec}'
+            ),
             'options': '-vn'
         }
 
-        audio_source = discord.FFmpegPCMAudio(
-            song['url'],
-            executable=FFMPEG_PATH,
-            **ffmpeg_options
-        )
-        transformer = discord.PCMVolumeTransformer(audio_source, volume=state.volume)
+        try:
+            audio_source = discord.FFmpegPCMAudio(
+                song['url'],
+                executable=FFMPEG_PATH,
+                **ffmpeg_options
+            )
+            transformer = discord.PCMVolumeTransformer(audio_source, volume=state.volume)
+        except Exception as e:
+            log.error(f"建立 FFmpeg 音訊來源失敗: {e}")
+            await interaction.channel.send(f"❌ 啟動音樂串流處理器失敗。詳細錯誤: `{str(e)}`")
+            await self.cleanup_and_disconnect(guild_id, vc)
+            return
 
+        # 播放歌曲後的狀態回呼
         def after_playing(error):
             if error:
                 log.error(f"FFmpeg 錯誤: {error}")
+                # 當遇到實質性的解碼或播放錯誤時，在聊天室回報，避免無聲瞬斷
+                self.bot.loop.create_task(
+                    interaction.channel.send(f"⚠️ 音訊播放中途異常中斷。錯誤資訊: `{str(error)}`")
+                )
             self.bot.loop.create_task(self.handle_song_end(interaction, vc))
 
-        vc.play(transformer, after=after_playing)
+        try:
+            vc.play(transformer, after=after_playing)
+        except Exception as e:
+            log.error(f"調用 vc.play 失敗: {e}")
+            await interaction.channel.send(f"❌ 調用 Discord 語音播放器失敗: `{str(e)}`")
+            await self.cleanup_and_disconnect(guild_id, vc)
+            return
 
         state.start_time = time.time() - start_sec
         state.total_paused_sec = 0
@@ -774,4 +799,4 @@ class MusicCog(commands.Cog):
         await self.play_next(interaction, vc)
 
 async def setup(bot):
-    await bot.add_cog(MusicCog(bot))
+    await bot.add_cog(Music(bot))
