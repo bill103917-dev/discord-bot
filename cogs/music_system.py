@@ -343,7 +343,7 @@ class MusicControlView(discord.ui.View):
 # ==========================================
 # 🎵 音樂主核心 Cog
 # ==========================================
-class Music(commands.Cog):
+class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.states = {}
@@ -774,4 +774,4 @@ class Music(commands.Cog):
         await self.play_next(interaction, vc)
 
 async def setup(bot):
-    await bot.add_cog(Music(bot))
+    await bot.add_cog(MusicCog(bot))
