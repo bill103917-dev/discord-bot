@@ -799,4 +799,4 @@ class MusicCog(commands.Cog):
         await self.play_next(interaction, vc)
 
 async def setup(bot):
-    await bot.add_cog(Music(bot))
+    await bot.add_cog(MusicCog(bot))
