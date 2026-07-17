@@ -8,9 +8,10 @@ import shutil
 import time
 import os
 import re
+import urllib.parse
 import logging
-import ffmpeg
-log = logging.getLogger("MusicBot")
+
+log = logging.getLogger("MusicCog")
 
 # ==========================================
 # ⚙️ FFmpeg 與系統環境偵測 (自動路徑優化)
@@ -18,9 +19,9 @@ log = logging.getLogger("MusicBot")
 FFMPEG_PATH = shutil.which("ffmpeg") or shutil.which("/usr/bin/ffmpeg") or shutil.which("/usr/local/bin/ffmpeg")
 
 if FFMPEG_PATH:
-    print(f"✅ [MusicBot] 成功偵測到 FFmpeg 執行檔！路徑為: {FFMPEG_PATH}")
+    print(f"✅ [MusicCog] 成功偵測到 FFmpeg 執行檔！路徑為: {FFMPEG_PATH}")
 else:
-    print("❌ [MusicBot] 警告：系統環境中未偵測到 FFmpeg！音樂將完全無法播放，請確認主機（如 Render）已安裝 FFmpeg。")
+    print("❌ [MusicCog] 警告：系統環境中未偵測到 FFmpeg！將無法播放直連音訊。")
 
 # ==========================================
 # ⚙️ yt-dlp 雙重配置與 Cookie 環境變數處理
@@ -38,9 +39,9 @@ if YT_COOKIES_CONTENT:
         COOKIE_FILE_PATH = None
 else:
     COOKIE_FILE_PATH = None
-    log.warning("未偵測到 YT_COOKIES 環境變數，YouTube 直接解析可能會受到限制，將自動啟用備用搜尋。")
+    log.warning("未偵測到 YT_COOKIES 環境變數，將自動對 YouTube 啟用備用重定向搜尋。")
 
-# 1. 優先配置
+# 1. 優先配置 (YouTube 帶 Cookie 解析)
 YTDL_DIRECT_OPTIONS = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -51,10 +52,10 @@ YTDL_DIRECT_OPTIONS = {
 if COOKIE_FILE_PATH:
     YTDL_DIRECT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
-# 2. 備用配置
+# 2. 備用配置 (SoundCloud 免 Cookie 搜尋)
 YTDL_SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
-    'default_search': 'scsearch5',  # 預設搜出 5 個最匹配結果
+    'default_search': 'scsearch5',
     'quiet': True,
     'no_warnings': True,
     'nocheckcertificate': True,
@@ -127,7 +128,7 @@ class SongSelectView(discord.ui.View):
         self.stop()
 
 # ==========================================
-# 🎛️ 音樂控制台按鈕介面
+# 🎛️ 音樂控制台按鈕介面 (全功能整合版)
 # ==========================================
 class MusicControlView(discord.ui.View):
     def __init__(self, cog, guild_id: int):
@@ -250,7 +251,7 @@ class MusicControlView(discord.ui.View):
 
         target_time = int(current_elapsed + 30)
 
-        if target_time >= state.current_song['duration']:
+        if target_time >= state.current_song['duration'] and state.current_song['duration'] > 0:
             vc.stop()
             return await interaction.followup.send("⏩ 快進已超出歌曲長度，直接播放下一首！", ephemeral=True)
 
@@ -349,7 +350,7 @@ class MusicControlView(discord.ui.View):
         await interaction.response.send_message("⏹️ 已停止播放並關閉面板。", ephemeral=True)
 
 # ==========================================
-# 🎵 音樂主核心 Cog
+# 🎵 音樂主核心 Cog (MusicCog)
 # ==========================================
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -371,6 +372,7 @@ class MusicCog(commands.Cog):
         return self.states[guild_id]
 
     async def fetch_synced_lyrics(self, title: str) -> list:
+        """非同步向 LRCLIB 請求解析帶時間戳的動態歌詞"""
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
         url = f"https://lrclib.net/api/search?q={clean_title}"
         
@@ -450,7 +452,9 @@ class MusicCog(commands.Cog):
 
     def create_progress_bar(self, elapsed, duration):
         if duration == 0:
-            return "🔴 直播中 [▬▬▬▬▬▬▬▬▬▬▬▬▬▬]"
+            # 針對直連未知長度音訊 (Discord 影片或外部 CDN) 的專屬進度條
+            elapsed_m, elapsed_s = divmod(int(elapsed), 60)
+            return f"`{elapsed_m:02d}:{elapsed_s:02d} / 網頁直連音軌`\n🔴 媒體檔案直接播放中..."
         
         bar_length = 15
         progress = int((elapsed / duration) * bar_length)
@@ -479,7 +483,11 @@ class MusicCog(commands.Cog):
         else:
             state.elapsed_time = time.time() - state.start_time - state.total_paused_sec
 
-        state.elapsed_time = max(0, min(song['duration'], state.elapsed_time))
+        # 核心優化：如果是直連媒體 (duration == 0)，不限制最大秒數
+        if song['duration'] > 0:
+            state.elapsed_time = max(0, min(song['duration'], state.elapsed_time))
+        else:
+            state.elapsed_time = max(0, state.elapsed_time)
 
         embed = discord.Embed(
             title="🎧 正在播放",
@@ -499,7 +507,7 @@ class MusicCog(commands.Cog):
         embed.add_field(name="🔊 音量大小", value=f"{int(state.volume * 100)}%", inline=True)
         embed.add_field(name="🎵 佇列剩餘", value=f"{len(state.queue)} 首歌曲", inline=True)
         
-        embed.set_footer(text="數據源：SoundCloud • 已啟用雙重決策環境變數Cookie技術")
+        embed.set_footer(text="數據源：SoundCloud / DirectStream • 已啟用雙重決策環境變數Cookie技術")
         if song.get('thumbnail'):
             embed.set_thumbnail(url=song['thumbnail'])
             
@@ -527,7 +535,7 @@ class MusicCog(commands.Cog):
                             view = MusicControlView(self, guild_id)
                             await state.control_message.edit(embed=embed, view=view)
                         
-                        if state.show_lyrics:
+                        if state.show_lyrics and len(state.parsed_lyrics) > 0:
                             lyric_embed = discord.Embed(
                                 title="🎤 歌詞同步面板 (動態滾動)",
                                 description=self.get_current_lyric_lines(guild_id),
@@ -547,11 +555,47 @@ class MusicCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     # =======================================================
-    # 🕵️‍♂️ 雙重解析偵查模組 (Cookie 環境變數 + SoundCloud 搜尋)
+    # 🕵️‍♂️ 網址分流過濾 (判斷是否為 Discord 附件、影音直連檔)
+    # =======================================================
+    def is_direct_media_link(self, url: str) -> bool:
+        """判定此網址是否為可以直接由 FFmpeg 播放的影音檔案連結"""
+        if "discordapp.net" in url or "discordapp.com" in url:
+            return True
+            
+        clean_url = url.split('?')[0].lower()
+        media_extensions = ('.mp3', '.mp4', '.mov', '.wav', '.ogg', '.m4a', '.webm', '.aac', '.flac')
+        if clean_url.endswith(media_extensions):
+            return True
+            
+        return False
+
+    # =======================================================
+    # 🕵️‍♂️ 雙重解析偵查模組 (直連過濾 + Cookie 優先 + SoundCloud 搜尋)
     # =======================================================
     async def scout_music_dual_mode(self, query: str, interaction: Interaction) -> dict:
         loop = asyncio.get_event_loop()
 
+        # 🌟 A. 優先檢查：直連媒體連結 (直接派 FFmpeg 載入，繞過 yt-dlp)
+        if self.is_direct_media_link(query):
+            log.info(f"偵查兵判定為直連影音，繞過解析直接串流播放: {query}")
+            
+            # 擷取檔名
+            filename = query.split('/')[-1].split('?')[0]
+            try:
+                filename = urllib.parse.unquote(filename)
+            except Exception:
+                pass
+                
+            return {
+                'title': filename if filename else "直連影音音軌",
+                'artist': "Discord 附件 / 網頁直連",
+                'url': query,
+                'duration': 0, 
+                'webpage_url': query,
+                'thumbnail': "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=200&auto=format&fit=crop"
+            }
+
+        # B. 優先配置 (YouTube/SoundCloud 使用環境變數 Cookie 直接解析)
         if "youtube.com" in query or "youtu.be" in query or "soundcloud.com" in query:
             try:
                 log.info("偵查兵嘗試使用環境變數 Cookie 直接解析音軌...")
@@ -576,13 +620,14 @@ class MusicCog(commands.Cog):
                 }
 
             except Exception as e:
-                log.warning(f"直接解析失敗 ({e})。偵查兵啟動 SoundCloud 備用重定向手動選歌計畫！")
-                await interaction.followup.send("⚠️ 原始連結遭平台阻擋或 Cookie 失效。正在為您搜尋備用音源...", ephemeral=True)
+                log.warning(f"直接解析失敗 ({e})。偵查兵啟動 SoundCloud 備用重定向與手動選歌計畫！")
+                await interaction.followup.send("⚠️ 原始連結遭阻擋或 Cookie 失效。正在為您搜尋備用音源...", ephemeral=True)
                 
                 title, artist = await self.get_video_metadata_safely(query)
                 search_keyword = f"{title} {artist if artist else ''}"
                 return await self.search_and_select_song(search_keyword, interaction)
 
+        # C. 一般關鍵字搜尋
         else:
             return await self.search_and_select_song(query, interaction)
 
@@ -606,7 +651,7 @@ class MusicCog(commands.Cog):
         data = await loop.run_in_executor(None, lambda: ytdl_search.extract_info(search_query, download=False))
         
         if 'entries' not in data or len(data['entries']) == 0:
-            raise Exception("偵查兵在網路上也搜不到任何匹配的歌曲！")
+            raise Exception("偵查兵在網路上搜不到任何匹配的歌曲！")
 
         entries = data['entries']
         
@@ -686,12 +731,13 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         state = self.get_state(guild_id)
 
-        # 1. 安全防禦：如果系統中根本沒有安裝 FFmpeg，在這裡直接報錯攔截
+        # 1. 安全攔截：若主機未成功裝載 FFmpeg，在此阻擋
         if not FFMPEG_PATH:
-            await interaction.channel.send("❌ 系統中未偵測到 FFmpeg 執行檔！音樂播放已遭系統攔截，請聯繫伺服器管理員安裝。")
+            await interaction.channel.send("❌ 系統中未偵測到 FFmpeg 執行檔！音樂播放已遭系統攔截。")
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
+        # 2. 為 FFmpeg 套用最強抗干擾與高規格 PCM 重組，完美解決 AAC 崩潰與斷音
         ffmpeg_options = {
             'before_options': (
                 f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
@@ -699,7 +745,7 @@ class MusicCog(commands.Cog):
                 f'-user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" '
                 f'-ss {start_sec}'
             ),
-            'options': '-vn'
+            'options': '-vn -ac 2 -ar 48000 -f s16le -af "aresample=async=1"'
         }
 
         try:
@@ -715,7 +761,7 @@ class MusicCog(commands.Cog):
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
-        # 記錄本次 FFmpeg 啟動的精確時間
+        # 記錄本次播放開始的時間
         state.stream_start_time = time.time()
 
         # 播放歌曲後的狀態回呼
@@ -723,21 +769,18 @@ class MusicCog(commands.Cog):
             if error:
                 log.error(f"FFmpeg 錯誤: {error}")
             
-            # 🕵️‍♂️ 核心黑科技：計算這次「播放持續了多少秒」
             duration_played = time.time() - state.stream_start_time
             
-            # 如果播放不到 2.5 秒就結束了，這在 99% 的情況下都是「FFmpeg 啟動崩潰/找不到執行檔」或「串流連線被 403 阻擋」
+            # 偵測是否剛開播 2.5 秒內就閃退 (表示解碼失敗或 Render 上有 FFmpeg 問題)
             if duration_played < 2.5:
-                # 報警！通知聊天室這不是正常播完，而是啟動失敗
                 err_msg = (
                     "🚨 **[播放異常中斷診斷]**\n"
                     "偵測到音訊串流在啟動後 2 秒內瞬間崩潰！這通常代表以下兩種情況之一：\n"
-                    "1. **Render 伺服器未安裝 FFmpeg** (最常見，請確認設定頁面中已添加 FFmpeg Buildpack)。\n"
-                    "2. **音訊網址（如 SoundCloud）已失效或被 403 阻擋**。\n\n"
-                    "ℹ️ *為了防止無限循環崩潰，播放器已暫停。*"
+                    "1. **Render 伺服器未安裝 FFmpeg** (請確認 Settings 內已添加 Buildpack)。\n"
+                    "2. **直連媒體網址已過期失效** (Discord 附件網址通常具有時效性，過期會回傳 403)。\n\n"
+                    "ℹ️ *為了防止無限循環崩潰，播放器已自動清理。*"
                 )
                 self.bot.loop.create_task(interaction.channel.send(err_msg))
-                # 停止並清空，防止其不斷自動播放下一首造成卡死
                 self.bot.loop.create_task(self.cleanup_and_disconnect(guild_id, vc))
                 return
 
