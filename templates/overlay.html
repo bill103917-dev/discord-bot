@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Discord Voice Overlay - Channel {{ channel_id }}</title>
-    <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -13,17 +12,17 @@
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
         }
 
-        /* 🎨 沒說話/安靜時：頭像微暗、縮小 */
+        /* 🎨 安靜未發言：頭像微暗 */
         .avatar-card {
-            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
-                        filter 0.2s ease, 
-                        opacity 0.2s ease;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), 
+                        filter 0.3s ease, 
+                        opacity 0.3s ease;
             filter: brightness(0.4) grayscale(0.2);
             opacity: 0.6;
             transform: translateY(0) scale(0.95);
         }
 
-        /* 🗣️ 真正開口說話時：瞬間亮起、恢復原色、向上浮起 */
+        /* 🗣️ 發言高亮：亮綠框與跳動 */
         .avatar-card.speaking {
             filter: brightness(1.1) grayscale(0);
             opacity: 1;
@@ -32,13 +31,13 @@
 
         .avatar-ring {
             border: 3px solid transparent;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
-        /* 說話時亮起綠框與光暈 */
         .avatar-card.speaking .avatar-ring {
             border-color: #23a55a;
             box-shadow: 0 0 16px rgba(35, 165, 90, 0.8), inset 0 0 6px rgba(35, 165, 90, 0.4);
+            animation: voice-pulse 1.8s infinite ease-in-out;
         }
 
         .user-name {
@@ -52,28 +51,22 @@
             box-shadow: 0 4px 12px rgba(35, 165, 90, 0.4);
         }
 
+        @keyframes voice-pulse {
+            0%, 100% { box-shadow: 0 0 14px rgba(35, 165, 90, 0.7); }
+            50% { box-shadow: 0 0 22px rgba(35, 165, 90, 0.95); }
+        }
+
         .fade-transition {
             transition: opacity 0.5s ease;
         }
     </style>
 </head>
-<body class="p-4 flex flex-col justify-between min-h-screen select-none">
+<body class="p-4 flex flex-col justify-end min-h-screen select-none">
 
-    <!-- 頂部連線狀態條 -->
-    <div id="status-bar" class="w-full flex items-center justify-between bg-slate-900/90 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 rounded-xl text-xs text-white shadow-xl fade-transition">
-        <div class="flex items-center gap-2.5">
-            <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            <span id="status-text" class="text-slate-300 font-mono">✅ 本機 Discord 語音偵測已連線</span>
-        </div>
-        <span class="text-slate-500 font-mono text-[11px]">Channel: {{ channel_id }}</span>
-    </div>
-
-    <!-- 📺 主要內容區域 -->
-    <div id="main-content" class="my-auto w-full flex items-center justify-center fade-transition">
+    <!-- 📺 主要內容區域 (頭像 / 倒數卡片) -->
+    <div id="main-content" class="w-full flex items-center justify-start fade-transition">
         <div id="users-container" class="flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full">
-            <div class="text-xs text-slate-400 border border-dashed border-slate-700/80 p-4 rounded-xl text-center w-full backdrop-blur-sm">
-                ⏳ 正在同步成員與發言狀態...
-            </div>
+            <!-- 預設載入中提示 -->
         </div>
     </div>
 
@@ -81,142 +74,77 @@
         const channelId = "{{ channel_id }}";
         let MAX_VISIBLE = {{ max_visible }};
         
-        // 1. Bot 伺服器 WebSocket 連線 (控制設定與關閉倒數)
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const botWsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
         
         let membersMap = new Map();
         let isClosed = false;
-        let botSocket = null;
+        let socket = null;
         let heartbeatInterval = null;
 
-        // -------------------------------------------------------------
-        // 🤖 區塊 A：Bot 伺服器控制（處理設定與 5 秒關閉倒數）
-        // -------------------------------------------------------------
-        function connectBotSocket() {
+        function connect() {
             if (isClosed) return;
-            botSocket = new WebSocket(botWsUrl);
+            socket = new WebSocket(botWsUrl);
 
-            botSocket.onopen = () => {
-                botSocket.send(JSON.stringify({ action: "request_init" }));
+            socket.onopen = () => {
+                socket.send(JSON.stringify({ action: "request_init" }));
 
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
                 heartbeatInterval = setInterval(() => {
-                    if (botSocket && botSocket.readyState === WebSocket.OPEN && !isClosed) {
-                        botSocket.send(JSON.stringify({ action: "request_init" }));
+                    if (socket && socket.readyState === WebSocket.OPEN && !isClosed) {
+                        socket.send(JSON.stringify({ action: "request_init" }));
                     }
                 }, 1000);
             };
 
-            botSocket.onmessage = (event) => {
+            socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
 
-                    // 🛑 收到關閉指令
+                    // 🛑 1. 收到關閉指令
                     if (data.action === "close") {
                         isClosed = true;
                         if (heartbeatInterval) clearInterval(heartbeatInterval);
-                        if (botSocket) botSocket.close();
+                        if (socket) socket.close();
                         startCountdownAndDestroy();
                         return;
                     }
 
-                    // ⚙️ 收到設定變更 (調整顯示人數上限)
+                    // ⚙️ 2. 收到來自後台 control 頁面的人數限制更新
                     if (data.action === "config_update" && data.max_visible) {
                         MAX_VISIBLE = parseInt(data.max_visible);
                         renderOverlay();
                         return;
                     }
 
-                    // 📋 收到 Bot 提供的基礎成員清單
+                    // 📋 3. 收到成員初始化名單
                     if (data.action === "init" && Array.isArray(data.members)) {
-                        data.members.forEach(m => {
-                            if (!membersMap.has(m.id)) {
-                                membersMap.set(m.id, {
-                                    id: m.id,
-                                    name: m.name,
-                                    avatar: m.avatar,
-                                    speaking: false
-                                });
-                            }
-                        });
+                        membersMap.clear();
+                        data.members.forEach(m => membersMap.set(m.id, m));
+                        renderOverlay();
+                    }
+                    // 🗣️ 4. 狀態更新
+                    else if (data.action === "update") {
+                        if (membersMap.has(data.id)) {
+                            membersMap.get(data.id).speaking = data.speaking;
+                        } else {
+                            membersMap.set(data.id, data);
+                        }
                         renderOverlay();
                     }
                 } catch (e) {
-                    console.error("Bot WS 錯誤:", e);
+                    console.error("WS 錯誤:", e);
                 }
             };
 
-            botSocket.onclose = () => {
-                if (!isClosed) setTimeout(connectBotSocket, 2000);
+            socket.onclose = () => {
+                if (!isClosed) setTimeout(connect, 2000);
             };
         }
 
-        // -------------------------------------------------------------
-        // 🎙️ 區塊 B：Discord RPC 本機精準說話監聽 (說話亮綠圈的核心秘密)
-        // -------------------------------------------------------------
-        function connectDiscordRPC() {
-            // Discord 本機 WebSocket 常用連接埠
-            const rpcPorts = [6463, 6464, 6465];
-            let connected = false;
-
-            rpcPorts.forEach(port => {
-                if (connected || isClosed) return;
-
-                const rpcWs = new WebSocket(`ws://127.0.0.1:${port}/?v=1&client_id=100000000000000000`);
-
-                rpcWs.onopen = () => {
-                    connected = true;
-                    // 訂閱語音頻道成員發言動態
-                    const subscribePayload = {
-                        cmd: "SUBSCRIBE",
-                        evt: "SPEAKING_START",
-                        args: { channel_id: channelId },
-                        nonce: Math.random().toString()
-                    };
-                    const stopPayload = {
-                        cmd: "SUBSCRIBE",
-                        evt: "SPEAKING_STOP",
-                        args: { channel_id: channelId },
-                        nonce: Math.random().toString()
-                    };
-                    rpcWs.send(JSON.stringify(subscribePayload));
-                    rpcWs.send(JSON.stringify(stopPayload));
-                };
-
-                rpcWs.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        // 🎙️ 捕捉開口說話與閉嘴事件
-                        if (data.evt === "SPEAKING_START" && data.data) {
-                            setSpeakingState(data.data.user_id, true);
-                        } else if (data.evt === "SPEAKING_STOP" && data.data) {
-                            setSpeakingState(data.data.user_id, false);
-                        }
-                    } catch (e) {}
-                };
-            });
-        }
-
-        function setSpeakingState(userId, isSpeaking) {
-            const strId = str(userId);
-            if (membersMap.has(strId)) {
-                membersMap.get(strId).speaking = isSpeaking;
-                renderOverlay();
-            }
-        }
-
-        function str(val) { return String(val); }
-
-        // -------------------------------------------------------------
-        // ⏱️ 區塊 C：畫面渲染與 5 秒銷毀
-        // -------------------------------------------------------------
+        // ⏱️ 5秒倒數關閉與徹底清空網頁
         function startCountdownAndDestroy() {
-            const statusBar = document.getElementById("status-bar");
             const mainContent = document.getElementById("main-content");
-
-            if (statusBar) statusBar.style.opacity = "0";
-
             let timeLeft = 5;
             
             const updateCountdownUI = () => {
@@ -258,11 +186,7 @@
             const members = Array.from(membersMap.values());
             
             if (members.length === 0) {
-                container.innerHTML = `
-                    <div class="text-xs text-slate-400 border border-dashed border-slate-700/80 p-4 rounded-xl text-center w-full backdrop-blur-sm">
-                        🎙️ 語音頻道內目前沒有成員。
-                    </div>
-                `;
+                container.innerHTML = "";
                 return;
             }
 
@@ -306,9 +230,7 @@
             }
         }
 
-        // 啟動連線
-        connectBotSocket();
-        connectDiscordRPC();
+        connect();
     </script>
 </body>
 </html>
