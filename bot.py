@@ -1438,6 +1438,11 @@ def index():
         DISCORD_CLIENT_ID=DISCORD_CLIENT_ID
     )
 
+# 初始化全域偵測模式字典
+if not hasattr(bot, "channel_detect_mode"):
+    bot.channel_detect_mode = {}
+    
+    
 @sock.route('/ws/<channel_id>')
 def overlay_ws(ws, channel_id):
     if channel_id not in overlay_websockets:
@@ -1449,7 +1454,6 @@ def overlay_ws(ws, channel_id):
         
         is_active = (channel_id in channel_max_visible) or (channel_id_int is not None and channel_id_int in channel_max_visible)
         
-        # 如果頻道未啟用，發送關閉訊號
         if not is_active:
             ws.send(json.dumps({"action": "close"}))
             return
@@ -1461,22 +1465,28 @@ def overlay_ws(ws, channel_id):
                     data = json.loads(data_raw)
                     cog = bot.get_cog("StreamOverlayCog")
 
-                    # 1. 網頁開啟時請求初始化資料
                     if data.get("action") == "request_init":
                         if cog and channel_id_int is not None:
                             members = cog.fetch_channel_members(channel_id_int)
-                            ws.send(json.dumps({"action": "init", "members": members}))
-
+                            detect_mode = getattr(bot, "channel_detect_mode", {}).get(str(channel_id), "rpc")
+                            ws.send(json.dumps({
+                                "action": "init", 
+                                "members": members,
+                                "detect_mode": detect_mode
+                            }))
 
                     elif data.get("action") == "update_config":
                         new_max = data.get("max_visible", 3)
                         layout_mode = data.get("layout_mode", "horizontal")
-                        detect_mode = data.get("detect_mode", "auto")
+                        detect_mode = data.get("detect_mode", "rpc")
                         
                         channel_max_visible[channel_id] = new_max
                         if channel_id_int is not None:
                             channel_max_visible[channel_id_int] = new_max
                         
+                        if hasattr(bot, "channel_detect_mode"):
+                            bot.channel_detect_mode[str(channel_id)] = detect_mode
+
                         if cog:
                             import asyncio
                             asyncio.run_coroutine_threadsafe(
@@ -1489,14 +1499,12 @@ def overlay_ws(ws, channel_id):
                                 bot.loop
                             )
 
-                    # 3. 🛑 來自控制後台 (control.html)：點擊關閉疊加服務
                     elif data.get("action") == "stop_service":
                         if channel_id in channel_max_visible:
                             del channel_max_visible[channel_id]
                         if channel_id_int is not None and channel_id_int in channel_max_visible:
                             del channel_max_visible[channel_id_int]
                         
-                        # 廣播關閉訊號，觸發 5 秒倒數與銷毀
                         if cog:
                             import asyncio
                             asyncio.run_coroutine_threadsafe(
@@ -1512,17 +1520,21 @@ def overlay_ws(ws, channel_id):
         if ws in overlay_websockets.get(channel_id, []):
             overlay_websockets[channel_id].remove(ws)
 
-# 1. OBS 專屬疊加畫面
+
+
+# 1. OBS 專屬疊加頁面
 @app.route('/overlay/<channel_id>')
 def overlay_page(channel_id):
     max_visible = channel_max_visible.get(str(channel_id), 3)
-    return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible)
+    detect_mode = getattr(bot, "channel_detect_mode", {}).get(str(channel_id), "rpc")
+    return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible, detect_mode=detect_mode)
 
-# 2. 🎛️ 新增：後台控制與設定網頁
+# 2. 控制後台網頁
 @app.route('/control/<channel_id>')
 def control_page(channel_id):
     max_visible = channel_max_visible.get(str(channel_id), 3)
-    return render_template('control.html', channel_id=channel_id, max_visible=max_visible)
+    detect_mode = getattr(bot, "channel_detect_mode", {}).get(str(channel_id), "rpc")
+    return render_template('control.html', channel_id=channel_id, max_visible=max_visible, detect_mode=detect_mode)
 
 # --------------------------
 # 伺服器儀表板/設定 (其餘路由保持不變)
