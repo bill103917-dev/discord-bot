@@ -1252,11 +1252,12 @@ import uuid # 用於生成獨特的檔案名
 import random # 用於隨機邏輯 (儘管在此版本中已棄用)
 from utils.config_manager import load_config, save_config
 from utils.time_utils import safe_now
+from flask_sock import Sock  # 1. 補上這行匯入
 
 
 
 app = Flask(__name__)
-# 建議使用環境變數設定 FLASK_SECRET_KEY
+sock = Sock(app)      
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "change_this_to_secure_key")
 
 
