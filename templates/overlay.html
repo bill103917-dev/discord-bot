@@ -4,64 +4,57 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Discord Voice Overlay - Channel {{ channel_id }}</title>
-    <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 在手機上預設為深色背景，方便排查；OBS 瀏覽器載入時會自動保持透明 */
         body {
-            background-color: #0f172a;
+            background-color: transparent;
             overflow: hidden;
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
         }
-        /* 未說話時變暗 */
+        /* 基礎頭像卡片 */
         .avatar-card {
             transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            filter: brightness(0.4) grayscale(0.2);
-            opacity: 0.6;
+            filter: brightness(0.6) grayscale(0.1);
+            opacity: 0.8;
             transform: translateY(0);
         }
-        /* 🗣️ 說話時：恢復亮度、亮綠圈、向上微跳 */
-        .avatar-card.speaking {
+        /* 🗣️ 說話/未靜音高亮狀態 */
+        .avatar-card.active {
             filter: brightness(1) grayscale(0);
             opacity: 1;
-            transform: translateY(-8px);
+            transform: translateY(-6px);
         }
         .avatar-ring {
             border: 3px solid transparent;
             transition: all 0.15s ease;
         }
-        .avatar-card.speaking .avatar-ring {
+        .avatar-card.active .avatar-ring {
             border-color: #23a55a;
-            box-shadow: 0 0 15px rgba(35, 165, 90, 0.6);
+            box-shadow: 0 0 12px rgba(35, 165, 90, 0.6);
         }
-        .avatar-card.speaking .user-name {
+        .avatar-card.active .user-name {
             background-color: #23a55a;
             color: #ffffff;
             font-weight: bold;
         }
     </style>
 </head>
-<body class="p-4 flex flex-col justify-between min-h-screen text-white select-none">
+<body class="p-4 flex flex-col justify-between min-h-screen select-none">
 
-    <!-- 📱 手機狀態顯示列 (讓你在手機上一眼看懂連線狀態) -->
-    <div class="w-full flex items-center justify-between bg-slate-800/90 border border-slate-700 px-3 py-2 rounded-lg text-xs">
+    <!-- 頂部連線狀態條 -->
+    <div id="status-bar" class="w-full flex items-center justify-between bg-slate-900/90 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-white">
         <div class="flex items-center gap-2">
             <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-            <span id="status-text" class="text-slate-300 font-mono">連線中...</span>
+            <span id="status-text" class="text-slate-300 font-mono">正在同步語音成員...</span>
         </div>
-        <span class="text-slate-500">Channel: {{ channel_id }}</span>
+        <span class="text-slate-500">Channel ID: {{ channel_id }}</span>
     </div>
 
-    <!-- 📺 頭像顯示區域 (橫向單行) -->
+    <!-- 📺 頭像顯示區域 -->
     <div id="users-container" class="my-auto flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-x-auto py-6">
         <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
-            🎙️ 語音疊加層準備就緒，請在 Discord 語音頻道中開口說話...
+            ⏳ 正在連接並獲取語音頻道成員名單...
         </div>
-    </div>
-
-    <!-- 底部說明 -->
-    <div class="text-[10px] text-slate-500 text-center">
-        手機預覽模式 • 放進 OBS 後背景將自動透明
     </div>
 
     <script>
@@ -72,56 +65,84 @@
         const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
         
         let membersMap = new Map();
+        let isClosed = false;
 
         const statusDot = document.getElementById("status-dot");
         const statusText = document.getElementById("status-text");
 
         function updateStatus(connected, msg) {
+            if (isClosed) return;
             if (connected) {
                 statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
-                statusText.innerText = msg || "✅ 已連線至 Discord 語音";
+                statusText.innerText = msg || "✅ 已同步語音成員名單";
                 statusText.className = "text-emerald-400 font-semibold";
             } else {
                 statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping";
-                statusText.innerText = msg || "⚠️ 正在嘗試重新連線...";
+                statusText.innerText = msg || "⚠️ 重新連線中...";
                 statusText.className = "text-amber-400 font-mono";
             }
         }
 
         function connect() {
-            updateStatus(false, "正在連接 WebSocket 伺服器...");
+            if (isClosed) return;
             const ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
-                updateStatus(true, "✅ 伺服器已連線，等待語音訊號");
+                updateStatus(true, "✅ 連線成功，請求成員資料中...");
+                // 連線建立後立刻主動請求獲取最新成員名單
+                ws.send(JSON.stringify({ action: "request_init" }));
             };
 
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     
-                    if (data.action === "remove") {
+                    if (data.action === "close") {
+                        isClosed = true;
+                        ws.close();
+                        showClosedScreen();
+                        return;
+                    }
+
+                    if (data.action === "init" && Array.isArray(data.members)) {
+                        membersMap.clear();
+                        data.members.forEach(m => membersMap.set(m.id, m));
+                        updateStatus(true, `✅ 已成功載入 ${data.members.length} 位成員`);
+                    } else if (data.action === "remove") {
                         membersMap.delete(data.id);
-                    } else {
+                    } else if (data.action === "update") {
                         membersMap.set(data.id, data);
                     }
+                    
                     renderOverlay();
                 } catch (e) {
-                    console.error("解析失敗:", e);
+                    console.error("解析 WebSocket 資料失敗:", e);
                 }
-            };
-            
-            ws.onerror = (err) => {
-                updateStatus(false, "❌ 連線失敗，檢查網絡或伺服器");
             };
 
             ws.onclose = () => {
-                updateStatus(false, "🔄 連線中斷，2秒後重連...");
-                setTimeout(connect, 2000);
+                if (!isClosed) {
+                    updateStatus(false, "🔄 連線中斷，2秒後重試...");
+                    setTimeout(connect, 2000);
+                }
             };
         }
 
+        function showClosedScreen() {
+            const container = document.getElementById("users-container");
+            statusDot.className = "w-2.5 h-2.5 rounded-full bg-red-500";
+            statusText.innerText = "🛑 疊加服務已終止";
+            statusText.className = "text-red-400 font-semibold";
+            
+            container.innerHTML = `
+                <div class="text-xs text-red-400 border border-red-500/40 bg-red-950/20 p-4 rounded-xl text-center w-full">
+                    🛑 該頻道的實況疊加層服務已被關閉。
+                </div>
+            `;
+        }
+
         function renderOverlay() {
+            if (isClosed) return;
             const container = document.getElementById("users-container");
             container.innerHTML = "";
 
@@ -130,7 +151,7 @@
             if (members.length === 0) {
                 container.innerHTML = `
                     <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
-                        🎙️ 語音頻道內暫無發言動態，請在 Discord 開口說話...
+                        🎙️ 語音頻道內目前沒有成員。
                     </div>
                 `;
                 return;
@@ -139,11 +160,11 @@
             const visibleMembers = members.slice(0, MAX_VISIBLE);
             const hiddenMembers = members.slice(MAX_VISIBLE);
 
-            // 1. 繪製前 MAX_VISIBLE 名成員
+            // 1. 繪製前 MAX_VISIBLE 個成員
             visibleMembers.forEach(user => {
                 const card = document.createElement("div");
                 card.id = `user-${user.id}`;
-                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'speaking' : ''}`;
+                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'active' : ''}`;
                 card.innerHTML = `
                     <div class="relative">
                         <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800 shadow-md">
@@ -157,11 +178,11 @@
                 container.appendChild(card);
             });
 
-            // 2. 超出人數時自動顯示 +N 卡片
+            // 2. 超出限制自動轉為 +N
             if (hiddenMembers.length > 0) {
-                const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
+                const isAnyHiddenActive = hiddenMembers.some(u => u.speaking);
                 const plusCard = document.createElement("div");
-                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
+                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenActive ? 'active' : ''}`;
                 plusCard.innerHTML = `
                     <div class="relative">
                         <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-md">
