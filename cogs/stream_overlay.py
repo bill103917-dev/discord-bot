@@ -31,8 +31,15 @@ class OverlayConfigModal(Modal, title="⚙️ 實況疊加層設定"):
             if val < 1 or val > 10:
                 return await interaction.response.send_message("❌ 請輸入 1 到 10 之間的數字！", ephemeral=True)
             
+            # 1. 更新全域設定字典 (相容 int 與 str)
             self.cog.bot.channel_max_visible[self.channel_id] = val
-            await interaction.response.send_message(f"✅ 設定已更新！目前橫向最多顯示 **{val}** 人，超過將自動轉換為 `+N`！", ephemeral=True)
+            self.cog.bot.channel_max_visible[str(self.channel_id)] = val
+
+            # 2. 🌟 關鍵修正：即時發送 config_update 廣播給網頁，瞬間熱套用！
+            config_payload = {"action": "config_update", "max_visible": val}
+            await self.cog.broadcast_speaking_status(str(self.channel_id), config_payload)
+
+            await interaction.response.send_message(f"✅ 設定已即時更新！目前橫向最多顯示 **{val}** 人，網頁已同步生效！", ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ 請輸入有效的整數數字！", ephemeral=True)
 
@@ -77,18 +84,18 @@ class VoiceOverlayControlView(View):
         if not self.check_permissions(interaction):
             return await interaction.response.send_message("❌ 只有**伺服器管理員**或**指令發起者**可以關閉此服務！", ephemeral=True)
         
-        # 1. 刪除啟用狀態（從全域字典刪除）
+        # 1. 刪除啟用狀態
         if self.channel_id in self.cog.bot.channel_max_visible:
             del self.cog.bot.channel_max_visible[self.channel_id]
         if str(self.channel_id) in self.cog.bot.channel_max_visible:
             del self.cog.bot.channel_max_visible[str(self.channel_id)]
 
-        # 2. 向前端廣播關閉指令
+        # 2. 🌟 關鍵修正：向前端網頁即時廣播 close 指令！
         await self.cog.broadcast_speaking_status(str(self.channel_id), {"action": "close"})
 
         embed = discord.Embed(
             title="🛑 語音疊加層服務已結束",
-            description="已成功關閉該頻道的實況疊加控制，網頁已進入倒數關閉流程。",
+            description="已成功關閉該頻道的實況疊加控制，網頁已收到關閉訊號並進入倒數！",
             color=discord.Color.red()
         )
         await interaction.response.edit_message(embed=embed, view=None)
@@ -102,7 +109,7 @@ class StreamOverlayCog(commands.Cog):
 
     async def broadcast_speaking_status(self, channel_id: str, user_data: dict):
         """廣播 JSON 資料給連線該頻道的 WebSocket 網頁"""
-        websockets = getattr(self.bot, "overlay_websockets", {}).get(channel_id, [])
+        websockets = getattr(self.bot, "overlay_websockets", {}).get(str(channel_id), [])
         for ws in list(websockets):
             try:
                 ws.send(json.dumps(user_data))
@@ -130,7 +137,6 @@ class StreamOverlayCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        """當成員進出頻道或狀態變更時即時觸發"""
         channel = after.channel or before.channel
         if not channel:
             return
@@ -138,19 +144,10 @@ class StreamOverlayCog(commands.Cog):
         channel_id = str(channel.id)
         channel_id_int = channel.id
 
-        # 檢查該頻道是否處於啟用狀態（相容 int 與 str）
         active_map = getattr(self.bot, "channel_max_visible", {})
         if channel_id not in active_map and channel_id_int not in active_map:
             return
 
-        # ⚡ 情況 A：成員「加入」或「離開」頻道 ➡️ 重新發送完整成員清單 (全量同步)
-        if before.channel != after.channel:
-            members_list = self.fetch_channel_members(channel_id_int)
-            init_payload = {"action": "init", "members": members_list}
-            await self.broadcast_speaking_status(channel_id, init_payload)
-            return
-
-        # ⚡ 情況 B：成員在頻道內變更狀態（例如：發言/靜音/拒聽）
         avatar_url = member.display_avatar.url
         user_payload = {
             "action": "update",
@@ -169,7 +166,6 @@ class StreamOverlayCog(commands.Cog):
         voice_channel = interaction.user.voice.channel
         channel_id = voice_channel.id
 
-        # 同時儲存 int 與 str 防止型態錯位
         self.bot.channel_max_visible[channel_id] = 3
         self.bot.channel_max_visible[str(channel_id)] = 3
 
