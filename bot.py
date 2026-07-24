@@ -1438,7 +1438,6 @@ def index():
         DISCORD_CLIENT_ID=DISCORD_CLIENT_ID
     )
 
-
 @sock.route('/ws/<channel_id>')
 def overlay_ws(ws, channel_id):
     if channel_id not in overlay_websockets:
@@ -1446,10 +1445,13 @@ def overlay_ws(ws, channel_id):
     overlay_websockets[channel_id].append(ws)
     
     try:
-        # 檢查該頻道是否還在開啟狀態（若已按結束，直接告知網頁關閉）
-        channel_id_int = int(channel_id) if channel_id.isdigit() else 0
-        active_channels = getattr(app, "channel_max_visible", {})
-        if channel_id_int not in active_channels:
+        # 轉成 int 比對全域字典 channel_max_visible
+        channel_id_int = int(channel_id) if channel_id.isdigit() else None
+        
+        is_active = (channel_id in channel_max_visible) or (channel_id_int is not None and channel_id_int in channel_max_visible)
+        
+        # 如果該頻道沒有在 Discord 輸入 /overlay 啟用，才發送關閉訊號
+        if not is_active:
             ws.send(json.dumps({"action": "close"}))
             return
 
@@ -1459,13 +1461,13 @@ def overlay_ws(ws, channel_id):
                 try:
                     data = json.loads(data_raw)
                     if data.get("action") == "request_init":
-                        # 再次檢查是否已被關閉
-                        if channel_id_int not in getattr(app, "channel_max_visible", {}):
+                        # 再次確認是否開啟中
+                        if channel_id not in channel_max_visible and channel_id_int not in channel_max_visible:
                             ws.send(json.dumps({"action": "close"}))
                             break
                         
                         cog = bot.get_cog("StreamOverlayCog")
-                        if cog and channel_id.isdigit():
+                        if cog and channel_id_int is not None:
                             members = cog.fetch_channel_members(channel_id_int)
                             ws.send(json.dumps({"action": "init", "members": members}))
                 except Exception:
