@@ -16,3 +16,4 @@ PyNaCl
 discord.py
 ffmpeg
 aiohttp
+Flask-Sock
