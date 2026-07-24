@@ -1467,18 +1467,25 @@ def overlay_ws(ws, channel_id):
                             members = cog.fetch_channel_members(channel_id_int)
                             ws.send(json.dumps({"action": "init", "members": members}))
 
-                    # 2. 🎛️ 來自控制後台 (control.html)：拉動滑桿即時更改人數上限
+
                     elif data.get("action") == "update_config":
                         new_max = data.get("max_visible", 3)
+                        layout_mode = data.get("layout_mode", "horizontal")
+                        detect_mode = data.get("detect_mode", "auto")
+                        
                         channel_max_visible[channel_id] = new_max
                         if channel_id_int is not None:
                             channel_max_visible[channel_id_int] = new_max
                         
-                        # 廣播給包含 OBS Overlay 在內的所有連線網頁，瞬間套用！
                         if cog:
                             import asyncio
                             asyncio.run_coroutine_threadsafe(
-                                cog.broadcast_speaking_status(str(channel_id), {"action": "config_update", "max_visible": new_max}),
+                                cog.broadcast_speaking_status(str(channel_id), {
+                                    "action": "config_update", 
+                                    "max_visible": new_max,
+                                    "layout_mode": layout_mode,
+                                    "detect_mode": detect_mode
+                                }),
                                 bot.loop
                             )
 
