@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Voice Overlay - Channel {{ channel_id }}</title>
+    <!-- 載入 Tailwind CSS 樣式庫 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+        }
+        /* 頭像卡片基礎狀態（未發言時變暗、靜止） */
+        .avatar-card {
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            filter: brightness(0.4) grayscale(0.2);
+            opacity: 0.6;
+            transform: translateY(0);
+        }
+        /* 🗣️ 發言狀態：恢復正常亮度、亮起綠光圈並向上彈跳 */
+        .avatar-card.speaking {
+            filter: brightness(1) grayscale(0);
+            opacity: 1;
+            transform: translateY(-8px);
+        }
+        .avatar-ring {
+            border: 3px solid transparent;
+            transition: all 0.15s ease;
+        }
+        .avatar-card.speaking .avatar-ring {
+            border-color: #23a55a;
+            box-shadow: 0 0 15px rgba(35, 165, 90, 0.6);
+        }
+        .avatar-card.speaking .user-name {
+            background-color: #23a55a;
+            color: #ffffff;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="p-4 flex items-end justify-start min-h-screen">
+    <!-- 強制單行橫向排列，不換行 -->
+    <div id="users-container" class="flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-hidden"></div>
+
+    <script>
+        // 接收來自 Flask 後端帶入的模板變數
+        const channelId = "{{ channel_id }}";
+        const MAX_VISIBLE = {{ max_visible }};
+        
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
+        
+        let membersMap = new Map();
+
+        function connect() {
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.action === "remove") {
+                    membersMap.delete(data.id);
+                } else {
+                    membersMap.set(data.id, data);
+                }
+                renderOverlay();
+            };
+            
+            ws.onclose = () => {
+                setTimeout(connect, 2000); // 斷線後 2 秒自動重連
+            };
+        }
+
+        function renderOverlay() {
+            const container = document.getElementById("users-container");
+            container.innerHTML = "";
+
+            const members = Array.from(membersMap.values());
+            const visibleMembers = members.slice(0, MAX_VISIBLE);
+            const hiddenMembers = members.slice(MAX_VISIBLE);
+
+            // 1. 繪製未超出的成員頭像
+            visibleMembers.forEach(user => {
+                const card = document.createElement("div");
+                card.id = `user-${user.id}`;
+                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'speaking' : ''}`;
+                card.innerHTML = `
+                    <div class="relative">
+                        <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800 shadow-md">
+                            <img src="${user.avatar}" class="w-full h-full object-cover rounded-full">
+                        </div>
+                    </div>
+                    <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow max-w-[90px] truncate">
+                        ${user.name}
+                    </span>
+                `;
+                container.appendChild(card);
+            });
+
+            // 2. 超出人數時，將剩餘成員合併為 +N 卡片
+            if (hiddenMembers.length > 0) {
+                const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
+                const plusCard = document.createElement("div");
+                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
+                plusCard.innerHTML = `
+                    <div class="relative">
+                        <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-md">
+                            +${hiddenMembers.length}
+                        </div>
+                    </div>
+                    <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow">
+                        其餘成員
+                    </span>
+                `;
+                container.appendChild(plusCard);
+            }
+        }
+
+        connect();
+    </script>
+</body>
+</html>
