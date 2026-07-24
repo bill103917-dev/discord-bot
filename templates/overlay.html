@@ -13,9 +13,9 @@
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
         }
 
-        /* 🎨 預設（沒說話/安靜時）：頭像微暗、稍微縮小 */
+        /* 🎨 沒說話/安靜時：頭像微暗、縮小 */
         .avatar-card {
-            transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), 
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
                         filter 0.2s ease, 
                         opacity 0.2s ease;
             filter: brightness(0.4) grayscale(0.2);
@@ -23,7 +23,7 @@
             transform: translateY(0) scale(0.95);
         }
 
-        /* 🗣️ 正在說話時：亮起、恢復原色、向上浮起 */
+        /* 🗣️ 真正開口說話時：瞬間亮起、恢復原色、向上浮起 */
         .avatar-card.speaking {
             filter: brightness(1.1) grayscale(0);
             opacity: 1;
@@ -35,7 +35,7 @@
             transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
-        /* 說話時的亮綠圈與柔光 */
+        /* 說話時亮起綠框與光暈 */
         .avatar-card.speaking .avatar-ring {
             border-color: #23a55a;
             box-shadow: 0 0 16px rgba(35, 165, 90, 0.8), inset 0 0 6px rgba(35, 165, 90, 0.4);
@@ -63,16 +63,16 @@
     <div id="status-bar" class="w-full flex items-center justify-between bg-slate-900/90 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 rounded-xl text-xs text-white shadow-xl fade-transition">
         <div class="flex items-center gap-2.5">
             <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            <span id="status-text" class="text-slate-300 font-mono">✅ 語音開口說話偵測中</span>
+            <span id="status-text" class="text-slate-300 font-mono">✅ 本機 Discord 語音偵測已連線</span>
         </div>
         <span class="text-slate-500 font-mono text-[11px]">Channel: {{ channel_id }}</span>
     </div>
 
-    <!-- 📺 主要內容區域 (頭像 / 倒數卡片) -->
+    <!-- 📺 主要內容區域 -->
     <div id="main-content" class="my-auto w-full flex items-center justify-center fade-transition">
         <div id="users-container" class="flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full">
             <div class="text-xs text-slate-400 border border-dashed border-slate-700/80 p-4 rounded-xl text-center w-full backdrop-blur-sm">
-                ⏳ 正在載入語音頻道成員名單...
+                ⏳ 正在同步成員與發言狀態...
             </div>
         </div>
     </div>
@@ -81,115 +81,136 @@
         const channelId = "{{ channel_id }}";
         let MAX_VISIBLE = {{ max_visible }};
         
+        // 1. Bot 伺服器 WebSocket 連線 (控制設定與關閉倒數)
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
+        const botWsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
         
         let membersMap = new Map();
-        let speakingTimers = new Map();
         let isClosed = false;
-        let socket = null;
+        let botSocket = null;
         let heartbeatInterval = null;
 
-        const statusDot = document.getElementById("status-dot");
-        const statusText = document.getElementById("status-text");
-
-        // 🎙️ 處理開口說話事件：亮綠框 + 說完話自然消退
-        function handleSpeakingEvent(userId, isSpeaking) {
-            if (isClosed || !membersMap.has(userId)) return;
-
-            const member = membersMap.get(userId);
-
-            if (isSpeaking) {
-                member.speaking = true;
-                // 清除舊的消退計時器
-                if (speakingTimers.has(userId)) {
-                    clearTimeout(speakingTimers.get(userId));
-                }
-                // 發言防抖：講話停下來 400ms 後，綠框立刻消失
-                const timer = setTimeout(() => {
-                    if (membersMap.has(userId)) {
-                        membersMap.get(userId).speaking = false;
-                        renderOverlay();
-                    }
-                }, 400);
-                speakingTimers.set(userId, timer);
-            } else {
-                member.speaking = false;
-                if (speakingTimers.has(userId)) {
-                    clearTimeout(speakingTimers.get(userId));
-                    speakingTimers.delete(userId);
-                }
-            }
-            renderOverlay();
-        }
-
-        function connect() {
+        // -------------------------------------------------------------
+        // 🤖 區塊 A：Bot 伺服器控制（處理設定與 5 秒關閉倒數）
+        // -------------------------------------------------------------
+        function connectBotSocket() {
             if (isClosed) return;
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = () => {
-                socket.send(JSON.stringify({ action: "request_init" }));
+            botSocket = new WebSocket(botWsUrl);
 
-                // 每 1 秒心跳同步最新成員進出名單
+            botSocket.onopen = () => {
+                botSocket.send(JSON.stringify({ action: "request_init" }));
+
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
                 heartbeatInterval = setInterval(() => {
-                    if (socket && socket.readyState === WebSocket.OPEN && !isClosed) {
-                        socket.send(JSON.stringify({ action: "request_init" }));
+                    if (botSocket && botSocket.readyState === WebSocket.OPEN && !isClosed) {
+                        botSocket.send(JSON.stringify({ action: "request_init" }));
                     }
                 }, 1000);
             };
 
-            socket.onmessage = (event) => {
+            botSocket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    
-                    // 🛑 1. 收到結束關閉指令
+
+                    // 🛑 收到關閉指令
                     if (data.action === "close") {
                         isClosed = true;
                         if (heartbeatInterval) clearInterval(heartbeatInterval);
-                        socket.close();
+                        if (botSocket) botSocket.close();
                         startCountdownAndDestroy();
                         return;
                     }
 
-                    // ⚙️ 2. 收到按鈕設定更新指令 (即時改上限)
+                    // ⚙️ 收到設定變更 (調整顯示人數上限)
                     if (data.action === "config_update" && data.max_visible) {
                         MAX_VISIBLE = parseInt(data.max_visible);
                         renderOverlay();
                         return;
                     }
 
-                    // 📋 3. 收到成員初始化名單
+                    // 📋 收到 Bot 提供的基礎成員清單
                     if (data.action === "init" && Array.isArray(data.members)) {
-                        const newMap = new Map();
                         data.members.forEach(m => {
-                            // 保留目前的 speaking 狀態，預設為未發言(false)
-                            const oldMember = membersMap.get(m.id);
-                            m.speaking = oldMember ? oldMember.speaking : false;
-                            newMap.set(m.id, m);
+                            if (!membersMap.has(m.id)) {
+                                membersMap.set(m.id, {
+                                    id: m.id,
+                                    name: m.name,
+                                    avatar: m.avatar,
+                                    speaking: false
+                                });
+                            }
                         });
-
-                        membersMap = newMap;
                         renderOverlay();
-                    } 
-                    // 🗣️ 4. 收到說話動態訊號 (true/false)
-                    else if (data.action === "update") {
-                        handleSpeakingEvent(data.id, data.speaking);
                     }
                 } catch (e) {
-                    console.error("解析 WebSocket 資料失敗:", e);
+                    console.error("Bot WS 錯誤:", e);
                 }
             };
 
-            socket.onclose = () => {
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
-                if (!isClosed) {
-                    setTimeout(connect, 2000);
-                }
+            botSocket.onclose = () => {
+                if (!isClosed) setTimeout(connectBotSocket, 2000);
             };
         }
 
-        // ⏱️ 5秒倒數關閉與徹底清空網頁
+        // -------------------------------------------------------------
+        // 🎙️ 區塊 B：Discord RPC 本機精準說話監聽 (說話亮綠圈的核心秘密)
+        // -------------------------------------------------------------
+        function connectDiscordRPC() {
+            // Discord 本機 WebSocket 常用連接埠
+            const rpcPorts = [6463, 6464, 6465];
+            let connected = false;
+
+            rpcPorts.forEach(port => {
+                if (connected || isClosed) return;
+
+                const rpcWs = new WebSocket(`ws://127.0.0.1:${port}/?v=1&client_id=100000000000000000`);
+
+                rpcWs.onopen = () => {
+                    connected = true;
+                    // 訂閱語音頻道成員發言動態
+                    const subscribePayload = {
+                        cmd: "SUBSCRIBE",
+                        evt: "SPEAKING_START",
+                        args: { channel_id: channelId },
+                        nonce: Math.random().toString()
+                    };
+                    const stopPayload = {
+                        cmd: "SUBSCRIBE",
+                        evt: "SPEAKING_STOP",
+                        args: { channel_id: channelId },
+                        nonce: Math.random().toString()
+                    };
+                    rpcWs.send(JSON.stringify(subscribePayload));
+                    rpcWs.send(JSON.stringify(stopPayload));
+                };
+
+                rpcWs.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        // 🎙️ 捕捉開口說話與閉嘴事件
+                        if (data.evt === "SPEAKING_START" && data.data) {
+                            setSpeakingState(data.data.user_id, true);
+                        } else if (data.evt === "SPEAKING_STOP" && data.data) {
+                            setSpeakingState(data.data.user_id, false);
+                        }
+                    } catch (e) {}
+                };
+            });
+        }
+
+        function setSpeakingState(userId, isSpeaking) {
+            const strId = str(userId);
+            if (membersMap.has(strId)) {
+                membersMap.get(strId).speaking = isSpeaking;
+                renderOverlay();
+            }
+        }
+
+        function str(val) { return String(val); }
+
+        // -------------------------------------------------------------
+        // ⏱️ 區塊 C：畫面渲染與 5 秒銷毀
+        // -------------------------------------------------------------
         function startCountdownAndDestroy() {
             const statusBar = document.getElementById("status-bar");
             const mainContent = document.getElementById("main-content");
@@ -285,7 +306,9 @@
             }
         }
 
-        connect();
+        // 啟動連線
+        connectBotSocket();
+        connectDiscordRPC();
     </script>
 </body>
 </html>
