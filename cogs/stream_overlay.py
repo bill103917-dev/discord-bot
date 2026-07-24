@@ -119,7 +119,7 @@ class StreamOverlayCog(commands.Cog):
                 pass
 
     def fetch_channel_members(self, channel_id_int: int) -> list:
-        """獲取該語音頻道內的所有非機器人成員名單"""
+        """獲取該語音頻道內的所有成員，預設為未開口發言狀態"""
         channel = self.bot.get_channel(channel_id_int)
         if not channel or not isinstance(channel, discord.VoiceChannel):
             return []
@@ -131,7 +131,7 @@ class StreamOverlayCog(commands.Cog):
                     "id": str(m.id),
                     "name": m.display_name,
                     "avatar": m.display_avatar.url,
-                    "speaking": False
+                    "speaking": False  # 🌟 預設不說話，保持暗色
                 })
         return members_list
 
