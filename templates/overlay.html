@@ -4,56 +4,84 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Discord Voice Overlay - Channel {{ channel_id }}</title>
+    <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             background-color: transparent;
             overflow: hidden;
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            transition: background-color 0.5s ease;
         }
-        /* 基礎頭像卡片 */
+
+        /* 🎨 頭像卡片基礎樣式 */
         .avatar-card {
-            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            filter: brightness(0.6) grayscale(0.1);
-            opacity: 0.8;
-            transform: translateY(0);
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
+                        filter 0.3s ease, 
+                        opacity 0.3s ease;
+            filter: brightness(0.45) grayscale(0.3);
+            opacity: 0.65;
+            transform: translateY(0) scale(0.96);
         }
-        /* 🗣️ 說話/未靜音高亮狀態 */
-        .avatar-card.active {
-            filter: brightness(1) grayscale(0);
+
+        /* 🗣️ 說話/發言高亮狀態 */
+        .avatar-card.speaking {
+            filter: brightness(1.05) grayscale(0);
             opacity: 1;
-            transform: translateY(-6px);
+            transform: translateY(-10px) scale(1.05);
         }
+
+        /* 外圈 Glow 光圈視覺動態 */
         .avatar-ring {
             border: 3px solid transparent;
-            transition: all 0.15s ease;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
-        .avatar-card.active .avatar-ring {
+
+        .avatar-card.speaking .avatar-ring {
             border-color: #23a55a;
-            box-shadow: 0 0 12px rgba(35, 165, 90, 0.6);
+            box-shadow: 0 0 18px rgba(35, 165, 90, 0.75), inset 0 0 8px rgba(35, 165, 90, 0.3);
+            animation: pulse-glow 1.8s infinite ease-in-out;
         }
-        .avatar-card.active .user-name {
+
+        .user-name {
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .avatar-card.speaking .user-name {
             background-color: #23a55a;
             color: #ffffff;
             font-weight: bold;
+            box-shadow: 0 4px 12px rgba(35, 165, 90, 0.4);
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 16px rgba(35, 165, 90, 0.7); }
+            50% { box-shadow: 0 0 24px rgba(35, 165, 90, 0.95); }
+        }
+
+        /* 倒數卡片淡入與倒數淡出淡入效果 */
+        .fade-transition {
+            transition: opacity 0.5s ease, transform 0.5s ease;
         }
     </style>
 </head>
-<body class="p-4 flex flex-col justify-between min-h-screen select-none">
+<body id="app-body" class="p-4 flex flex-col justify-between min-h-screen select-none">
 
     <!-- 頂部連線狀態條 -->
-    <div id="status-bar" class="w-full flex items-center justify-between bg-slate-900/90 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-white">
-        <div class="flex items-center gap-2">
+    <div id="status-bar" class="w-full flex items-center justify-between bg-slate-900/90 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 rounded-xl text-xs text-white shadow-xl fade-transition">
+        <div class="flex items-center gap-2.5">
             <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
             <span id="status-text" class="text-slate-300 font-mono">正在同步語音成員...</span>
         </div>
-        <span class="text-slate-500">Channel ID: {{ channel_id }}</span>
+        <span class="text-slate-500 font-mono text-[11px]">Channel: {{ channel_id }}</span>
     </div>
 
-    <!-- 📺 頭像顯示區域 -->
-    <div id="users-container" class="my-auto flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-x-auto py-6">
-        <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
-            ⏳ 正在連接並獲取語音頻道成員名單...
+    <!-- 📺 主要內容區域 (頭像 / 倒數卡片) -->
+    <div id="main-content" class="my-auto w-full flex items-center justify-center fade-transition">
+        <div id="users-container" class="flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full">
+            <div class="text-xs text-slate-400 border border-dashed border-slate-700/80 p-4 rounded-xl text-center w-full backdrop-blur-sm">
+                ⏳ 正在連接並獲取語音頻道成員名單...
+            </div>
         </div>
     </div>
 
@@ -65,6 +93,7 @@
         const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
         
         let membersMap = new Map();
+        let speakingTimers = new Map();
         let isClosed = false;
 
         const statusDot = document.getElementById("status-dot");
@@ -83,13 +112,33 @@
             }
         }
 
+        function triggerSpeakingEvent(userId) {
+            if (isClosed) return;
+            if (membersMap.has(userId)) {
+                membersMap.get(userId).speaking = true;
+                
+                if (speakingTimers.has(userId)) {
+                    clearTimeout(speakingTimers.get(userId));
+                }
+
+                const timer = setTimeout(() => {
+                    if (membersMap.has(userId)) {
+                        membersMap.get(userId).speaking = false;
+                        renderOverlay();
+                    }
+                }, 1200);
+
+                speakingTimers.set(userId, timer);
+                renderOverlay();
+            }
+        }
+
         function connect() {
             if (isClosed) return;
             const ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
                 updateStatus(true, "✅ 連線成功，請求成員資料中...");
-                // 連線建立後立刻主動請求獲取最新成員名單
                 ws.send(JSON.stringify({ action: "request_init" }));
             };
 
@@ -97,21 +146,30 @@
                 try {
                     const data = JSON.parse(event.data);
                     
+                    // 🛑 收到關閉指令：開啟 5 秒倒數清空流程
                     if (data.action === "close") {
                         isClosed = true;
                         ws.close();
-                        showClosedScreen();
+                        startCountdownAndDestroy();
                         return;
                     }
 
                     if (data.action === "init" && Array.isArray(data.members)) {
                         membersMap.clear();
-                        data.members.forEach(m => membersMap.set(m.id, m));
+                        data.members.forEach(m => {
+                            m.speaking = false;
+                            membersMap.set(m.id, m);
+                        });
                         updateStatus(true, `✅ 已成功載入 ${data.members.length} 位成員`);
                     } else if (data.action === "remove") {
                         membersMap.delete(data.id);
+                        if (speakingTimers.has(data.id)) {
+                            clearTimeout(speakingTimers.get(data.id));
+                            speakingTimers.delete(data.id);
+                        }
                     } else if (data.action === "update") {
                         membersMap.set(data.id, data);
+                        triggerSpeakingEvent(data.id);
                     }
                     
                     renderOverlay();
@@ -128,29 +186,62 @@
             };
         }
 
-        function showClosedScreen() {
-            const container = document.getElementById("users-container");
-            statusDot.className = "w-2.5 h-2.5 rounded-full bg-red-500";
-            statusText.innerText = "🛑 疊加服務已終止";
-            statusText.className = "text-red-400 font-semibold";
+        // ⏱️ 5秒倒數關閉與徹底清空網頁
+        function startCountdownAndDestroy() {
+            const statusBar = document.getElementById("status-bar");
+            const mainContent = document.getElementById("main-content");
+
+            // 1. 隱藏頂部狀態條
+            if (statusBar) statusBar.style.opacity = "0";
+
+            // 2. 清空現有頭像介面，替換為 5 秒倒數計時卡片
+            let timeLeft = 5;
             
-            container.innerHTML = `
-                <div class="text-xs text-red-400 border border-red-500/40 bg-red-950/20 p-4 rounded-xl text-center w-full">
-                    🛑 該頻道的實況疊加層服務已被關閉。
-                </div>
-            `;
+            const updateCountdownUI = () => {
+                mainContent.innerHTML = `
+                    <div class="bg-slate-900/90 border border-red-500/40 p-6 rounded-2xl shadow-2xl text-center max-w-sm w-full space-y-3 backdrop-blur-md">
+                        <div class="flex items-center justify-center gap-2 text-red-400 font-bold text-sm">
+                            <span class="animate-bounce">🛑</span> 實況語音疊加層服務已結束
+                        </div>
+                        <p class="text-xs text-slate-400">管理員已關閉此頻道服務，網頁將於倒數後自動關閉...</p>
+                        <div class="text-2xl font-black text-amber-400 font-mono tracking-wider">
+                            ${timeLeft} 秒
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div class="bg-red-500 h-1.5 transition-all duration-1000 ease-linear" style="width: ${(timeLeft / 5) * 100}%"></div>
+                        </div>
+                    </div>
+                `;
+            };
+
+            updateCountdownUI();
+
+            // 3. 開始倒數計時器
+            const timer = setInterval(() => {
+                timeLeft--;
+                if (timeLeft > 0) {
+                    updateCountdownUI();
+                } else {
+                    clearInterval(timer);
+                    
+                    // 4. 倒數完畢：將倒數卡片與 DOM 完全刪除，清除背景，留下徹底空白頁面
+                    document.body.innerHTML = "";
+                    document.body.style.backgroundColor = "transparent";
+                }
+            }, 1000);
         }
 
         function renderOverlay() {
             if (isClosed) return;
             const container = document.getElementById("users-container");
+            if (!container) return;
             container.innerHTML = "";
 
             const members = Array.from(membersMap.values());
             
             if (members.length === 0) {
                 container.innerHTML = `
-                    <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
+                    <div class="text-xs text-slate-400 border border-dashed border-slate-700/80 p-4 rounded-xl text-center w-full backdrop-blur-sm">
                         🎙️ 語音頻道內目前沒有成員。
                     </div>
                 `;
@@ -160,36 +251,34 @@
             const visibleMembers = members.slice(0, MAX_VISIBLE);
             const hiddenMembers = members.slice(MAX_VISIBLE);
 
-            // 1. 繪製前 MAX_VISIBLE 個成員
             visibleMembers.forEach(user => {
                 const card = document.createElement("div");
                 card.id = `user-${user.id}`;
-                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'active' : ''}`;
+                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'speaking' : ''}`;
                 card.innerHTML = `
                     <div class="relative">
-                        <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800 shadow-md">
+                        <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800/90 shadow-lg">
                             <img src="${user.avatar}" class="w-full h-full object-cover rounded-full" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
                         </div>
                     </div>
-                    <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow max-w-[90px] truncate">
+                    <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow-md max-w-[95px] truncate">
                         ${user.name}
                     </span>
                 `;
                 container.appendChild(card);
             });
 
-            // 2. 超出限制自動轉為 +N
             if (hiddenMembers.length > 0) {
-                const isAnyHiddenActive = hiddenMembers.some(u => u.speaking);
+                const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
                 const plusCard = document.createElement("div");
-                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenActive ? 'active' : ''}`;
+                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
                 plusCard.innerHTML = `
                     <div class="relative">
-                        <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-md">
+                        <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600/80 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-lg">
                             +${hiddenMembers.length}
                         </div>
                     </div>
-                    <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow">
+                    <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow-md">
                         其餘成員
                     </span>
                 `;
