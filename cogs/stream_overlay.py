@@ -188,6 +188,6 @@ class StreamOverlayCog(commands.Cog):
             ephemeral=True
         )
 
-async def setup(bot: commands.Bot):
-    cog = StreamOverlayCog(bot)
-    await bot.add_cog(cog)
+
+async def setup(bot):
+    await bot.add_cog(StreamOverlayCog(bot))
