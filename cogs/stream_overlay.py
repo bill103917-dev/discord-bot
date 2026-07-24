@@ -2,9 +2,8 @@ import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
-from aiohttp import web
-import asyncio
 import json
+import os
 import logging
 
 log = logging.getLogger("StreamOverlayCog")
@@ -32,8 +31,8 @@ class OverlayConfigModal(Modal, title="⚙️ 實況疊加層設定"):
             if val < 1 or val > 10:
                 return await interaction.response.send_message("❌ 請輸入 1 到 10 之間的數字！", ephemeral=True)
             
-            # 更新該頻道的最高顯示人數
-            self.cog.channel_configs[self.channel_id] = {"max_visible": val}
+            # 更新全域設定
+            self.cog.bot.channel_max_visible[self.channel_id] = val
             await interaction.response.send_message(f"✅ 設定已更新！目前橫向最多顯示 **{val}** 人，超過將自動轉換為 `+N`！", ephemeral=True)
         except ValueError:
             await interaction.response.send_message("❌ 請輸入有效的整數數字！", ephemeral=True)
@@ -43,7 +42,7 @@ class OverlayConfigModal(Modal, title="⚙️ 實況疊加層設定"):
 # ==========================================
 class VoiceOverlayControlView(View):
     def __init__(self, cog, owner_id: int, channel_id: int):
-        super().__init__(timeout=None) # 持久化按鈕
+        super().__init__(timeout=None)
         self.cog = cog
         self.owner_id = owner_id
         self.channel_id = channel_id
@@ -56,12 +55,13 @@ class VoiceOverlayControlView(View):
 
     @discord.ui.button(label="🔗 顯示畫面連結", style=discord.ButtonStyle.primary, custom_id="btn_overlay_link")
     async def get_link(self, interaction: Interaction, button: Button):
-        # 所有人都可以按下此按鈕以取得專屬網址
-        host_url = f"http://localhost:8080/overlay/{self.channel_id}"
+        # 動態抓取主機網址
+        render_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:10000")
+        overlay_url = f"{render_url}/overlay/{self.channel_id}"
         
         embed = discord.Embed(
             title="🎥 專屬 OBS 語音疊加網址",
-            description=f"請複製下方網址並貼入 OBS 的「瀏覽器來源 (Browser Source)」：\n`{host_url}`",
+            description=f"請複製下方網址並貼入 OBS 的「瀏覽器來源 (Browser Source)」：\n`{overlay_url}`",
             color=discord.Color.green()
         )
         embed.set_footer(text="💡 此網址為個人專屬私密發送，請勿隨意洩漏給無關人員。")
@@ -80,9 +80,8 @@ class VoiceOverlayControlView(View):
         if not self.check_permissions(interaction):
             return await interaction.response.send_message("❌ 只有**伺服器管理員**或**指令發起者**可以關閉此服務！", ephemeral=True)
         
-        # 移除設定檔
-        if self.channel_id in self.cog.channel_configs:
-            del self.cog.channel_configs[self.channel_id]
+        if self.channel_id in self.cog.bot.channel_max_visible:
+            del self.cog.bot.channel_max_visible[self.channel_id]
 
         embed = discord.Embed(
             title="🛑 語音疊加層服務已結束",
@@ -97,168 +96,15 @@ class VoiceOverlayControlView(View):
 class StreamOverlayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.websockets = {}
-        self.channel_configs = {} # {channel_id: {"max_visible": 3}}
-        self.bg_task = asyncio.create_task(self.start_web_server())
-
-    def cog_unload(self):
-        self.bg_task.cancel()
-
-    # 🌐 非同步 Web 伺服器與 WebSocket 處理
-    async def start_web_server(self):
-        app = web.Application()
-        app.router.add_get('/overlay/{channel_id}', self.handle_overlay_page)
-        app.router.add_get('/ws/{channel_id}', self.handle_websocket)
-        
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
-        try:
-            await site.start()
-            log.info("🌐 [StreamOverlay] Web 伺服器已啟動於 Port 8080")
-        except Exception as e:
-            log.error(f"❌ [StreamOverlay] Web 伺服器啟動失敗: {e}")
-
-    async def handle_overlay_page(self, request):
-        channel_id_str = request.match_info.get('channel_id')
-        channel_id = int(channel_id_str) if channel_id_str.isdigit() else 0
-        
-        # 取得頻道設定的預設顯示人數 (預設為 3)
-        config = self.channel_configs.get(channel_id, {"max_visible": 3})
-        max_visible = config.get("max_visible", 3)
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html lang="zh-Hant">
-        <head>
-            <meta charset="UTF-8">
-            <title>Discord Voice Overlay</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <style>
-                body {{ background: transparent; overflow: hidden; font-family: sans-serif; }}
-                .avatar-card {{
-                    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-                    filter: brightness(0.4) grayscale(0.2);
-                    opacity: 0.6;
-                    transform: translateY(0);
-                }}
-                .avatar-card.speaking {{
-                    filter: brightness(1) grayscale(0);
-                    opacity: 1;
-                    transform: translateY(-8px);
-                }}
-                .avatar-ring {{
-                    border: 3px solid transparent;
-                    transition: all 0.15s ease;
-                }}
-                .avatar-card.speaking .avatar-ring {{
-                    border-color: #23a55a;
-                    box-shadow: 0 0 15px rgba(35, 165, 90, 0.6);
-                }}
-                .avatar-card.speaking .user-name {{
-                    background-color: #23a55a;
-                    color: #ffffff;
-                }}
-            </style>
-        </head>
-        <body class="p-4 flex items-end justify-start min-h-screen">
-            <div id="users-container" class="flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-hidden"></div>
-
-            <script>
-                const channelId = "{channel_id_str}";
-                const MAX_VISIBLE = {max_visible};
-                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                const wsUrl = `${{protocol}}//${{window.location.host}}/ws/${{channelId}}`;
-                
-                let membersMap = new Map();
-
-                function connect() {{
-                    const ws = new WebSocket(wsUrl);
-                    ws.onmessage = (event) => {{
-                        const data = JSON.parse(event.data);
-                        if (data.action === "remove") {{
-                            membersMap.delete(data.id);
-                        }} else {{
-                            membersMap.set(data.id, data);
-                        }}
-                        renderOverlay();
-                    }};
-                    ws.onclose = () => {{ setTimeout(connect, 2000); }};
-                }}
-
-                function renderOverlay() {{
-                    const container = document.getElementById("users-container");
-                    container.innerHTML = "";
-
-                    const members = Array.from(membersMap.values());
-                    const visibleMembers = members.slice(0, MAX_VISIBLE);
-                    const hiddenMembers = members.slice(MAX_VISIBLE);
-
-                    visibleMembers.forEach(user => {{
-                        const card = document.createElement("div");
-                        card.id = `user-${{user.id}}`;
-                        card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${{user.speaking ? 'speaking' : ''}}`;
-                        card.innerHTML = `
-                            <div class="relative">
-                                <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800 shadow-md">
-                                    <img src="${{user.avatar}}" class="w-full h-full object-cover rounded-full">
-                                </div>
-                            </div>
-                            <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow max-w-[90px] truncate">
-                                ${{user.name}}
-                            </span>
-                        `;
-                        container.appendChild(card);
-                    }});
-
-                    if (hiddenMembers.length > 0) {{
-                        const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
-                        const plusCard = document.createElement("div");
-                        plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${{isAnyHiddenSpeaking ? 'speaking' : ''}}`;
-                        plusCard.innerHTML = `
-                            <div class="relative">
-                                <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-md">
-                                    +${{hiddenMembers.length}}
-                                </div>
-                            </div>
-                            <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow">
-                                其餘成員
-                            </span>
-                        `;
-                        container.appendChild(plusCard);
-                    }}
-                }}
-
-                connect();
-            </script>
-        </body>
-        </html>
-        """
-        return web.Response(text=html_content, content_type='text/html')
-
-    async def handle_websocket(self, request):
-        channel_id = request.match_info.get('channel_id')
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-
-        if channel_id not in self.websockets:
-            self.websockets[channel_id] = []
-        self.websockets[channel_id].append(ws)
-
-        try:
-            async for msg in ws:
-                pass
-        finally:
-            self.websockets[channel_id].remove(ws)
-        return ws
 
     async def broadcast_speaking_status(self, channel_id: str, user_data: dict):
-        if channel_id in self.websockets:
-            for ws in self.websockets[channel_id]:
-                try:
-                    await ws.send_str(json.dumps(user_data))
-                except Exception:
-                    pass
+        """透過 bot.py 裡的 Flask WebSocket 廣播訊息"""
+        websockets = getattr(self.bot, "overlay_websockets", {}).get(channel_id, [])
+        for ws in list(websockets):
+            try:
+                ws.send(json.dumps(user_data))
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -294,7 +140,7 @@ class StreamOverlayCog(commands.Cog):
         channel_id = voice_channel.id
 
         # 初始化頻道預設設定
-        self.channel_configs[channel_id] = {"max_visible": 3}
+        self.bot.channel_max_visible[channel_id] = 3
 
         # 建立語音頻道聊天室內的 Embed 控制卡片
         embed = discord.Embed(
@@ -326,7 +172,7 @@ class StreamOverlayCog(commands.Cog):
 
         # 3. 回覆使用者：創建完畢，請點擊按鈕跳轉
         await interaction.response.send_message(
-            content="✅ **創建完畢！** 點擊下面按鈕前往語音頻道的控制訊息：",
+            content="✅ **創建完畢！** 點擊下面按鈕前往語音频道的控制訊息：",
             view=jump_view,
             ephemeral=True
         )
