@@ -141,6 +141,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
+
+
+bot.overlay_websockets = overlay_websockets
+app.channel_max_visible = {}
+bot.channel_max_visible = app.channel_max_visible
 # =========================
 # Helper: safe send DM
 # =========================
@@ -1709,6 +1714,37 @@ async def status_carousel_task():
     await bot.change_presence(activity=activity)
     carousel_index = (carousel_index + 1) % len(carousel_words)
 
+
+
+
+# 1. 儲存所有連接該頻道的 WebSocket 客戶端: {channel_id: [ws1, ws2, ...]}
+overlay_websockets = {}
+
+# 2. 負責渲染前端 HTML 的路由
+@app.route('/overlay/<channel_id>')
+def overlay_page(channel_id):
+    # 讀取動態設定的最高顯示人數 (預設為 3)
+    max_visible = getattr(app, "channel_max_visible", {}).get(int(channel_id) if channel_id.isdigit() else 0, 3)
+    
+    # 渲染 templates/overlay.html 並帶入變數
+    return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible)
+
+# 3. WebSocket 連線管道
+@sock.route('/ws/<channel_id>')
+def overlay_ws(ws, channel_id):
+    if channel_id not in overlay_websockets:
+        overlay_websockets[channel_id] = []
+    overlay_websockets[channel_id].append(ws)
+    
+    try:
+        while True:
+            # 保持 WebSocket 連線不中斷
+            ws.receive()
+    except Exception:
+        pass
+    finally:
+        if ws in overlay_websockets.get(channel_id, []):
+            overlay_websockets[channel_id].remove(ws)
 
 
 
