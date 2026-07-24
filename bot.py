@@ -9,6 +9,7 @@ import aiohttp
 import asyncio
 import traceback
 import discord
+from cogs.stream_overlay import StreamOverlayCog
 from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
@@ -1197,7 +1198,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-        BackupSystem, ImageDrawCog, MusicCog
+        BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog
     ]
 
     for cog in cog_list:
