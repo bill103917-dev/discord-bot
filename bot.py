@@ -112,6 +112,8 @@ logging.basicConfig(
 )
 
 # Shared globals
+channel_max_visible = {}
+overlay_websockets = {}⁠ 
 COMMAND_LOGS: List[Dict] = []
 SPECIAL_USER_IDS = [1238436456041676853]
 LOG_VIEWER_IDS = [1238436456041676853]
@@ -144,7 +146,6 @@ app.secret_key = FLASK_SECRET_KEY
 
 
 bot.overlay_websockets = overlay_websockets
-app.channel_max_visible = {}
 bot.channel_max_visible = app.channel_max_visible
 # =========================
 # Helper: safe send DM
