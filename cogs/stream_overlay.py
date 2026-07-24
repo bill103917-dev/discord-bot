@@ -14,7 +14,7 @@ class VoiceOverlayControlView(View):
         self.cog = cog
         self.owner_id = owner_id
         self.channel_id = channel_id
-
+        
     @discord.ui.button(label="🎛️ 開啟後台控制與設定網頁", style=discord.ButtonStyle.primary, custom_id="btn_overlay_control_page")
     async def open_control_page(self, interaction: Interaction, button: Button):
         render_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:10000")
@@ -23,9 +23,10 @@ class VoiceOverlayControlView(View):
         embed = discord.Embed(
             title="🎛️ 專屬後台控制網頁",
             description=f"請點擊下方連結前往控制後台，可複製 OBS 網址、即時調整人數限制與關閉服務：\n\n🔗 [點我前往控制後台]({control_url})",
-            color=discord.Color.indigo()
+            color=discord.Color.blurple()  # 🌟 改成 blurple (Discord 經典藍紫色) 或 blue
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 class StreamOverlayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
