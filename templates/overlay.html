@@ -76,7 +76,7 @@
         const channelId = "{{ channel_id }}";
         let MAX_VISIBLE = {{ max_visible }};
         let LAYOUT_MODE = 'horizontal';
-        let DETECT_MODE = 'auto'; // 'auto' | 'rpc' | 'state'
+        let DETECT_MODE = "{{ detect_mode or 'rpc' }}";
         
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const botWsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
@@ -123,6 +123,7 @@
                     }
 
                     if (data.action === "init" && Array.isArray(data.members)) {
+                        if (data.detect_mode) DETECT_MODE = data.detect_mode;
                         data.members.forEach(m => {
                             if (!membersMap.has(m.id)) {
                                 membersMap.set(m.id, m);
@@ -130,8 +131,7 @@
                                 const existing = membersMap.get(m.id);
                                 existing.name = m.name;
                                 existing.avatar = m.avatar;
-                                // 若非純 RPC 模式，由伺服器帶入開麥狀態
-                                if (DETECT_MODE === 'state' || (DETECT_MODE === 'auto' && !rpcConnected)) {
+                                if (DETECT_MODE === 'state') {
                                     existing.speaking = m.speaking;
                                 }
                             }
@@ -139,7 +139,7 @@
                         renderOverlay();
                     }
                     else if (data.action === "update") {
-                        if (DETECT_MODE === 'state' || (DETECT_MODE === 'auto' && !rpcConnected)) {
+                        if (DETECT_MODE === 'state') {
                             if (membersMap.has(data.id)) {
                                 membersMap.get(data.id).speaking = data.speaking;
                             } else {
@@ -158,7 +158,6 @@
             };
         }
 
-        // 🎙️ 本機 RPC 講話動態監聽
         function connectDiscordRPC() {
             const rpcPorts = [6463, 6464, 6465];
             rpcPorts.forEach(port => {
@@ -174,7 +173,7 @@
                 rpcWs.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        if (DETECT_MODE === 'rpc' || (DETECT_MODE === 'auto' && rpcConnected)) {
+                        if (DETECT_MODE === 'rpc') {
                             if (data.evt === "SPEAKING_START" && data.data) {
                                 setSpeakingState(String(data.data.user_id), true);
                             } else if (data.evt === "SPEAKING_STOP" && data.data) {
