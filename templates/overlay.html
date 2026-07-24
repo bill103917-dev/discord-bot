@@ -4,22 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Discord Voice Overlay - Channel {{ channel_id }}</title>
-    <!-- 載入 Tailwind CSS 樣式庫 -->
+    <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        /* 在手機上預設為深色背景，方便排查；OBS 瀏覽器載入時會自動保持透明 */
         body {
-            background: transparent;
+            background-color: #0f172a;
             overflow: hidden;
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
         }
-        /* 頭像卡片基礎狀態（未發言時變暗、靜止） */
+        /* 未說話時變暗 */
         .avatar-card {
             transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             filter: brightness(0.4) grayscale(0.2);
             opacity: 0.6;
             transform: translateY(0);
         }
-        /* 🗣️ 發言狀態：恢復正常亮度、亮起綠光圈並向上彈跳 */
+        /* 🗣️ 說話時：恢復亮度、亮綠圈、向上微跳 */
         .avatar-card.speaking {
             filter: brightness(1) grayscale(0);
             opacity: 1;
@@ -40,12 +41,30 @@
         }
     </style>
 </head>
-<body class="p-4 flex items-end justify-start min-h-screen">
-    <!-- 強制單行橫向排列，不換行 -->
-    <div id="users-container" class="flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-hidden"></div>
+<body class="p-4 flex flex-col justify-between min-h-screen text-white select-none">
+
+    <!-- 📱 手機狀態顯示列 (讓你在手機上一眼看懂連線狀態) -->
+    <div class="w-full flex items-center justify-between bg-slate-800/90 border border-slate-700 px-3 py-2 rounded-lg text-xs">
+        <div class="flex items-center gap-2">
+            <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+            <span id="status-text" class="text-slate-300 font-mono">連線中...</span>
+        </div>
+        <span class="text-slate-500">Channel: {{ channel_id }}</span>
+    </div>
+
+    <!-- 📺 頭像顯示區域 (橫向單行) -->
+    <div id="users-container" class="my-auto flex flex-row flex-nowrap items-end gap-5 max-w-full overflow-x-auto py-6">
+        <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
+            🎙️ 語音疊加層準備就緒，請在 Discord 語音頻道中開口說話...
+        </div>
+    </div>
+
+    <!-- 底部說明 -->
+    <div class="text-[10px] text-slate-500 text-center">
+        手機預覽模式 • 放進 OBS 後背景將自動透明
+    </div>
 
     <script>
-        // 接收來自 Flask 後端帶入的模板變數
         const channelId = "{{ channel_id }}";
         const MAX_VISIBLE = {{ max_visible }};
         
@@ -54,21 +73,51 @@
         
         let membersMap = new Map();
 
+        const statusDot = document.getElementById("status-dot");
+        const statusText = document.getElementById("status-text");
+
+        function updateStatus(connected, msg) {
+            if (connected) {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+                statusText.innerText = msg || "✅ 已連線至 Discord 語音";
+                statusText.className = "text-emerald-400 font-semibold";
+            } else {
+                statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping";
+                statusText.innerText = msg || "⚠️ 正在嘗試重新連線...";
+                statusText.className = "text-amber-400 font-mono";
+            }
+        }
+
         function connect() {
+            updateStatus(false, "正在連接 WebSocket 伺服器...");
             const ws = new WebSocket(wsUrl);
             
+            ws.onopen = () => {
+                updateStatus(true, "✅ 伺服器已連線，等待語音訊號");
+            };
+
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.action === "remove") {
-                    membersMap.delete(data.id);
-                } else {
-                    membersMap.set(data.id, data);
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.action === "remove") {
+                        membersMap.delete(data.id);
+                    } else {
+                        membersMap.set(data.id, data);
+                    }
+                    renderOverlay();
+                } catch (e) {
+                    console.error("解析失敗:", e);
                 }
-                renderOverlay();
             };
             
+            ws.onerror = (err) => {
+                updateStatus(false, "❌ 連線失敗，檢查網絡或伺服器");
+            };
+
             ws.onclose = () => {
-                setTimeout(connect, 2000); // 斷線後 2 秒自動重連
+                updateStatus(false, "🔄 連線中斷，2秒後重連...");
+                setTimeout(connect, 2000);
             };
         }
 
@@ -77,10 +126,20 @@
             container.innerHTML = "";
 
             const members = Array.from(membersMap.values());
+            
+            if (members.length === 0) {
+                container.innerHTML = `
+                    <div class="text-xs text-slate-400 border border-dashed border-slate-700 p-4 rounded-xl text-center w-full">
+                        🎙️ 語音頻道內暫無發言動態，請在 Discord 開口說話...
+                    </div>
+                `;
+                return;
+            }
+
             const visibleMembers = members.slice(0, MAX_VISIBLE);
             const hiddenMembers = members.slice(MAX_VISIBLE);
 
-            // 1. 繪製未超出的成員頭像
+            // 1. 繪製前 MAX_VISIBLE 名成員
             visibleMembers.forEach(user => {
                 const card = document.createElement("div");
                 card.id = `user-${user.id}`;
@@ -88,7 +147,7 @@
                 card.innerHTML = `
                     <div class="relative">
                         <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800 shadow-md">
-                            <img src="${user.avatar}" class="w-full h-full object-cover rounded-full">
+                            <img src="${user.avatar}" class="w-full h-full object-cover rounded-full" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
                         </div>
                     </div>
                     <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow max-w-[90px] truncate">
@@ -98,7 +157,7 @@
                 container.appendChild(card);
             });
 
-            // 2. 超出人數時，將剩餘成員合併為 +N 卡片
+            // 2. 超出人數時自動顯示 +N 卡片
             if (hiddenMembers.length > 0) {
                 const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
                 const plusCard = document.createElement("div");
@@ -121,3 +180,4 @@
     </script>
 </body>
 </html>
+
