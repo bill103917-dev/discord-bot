@@ -1445,12 +1445,11 @@ def overlay_ws(ws, channel_id):
     overlay_websockets[channel_id].append(ws)
     
     try:
-        # 轉成 int 比對全域字典 channel_max_visible
         channel_id_int = int(channel_id) if channel_id.isdigit() else None
         
         is_active = (channel_id in channel_max_visible) or (channel_id_int is not None and channel_id_int in channel_max_visible)
         
-        # 如果該頻道沒有在 Discord 輸入 /overlay 啟用，才發送關閉訊號
+        # 如果頻道未啟用，發送關閉訊號
         if not is_active:
             ws.send(json.dumps({"action": "close"}))
             return
@@ -1460,16 +1459,44 @@ def overlay_ws(ws, channel_id):
             if data_raw:
                 try:
                     data = json.loads(data_raw)
+                    cog = bot.get_cog("StreamOverlayCog")
+
+                    # 1. 網頁開啟時請求初始化資料
                     if data.get("action") == "request_init":
-                        # 再次確認是否開啟中
-                        if channel_id not in channel_max_visible and channel_id_int not in channel_max_visible:
-                            ws.send(json.dumps({"action": "close"}))
-                            break
-                        
-                        cog = bot.get_cog("StreamOverlayCog")
                         if cog and channel_id_int is not None:
                             members = cog.fetch_channel_members(channel_id_int)
                             ws.send(json.dumps({"action": "init", "members": members}))
+
+                    # 2. 🎛️ 來自控制後台 (control.html)：拉動滑桿即時更改人數上限
+                    elif data.get("action") == "update_config":
+                        new_max = data.get("max_visible", 3)
+                        channel_max_visible[channel_id] = new_max
+                        if channel_id_int is not None:
+                            channel_max_visible[channel_id_int] = new_max
+                        
+                        # 廣播給包含 OBS Overlay 在內的所有連線網頁，瞬間套用！
+                        if cog:
+                            import asyncio
+                            asyncio.run_coroutine_threadsafe(
+                                cog.broadcast_speaking_status(str(channel_id), {"action": "config_update", "max_visible": new_max}),
+                                bot.loop
+                            )
+
+                    # 3. 🛑 來自控制後台 (control.html)：點擊關閉疊加服務
+                    elif data.get("action") == "stop_service":
+                        if channel_id in channel_max_visible:
+                            del channel_max_visible[channel_id]
+                        if channel_id_int is not None and channel_id_int in channel_max_visible:
+                            del channel_max_visible[channel_id_int]
+                        
+                        # 廣播關閉訊號，觸發 5 秒倒數與銷毀
+                        if cog:
+                            import asyncio
+                            asyncio.run_coroutine_threadsafe(
+                                cog.broadcast_speaking_status(str(channel_id), {"action": "close"}),
+                                bot.loop
+                            )
+
                 except Exception:
                     pass
     except Exception:
@@ -1477,6 +1504,18 @@ def overlay_ws(ws, channel_id):
     finally:
         if ws in overlay_websockets.get(channel_id, []):
             overlay_websockets[channel_id].remove(ws)
+
+# 1. OBS 專屬疊加畫面
+@app.route('/overlay/<channel_id>')
+def overlay_page(channel_id):
+    max_visible = channel_max_visible.get(str(channel_id), 3)
+    return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible)
+
+# 2. 🎛️ 新增：後台控制與設定網頁
+@app.route('/control/<channel_id>')
+def control_page(channel_id):
+    max_visible = channel_max_visible.get(str(channel_id), 3)
+    return render_template('control.html', channel_id=channel_id, max_visible=max_visible)
 
 # --------------------------
 # 伺服器儀表板/設定 (其餘路由保持不變)
