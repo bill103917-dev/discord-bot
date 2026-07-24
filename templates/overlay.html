@@ -12,21 +12,25 @@
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
         }
 
-        /* 🎨 安靜未發言：頭像微暗 */
         .avatar-card {
             transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), 
                         filter 0.3s ease, 
                         opacity 0.3s ease;
             filter: brightness(0.4) grayscale(0.2);
             opacity: 0.6;
-            transform: translateY(0) scale(0.95);
+            transform: scale(0.95);
         }
 
-        /* 🗣️ 發言高亮：亮綠框與跳動 */
-        .avatar-card.speaking {
+        .layout-horizontal .avatar-card.speaking {
             filter: brightness(1.1) grayscale(0);
             opacity: 1;
             transform: translateY(-8px) scale(1.05);
+        }
+
+        .layout-vertical .avatar-card.speaking {
+            filter: brightness(1.1) grayscale(0);
+            opacity: 1;
+            transform: translateX(8px) scale(1.05);
         }
 
         .avatar-ring {
@@ -63,16 +67,16 @@
 </head>
 <body class="p-4 flex flex-col justify-end min-h-screen select-none">
 
-    <!-- 📺 主要內容區域 (頭像 / 倒數卡片) -->
     <div id="main-content" class="w-full flex items-center justify-start fade-transition">
-        <div id="users-container" class="flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full">
-            <!-- 預設載入中提示 -->
+        <div id="users-container" class="flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full layout-horizontal">
         </div>
     </div>
 
     <script>
         const channelId = "{{ channel_id }}";
         let MAX_VISIBLE = {{ max_visible }};
+        let LAYOUT_MODE = 'horizontal';
+        let DETECT_MODE = 'auto'; // 'auto' | 'rpc' | 'state'
         
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const botWsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
@@ -81,8 +85,9 @@
         let isClosed = false;
         let socket = null;
         let heartbeatInterval = null;
+        let rpcConnected = false;
 
-        function connect() {
+        function connectBotSocket() {
             if (isClosed) return;
             socket = new WebSocket(botWsUrl);
 
@@ -101,7 +106,6 @@
                 try {
                     const data = JSON.parse(event.data);
 
-                    // 🛑 1. 收到關閉指令
                     if (data.action === "close") {
                         isClosed = true;
                         if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -110,27 +114,39 @@
                         return;
                     }
 
-                    // ⚙️ 2. 收到來自後台 control 頁面的人數限制更新
-                    if (data.action === "config_update" && data.max_visible) {
-                        MAX_VISIBLE = parseInt(data.max_visible);
+                    if (data.action === "config_update") {
+                        if (data.max_visible) MAX_VISIBLE = parseInt(data.max_visible);
+                        if (data.layout_mode) LAYOUT_MODE = data.layout_mode;
+                        if (data.detect_mode) DETECT_MODE = data.detect_mode;
                         renderOverlay();
                         return;
                     }
 
-                    // 📋 3. 收到成員初始化名單
                     if (data.action === "init" && Array.isArray(data.members)) {
-                        membersMap.clear();
-                        data.members.forEach(m => membersMap.set(m.id, m));
+                        data.members.forEach(m => {
+                            if (!membersMap.has(m.id)) {
+                                membersMap.set(m.id, m);
+                            } else {
+                                const existing = membersMap.get(m.id);
+                                existing.name = m.name;
+                                existing.avatar = m.avatar;
+                                // 若非純 RPC 模式，由伺服器帶入開麥狀態
+                                if (DETECT_MODE === 'state' || (DETECT_MODE === 'auto' && !rpcConnected)) {
+                                    existing.speaking = m.speaking;
+                                }
+                            }
+                        });
                         renderOverlay();
                     }
-                    // 🗣️ 4. 狀態更新
                     else if (data.action === "update") {
-                        if (membersMap.has(data.id)) {
-                            membersMap.get(data.id).speaking = data.speaking;
-                        } else {
-                            membersMap.set(data.id, data);
+                        if (DETECT_MODE === 'state' || (DETECT_MODE === 'auto' && !rpcConnected)) {
+                            if (membersMap.has(data.id)) {
+                                membersMap.get(data.id).speaking = data.speaking;
+                            } else {
+                                membersMap.set(data.id, data);
+                            }
+                            renderOverlay();
                         }
-                        renderOverlay();
                     }
                 } catch (e) {
                     console.error("WS 錯誤:", e);
@@ -138,11 +154,45 @@
             };
 
             socket.onclose = () => {
-                if (!isClosed) setTimeout(connect, 2000);
+                if (!isClosed) setTimeout(connectBotSocket, 2000);
             };
         }
 
-        // ⏱️ 5秒倒數關閉與徹底清空網頁
+        // 🎙️ 本機 RPC 講話動態監聽
+        function connectDiscordRPC() {
+            const rpcPorts = [6463, 6464, 6465];
+            rpcPorts.forEach(port => {
+                if (rpcConnected || isClosed) return;
+                const rpcWs = new WebSocket(`ws://127.0.0.1:${port}/?v=1&client_id=100000000000000000`);
+
+                rpcWs.onopen = () => {
+                    rpcConnected = true;
+                    rpcWs.send(JSON.stringify({ cmd: "SUBSCRIBE", evt: "SPEAKING_START", args: { channel_id: channelId }, nonce: "1" }));
+                    rpcWs.send(JSON.stringify({ cmd: "SUBSCRIBE", evt: "SPEAKING_STOP", args: { channel_id: channelId }, nonce: "2" }));
+                };
+
+                rpcWs.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (DETECT_MODE === 'rpc' || (DETECT_MODE === 'auto' && rpcConnected)) {
+                            if (data.evt === "SPEAKING_START" && data.data) {
+                                setSpeakingState(String(data.data.user_id), true);
+                            } else if (data.evt === "SPEAKING_STOP" && data.data) {
+                                setSpeakingState(String(data.data.user_id), false);
+                            }
+                        }
+                    } catch (e) {}
+                };
+            });
+        }
+
+        function setSpeakingState(userId, isSpeaking) {
+            if (membersMap.has(userId)) {
+                membersMap.get(userId).speaking = isSpeaking;
+                renderOverlay();
+            }
+        }
+
         function startCountdownAndDestroy() {
             const mainContent = document.getElementById("main-content");
             let timeLeft = 5;
@@ -183,8 +233,13 @@
             const container = document.getElementById("users-container");
             if (!container) return;
 
+            if (LAYOUT_MODE === 'vertical') {
+                container.className = "flex flex-col items-start gap-4 max-h-full py-2 px-2 w-full layout-vertical";
+            } else {
+                container.className = "flex flex-row flex-nowrap items-end gap-6 max-w-full overflow-x-auto py-8 px-2 w-full layout-horizontal";
+            }
+
             const members = Array.from(membersMap.values());
-            
             if (members.length === 0) {
                 container.innerHTML = "";
                 return;
@@ -198,39 +253,72 @@
             visibleMembers.forEach(user => {
                 const card = document.createElement("div");
                 card.id = `user-${user.id}`;
-                card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'speaking' : ''}`;
-                card.innerHTML = `
-                    <div class="relative">
-                        <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800/90 shadow-lg">
-                            <img src="${user.avatar}" class="w-full h-full object-cover rounded-full" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                
+                if (LAYOUT_MODE === 'vertical') {
+                    card.className = `avatar-card flex-shrink-0 flex flex-row items-center space-x-3 ${user.speaking ? 'speaking' : ''}`;
+                    card.innerHTML = `
+                        <div class="relative">
+                            <div class="avatar-ring w-12 h-12 rounded-full overflow-hidden p-0.5 bg-slate-800/90 shadow-lg">
+                                <img src="${user.avatar}" class="w-full h-full object-cover rounded-full" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                            </div>
                         </div>
-                    </div>
-                    <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow-md max-w-[95px] truncate">
-                        ${user.name}
-                    </span>
-                `;
+                        <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-3 py-1 rounded-full shadow-md max-w-[120px] truncate">
+                            ${user.name}
+                        </span>
+                    `;
+                } else {
+                    card.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${user.speaking ? 'speaking' : ''}`;
+                    card.innerHTML = `
+                        <div class="relative">
+                            <div class="avatar-ring w-16 h-16 rounded-full overflow-hidden p-0.5 bg-slate-800/90 shadow-lg">
+                                <img src="${user.avatar}" class="w-full h-full object-cover rounded-full" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                            </div>
+                        </div>
+                        <span class="user-name text-xs bg-slate-800/90 text-slate-200 px-2.5 py-0.5 rounded-full shadow-md max-w-[95px] truncate">
+                            ${user.name}
+                        </span>
+                    `;
+                }
+
                 container.appendChild(card);
             });
 
             if (hiddenMembers.length > 0) {
                 const isAnyHiddenSpeaking = hiddenMembers.some(u => u.speaking);
                 const plusCard = document.createElement("div");
-                plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
-                plusCard.innerHTML = `
-                    <div class="relative">
-                        <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600/80 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-lg">
-                            +${hiddenMembers.length}
+                
+                if (LAYOUT_MODE === 'vertical') {
+                    plusCard.className = `avatar-card flex-shrink-0 flex flex-row items-center space-x-3 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
+                    plusCard.innerHTML = `
+                        <div class="relative">
+                            <div class="avatar-ring w-12 h-12 rounded-full bg-slate-800/90 border-2 border-slate-600/80 flex items-center justify-center text-emerald-400 font-bold text-sm shadow-lg">
+                                +${hiddenMembers.length}
+                            </div>
                         </div>
-                    </div>
-                    <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow-md">
-                        其餘成員
-                    </span>
-                `;
+                        <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-3 py-1 rounded-full shadow-md">
+                            其餘成員
+                        </span>
+                    `;
+                } else {
+                    plusCard.className = `avatar-card flex-shrink-0 flex flex-col items-center space-y-2 ${isAnyHiddenSpeaking ? 'speaking' : ''}`;
+                    plusCard.innerHTML = `
+                        <div class="relative">
+                            <div class="avatar-ring w-16 h-16 rounded-full bg-slate-800/90 border-2 border-slate-600/80 flex items-center justify-center text-emerald-400 font-bold text-lg shadow-lg">
+                                +${hiddenMembers.length}
+                            </div>
+                        </div>
+                        <span class="user-name text-xs bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full shadow-md">
+                            其餘成員
+                        </span>
+                    `;
+                }
+
                 container.appendChild(plusCard);
             }
         }
 
-        connect();
+        connectBotSocket();
+        connectDiscordRPC();
     </script>
 </body>
 </html>
