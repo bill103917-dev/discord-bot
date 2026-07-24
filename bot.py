@@ -1438,6 +1438,31 @@ def index():
         DISCORD_CLIENT_ID=DISCORD_CLIENT_ID
     )
 
+
+@sock.route('/ws/<channel_id>')
+def overlay_ws(ws, channel_id):
+    if channel_id not in overlay_websockets:
+        overlay_websockets[channel_id] = []
+    overlay_websockets[channel_id].append(ws)
+    
+    try:
+        while True:
+            data_raw = ws.receive()
+            if data_raw:
+                try:
+                    data = json.loads(data_raw)
+                    # 🌟 當前端網頁打開發送請求時，自動將該語音頻道的成員名單打包回傳！
+                    if data.get("action") == "request_init":
+                        cog = bot.get_cog("StreamOverlayCog")
+                        if cog and channel_id.isdigit():
+                            members = cog.fetch_channel_members(int(channel_id))
+                            ws.send(json.dumps({"action": "init", "members": members}))
+                except Exception as e:
+                    pass
+    except Exception:
+        pass
+    finally:
+        if ws in over
 # --------------------------
 # 伺服器儀表板/設定 (其餘路由保持不變)
 # --------------------------
@@ -1730,23 +1755,6 @@ def overlay_page(channel_id):
     
     # 渲染 templates/overlay.html 並帶入變數
     return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible)
-
-# 3. WebSocket 連線管道
-@sock.route('/ws/<channel_id>')
-def overlay_ws(ws, channel_id):
-    if channel_id not in overlay_websockets:
-        overlay_websockets[channel_id] = []
-    overlay_websockets[channel_id].append(ws)
-    
-    try:
-        while True:
-            # 保持 WebSocket 連線不中斷
-            ws.receive()
-    except Exception:
-        pass
-    finally:
-        if ws in overlay_websockets.get(channel_id, []):
-            overlay_websockets[channel_id].remove(ws)
 
 
 
