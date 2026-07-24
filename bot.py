@@ -1446,16 +1446,27 @@ def overlay_ws(ws, channel_id):
     overlay_websockets[channel_id].append(ws)
     
     try:
+        # 檢查該頻道是否還在開啟狀態（若已按結束，直接告知網頁關閉）
+        channel_id_int = int(channel_id) if channel_id.isdigit() else 0
+        active_channels = getattr(app, "channel_max_visible", {})
+        if channel_id_int not in active_channels:
+            ws.send(json.dumps({"action": "close"}))
+            return
+
         while True:
             data_raw = ws.receive()
             if data_raw:
                 try:
                     data = json.loads(data_raw)
-                    # 當前端網頁打開發送請求時，自動將該語音頻道的成員名單打包回傳！
                     if data.get("action") == "request_init":
+                        # 再次檢查是否已被關閉
+                        if channel_id_int not in getattr(app, "channel_max_visible", {}):
+                            ws.send(json.dumps({"action": "close"}))
+                            break
+                        
                         cog = bot.get_cog("StreamOverlayCog")
                         if cog and channel_id.isdigit():
-                            members = cog.fetch_channel_members(int(channel_id))
+                            members = cog.fetch_channel_members(channel_id_int)
                             ws.send(json.dumps({"action": "init", "members": members}))
                 except Exception:
                     pass
