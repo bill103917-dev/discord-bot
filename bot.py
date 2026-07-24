@@ -1451,18 +1451,20 @@ def overlay_ws(ws, channel_id):
             if data_raw:
                 try:
                     data = json.loads(data_raw)
-                    # 🌟 當前端網頁打開發送請求時，自動將該語音頻道的成員名單打包回傳！
+                    # 當前端網頁打開發送請求時，自動將該語音頻道的成員名單打包回傳！
                     if data.get("action") == "request_init":
                         cog = bot.get_cog("StreamOverlayCog")
                         if cog and channel_id.isdigit():
                             members = cog.fetch_channel_members(int(channel_id))
                             ws.send(json.dumps({"action": "init", "members": members}))
-                except Exception as e:
+                except Exception:
                     pass
     except Exception:
         pass
     finally:
-        if ws in over
+        if ws in overlay_websockets.get(channel_id, []):
+            overlay_websockets[channel_id].remove(ws)
+
 # --------------------------
 # 伺服器儀表板/設定 (其餘路由保持不變)
 # --------------------------
