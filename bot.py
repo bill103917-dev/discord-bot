@@ -1798,20 +1798,6 @@ async def status_carousel_task():
 
 
 
-# 1. 儲存所有連接該頻道的 WebSocket 客戶端: {channel_id: [ws1, ws2, ...]}
-overlay_websockets = {}
-
-# 2. 負責渲染前端 HTML 的路由
-@app.route('/overlay/<channel_id>')
-def overlay_page(channel_id):
-    # 讀取動態設定的最高顯示人數 (預設為 3)
-    max_visible = getattr(app, "channel_max_visible", {}).get(int(channel_id) if channel_id.isdigit() else 0, 3)
-    
-    # 渲染 templates/overlay.html 並帶入變數
-    return render_template('overlay.html', channel_id=channel_id, max_visible=max_visible)
-
-
-
 @app.route("/api/bot/update_status", methods=['POST'])
 def update_bot_status():
     global carousel_words, is_carousel_enabled, carousel_index, current_activity_type
