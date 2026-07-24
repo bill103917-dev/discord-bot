@@ -112,7 +112,7 @@ logging.basicConfig(
 )
 
 # Shared globals
-channel_max_visible = {}
+app.channel_max_visible = {}
 overlay_websockets = {}
 COMMAND_LOGS: List[Dict] = []
 SPECIAL_USER_IDS = [1238436456041676853]
