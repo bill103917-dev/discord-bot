@@ -1,51 +1,13 @@
 import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
-from discord.ui import Button, View, Modal, TextInput
+from discord.ui import Button, View
 import json
 import os
 import logging
 
 log = logging.getLogger("StreamOverlayCog")
 
-# ==========================================
-# ⚙️ 設定 Modal (修改顯示人數上限)
-# ==========================================
-class OverlayConfigModal(Modal, title="⚙️ 實況疊加層設定"):
-    max_visible = TextInput(
-        label="橫向最多顯示人數 (超過自動轉為 +N)",
-        placeholder="請輸入數字 (例如: 3 或 4)",
-        default="3",
-        min_length=1,
-        max_length=2
-    )
-
-    def __init__(self, cog, channel_id: int):
-        super().__init__()
-        self.cog = cog
-        self.channel_id = channel_id
-
-    async def on_submit(self, interaction: Interaction):
-        try:
-            val = int(self.max_visible.value)
-            if val < 1 or val > 10:
-                return await interaction.response.send_message("❌ 請輸入 1 到 10 之間的數字！", ephemeral=True)
-            
-            # 1. 更新全域設定字典 (相容 int 與 str)
-            self.cog.bot.channel_max_visible[self.channel_id] = val
-            self.cog.bot.channel_max_visible[str(self.channel_id)] = val
-
-            # 2. 🌟 關鍵修正：即時發送 config_update 廣播給網頁，瞬間熱套用！
-            config_payload = {"action": "config_update", "max_visible": val}
-            await self.cog.broadcast_speaking_status(str(self.channel_id), config_payload)
-
-            await interaction.response.send_message(f"✅ 設定已即時更新！目前橫向最多顯示 **{val}** 人，網頁已同步生效！", ephemeral=True)
-        except ValueError:
-            await interaction.response.send_message("❌ 請輸入有效的整數數字！", ephemeral=True)
-
-# ==========================================
-# 🎛️ 語音頻道聊天室內的按鈕 View
-# ==========================================
 class VoiceOverlayControlView(View):
     def __init__(self, cog, owner_id: int, channel_id: int):
         super().__init__(timeout=None)
@@ -53,62 +15,23 @@ class VoiceOverlayControlView(View):
         self.owner_id = owner_id
         self.channel_id = channel_id
 
-    def check_permissions(self, interaction: Interaction) -> bool:
-        is_owner = interaction.user.id == self.owner_id
-        is_admin = interaction.user.guild_permissions.administrator
-        return is_owner or is_admin
-
-    @discord.ui.button(label="🔗 顯示畫面連結", style=discord.ButtonStyle.primary, custom_id="btn_overlay_link")
-    async def get_link(self, interaction: Interaction, button: Button):
+    @discord.ui.button(label="🎛️ 開啟後台控制與設定網頁", style=discord.ButtonStyle.primary, custom_id="btn_overlay_control_page")
+    async def open_control_page(self, interaction: Interaction, button: Button):
         render_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:10000")
-        overlay_url = f"{render_url}/overlay/{self.channel_id}"
+        control_url = f"{render_url}/control/{self.channel_id}"
         
         embed = discord.Embed(
-            title="🎥 專屬 OBS 語音疊加網址",
-            description=f"請複製下方網址並貼入 OBS 的「瀏覽器來源 (Browser Source)」：\n`{overlay_url}`",
-            color=discord.Color.green()
+            title="🎛️ 專屬後台控制網頁",
+            description=f"請點擊下方連結前往控制後台，可複製 OBS 網址、即時調整人數限制與關閉服務：\n\n🔗 [點我前往控制後台]({control_url})",
+            color=discord.Color.indigo()
         )
-        embed.set_footer(text="💡 此網址為個人專屬私密發送，請勿隨意洩漏給無關人員。")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="⚙️ 設定", style=discord.ButtonStyle.secondary, custom_id="btn_overlay_config")
-    async def open_config(self, interaction: Interaction, button: Button):
-        if not self.check_permissions(interaction):
-            return await interaction.response.send_message("❌ 只有**伺服器管理員**或**指令發起者**可以調整設定！", ephemeral=True)
-        
-        modal = OverlayConfigModal(self.cog, self.channel_id)
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="🛑 結束並關閉", style=discord.ButtonStyle.danger, custom_id="btn_overlay_stop")
-    async def stop_overlay(self, interaction: Interaction, button: Button):
-        if not self.check_permissions(interaction):
-            return await interaction.response.send_message("❌ 只有**伺服器管理員**或**指令發起者**可以關閉此服務！", ephemeral=True)
-        
-        # 1. 刪除啟用狀態
-        if self.channel_id in self.cog.bot.channel_max_visible:
-            del self.cog.bot.channel_max_visible[self.channel_id]
-        if str(self.channel_id) in self.cog.bot.channel_max_visible:
-            del self.cog.bot.channel_max_visible[str(self.channel_id)]
-
-        # 2. 🌟 關鍵修正：向前端網頁即時廣播 close 指令！
-        await self.cog.broadcast_speaking_status(str(self.channel_id), {"action": "close"})
-
-        embed = discord.Embed(
-            title="🛑 語音疊加層服務已結束",
-            description="已成功關閉該頻道的實況疊加控制，網頁已收到關閉訊號並進入倒數！",
-            color=discord.Color.red()
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
-
-# ==========================================
-# 🧩 核心 Cog 模組
-# ==========================================
 class StreamOverlayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     async def broadcast_speaking_status(self, channel_id: str, user_data: dict):
-        """廣播 JSON 資料給連線該頻道的 WebSocket 網頁"""
         websockets = getattr(self.bot, "overlay_websockets", {}).get(str(channel_id), [])
         for ws in list(websockets):
             try:
@@ -119,7 +42,6 @@ class StreamOverlayCog(commands.Cog):
                 pass
 
     def fetch_channel_members(self, channel_id_int: int) -> list:
-        """獲取該語音頻道內的所有成員，預設為未開口發言狀態"""
         channel = self.bot.get_channel(channel_id_int)
         if not channel or not isinstance(channel, discord.VoiceChannel):
             return []
@@ -131,14 +53,14 @@ class StreamOverlayCog(commands.Cog):
                     "id": str(m.id),
                     "name": m.display_name,
                     "avatar": m.display_avatar.url,
-                    "speaking": False  # 🌟 預設不說話，保持暗色
+                    "speaking": not (m.voice.self_mute or m.voice.mute) if m.voice else False
                 })
         return members_list
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         channel = after.channel or before.channel
-        if not channel:
+        if not channel or member.bot:
             return
 
         channel_id = str(channel.id)
@@ -148,13 +70,17 @@ class StreamOverlayCog(commands.Cog):
         if channel_id not in active_map and channel_id_int not in active_map:
             return
 
+        is_speaking = False
+        if after.channel:
+            is_speaking = not (after.self_mute or after.mute)
+
         avatar_url = member.display_avatar.url
         user_payload = {
             "action": "update",
             "id": str(member.id),
             "name": member.display_name,
             "avatar": avatar_url,
-            "speaking": True
+            "speaking": is_speaking
         }
         await self.broadcast_speaking_status(channel_id, user_payload)
 
@@ -173,17 +99,13 @@ class StreamOverlayCog(commands.Cog):
             title="🎙️ 實況語音疊加層 (Voice Overlay) 控制面板",
             description=(
                 f"已為語音頻道 **{voice_channel.mention}** 啟動實況視覺疊加層！\n\n"
-                "📌 **按鈕權限說明**：\n"
-                "• 🔗 **[顯示畫面連結]**：所有人皆可按，獲取專屬 OBS 網址。\n"
-                "• ⚙️ **[設定]**：僅限管理員或發起者，調整橫向顯示人數。\n"
-                "• 🛑 **[結束並關閉]**：僅限管理員或發起者，關閉本頻道服務與網頁。"
+                "📌 **使用方式**：\n"
+                "點擊下方按鈕可開啟專屬的 **[後台控制網頁]**，在網頁上可直接複製 OBS 連結、調整人數限制與一鍵關閉服務。"
             ),
             color=discord.Color.purple()
         )
-        embed.set_footer(text="💡 提示：貼入 OBS 瀏覽器來源即可自動顯示橫向頭像！")
 
         view = VoiceOverlayControlView(self, owner_id=interaction.user.id, channel_id=channel_id)
-
         control_message = await voice_channel.send(embed=embed, view=view)
 
         jump_view = View()
@@ -195,10 +117,77 @@ class StreamOverlayCog(commands.Cog):
         jump_view.add_item(jump_button)
 
         await interaction.response.send_message(
-            content="✅ **創建完畢！** 點擊下面按鈕前往語音頻道的控制訊息：",
+            content="✅ **創建完畢！** 點擊下方按鈕前往控制卡片：",
             view=jump_view,
             ephemeral=True
         )
 
 async def setup(bot):
     await bot.add_cog(StreamOverlayCog(bot))
+
+eof
+📄 5. bot.py 的 WebSocket 訊息處理（支援後台設定連動）
+請確認 bot.py 裡的 @sock.route('/ws/<channel_id>') 可以接收來自控制網頁傳過來的 update_config 與 stop_service 訊息：
+@sock.route('/ws/<channel_id>')
+def overlay_ws(ws, channel_id):
+    if channel_id not in overlay_websockets:
+        overlay_websockets[channel_id] = []
+    overlay_websockets[channel_id].append(ws)
+    
+    try:
+        channel_id_int = int(channel_id) if channel_id.isdigit() else None
+        
+        is_active = (channel_id in channel_max_visible) or (channel_id_int is not None and channel_id_int in channel_max_visible)
+        
+        if not is_active:
+            ws.send(json.dumps({"action": "close"}))
+            return
+
+        while True:
+            data_raw = ws.receive()
+            if data_raw:
+                try:
+                    data = json.loads(data_raw)
+                    cog = bot.get_cog("StreamOverlayCog")
+
+                    # 1. 前端/後台請求初始化資料
+                    if data.get("action") == "request_init":
+                        if cog and channel_id_int is not None:
+                            members = cog.fetch_channel_members(channel_id_int)
+                            ws.send(json.dumps({"action": "init", "members": members}))
+
+                    # 2. 🎛️ 來自控制網頁：拉動 slider 更改人數上限
+                    elif data.get("action") == "update_config":
+                        new_max = data.get("max_visible", 3)
+                        channel_max_visible[channel_id] = new_max
+                        if channel_id_int is not None:
+                            channel_max_visible[channel_id_int] = new_max
+                        # 廣播給所有連結此頻道的網頁 (包含 OBS overlay 畫面)
+                        if cog:
+                            import asyncio
+                            asyncio.run_coroutine_threadsafe(
+                                cog.broadcast_speaking_status(str(channel_id), {"action": "config_update", "max_visible": new_max}),
+                                bot.loop
+                            )
+
+                    # 3. 🛑 來自控制網頁：點擊關閉疊加服務
+                    elif data.get("action") == "stop_service":
+                        if channel_id in channel_max_visible:
+                            del channel_max_visible[channel_id]
+                        if channel_id_int is not None and channel_id_int in channel_max_visible:
+                            del channel_max_visible[channel_id_int]
+                        if cog:
+                            import asyncio
+                            asyncio.run_coroutine_threadsafe(
+                                cog.broadcast_speaking_status(str(channel_id), {"action": "close"}),
+                                bot.loop
+                            )
+
+                except Exception as e:
+                    pass
+    except Exception:
+        pass
+    finally:
+        if ws in overlay_websockets.get(channel_id, []):
+            overlay_websockets[channel_id].remove(ws)
+
