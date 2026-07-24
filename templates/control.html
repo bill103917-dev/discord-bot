@@ -44,19 +44,35 @@
             <p id="copy-msg" class="text-[11px] text-emerald-400 hidden">✅ 已成功複製連結至剪貼簿！</p>
         </div>
 
-        <!-- 區塊 2：顯示人數限制調整 -->
+        <!-- 區塊 2：顯示模式選擇 -->
+        <div class="space-y-2 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
+            <label class="text-xs font-semibold text-slate-300 block mb-1">
+                🎨 選擇頭像排列模式
+            </label>
+            <div class="grid grid-cols-2 gap-3">
+                <button id="mode-btn-horizontal" onclick="selectLayoutMode('horizontal')" class="py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-indigo-600 border-indigo-500 text-white shadow">
+                    ↔️ 橫向底欄模式
+                </button>
+                <button id="mode-btn-vertical" onclick="selectLayoutMode('vertical')" class="py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-slate-900 border-slate-700 text-slate-400 hover:text-white">
+                    ↕️ 縱向側欄模式
+                </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">切換後，OBS 畫面的頭像排列方向會即時改變。</p>
+        </div>
+
+        <!-- 區塊 3：顯示人數限制調整 -->
         <div class="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
             <div class="flex justify-between items-center">
                 <label class="text-xs font-semibold text-slate-300">
-                    ⚙️ 橫向最多顯示人數
+                    ⚙️ 最多顯示人數上限
                 </label>
                 <span id="max-visible-val" class="text-sm font-bold text-indigo-400 font-mono">{{ max_visible }} 人</span>
             </div>
-            <input id="max-visible-range" type="range" min="1" max="10" value="{{ max_visible }}" class="w-full accent-indigo-500 cursor-pointer" oninput="updateVisibleDisplay(this.value)" onchange="applyConfigChange(this.value)">
+            <input id="max-visible-range" type="range" min="1" max="10" value="{{ max_visible }}" class="w-full accent-indigo-500 cursor-pointer" oninput="updateVisibleDisplay(this.value)" onchange="applyConfigChange()">
             <p class="text-[11px] text-slate-400">超過此數量的成員將自動合併顯示為 <span class="text-indigo-400 font-bold">+N</span> 卡片。</p>
         </div>
 
-        <!-- 區塊 3：結束並關閉 -->
+        <!-- 區塊 4：結束並關閉 -->
         <div class="pt-2 border-t border-slate-800">
             <button onclick="stopOverlayService()" class="w-full py-3 bg-red-600/20 hover:bg-red-600 border border-red-500/40 hover:border-red-500 text-red-300 hover:text-white font-bold text-sm rounded-xl transition shadow-lg flex items-center justify-center gap-2">
                 🛑 結束並關閉疊加服務
@@ -72,8 +88,8 @@
         const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
         
         let ws = null;
+        let currentMode = 'horizontal';
 
-        // 設定全網址
         const fullOverlayUrl = `${window.location.origin}/overlay/${channelId}`;
         document.getElementById("overlay-url").value = fullOverlayUrl;
 
@@ -89,6 +105,21 @@
 
         function updateVisibleDisplay(val) {
             document.getElementById("max-visible-val").innerText = `${val} 人`;
+        }
+
+        function selectLayoutMode(mode) {
+            currentMode = mode;
+            const btnH = document.getElementById("mode-btn-horizontal");
+            const btnV = document.getElementById("mode-btn-vertical");
+
+            if (mode === 'horizontal') {
+                btnH.className = "py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-indigo-600 border-indigo-500 text-white shadow";
+                btnV.className = "py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-slate-900 border-slate-700 text-slate-400 hover:text-white";
+            } else {
+                btnV.className = "py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-indigo-600 border-indigo-500 text-white shadow";
+                btnH.className = "py-2.5 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-center gap-2 bg-slate-900 border-slate-700 text-slate-400 hover:text-white";
+            }
+            applyConfigChange();
         }
 
         function connectWS() {
@@ -109,17 +140,17 @@
             };
         }
 
-        // 當滑動條放開時，即時透過 WebSocket 向後端更新設定
-        function applyConfigChange(val) {
+        function applyConfigChange() {
+            const maxVal = parseInt(document.getElementById("max-visible-range").value);
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     action: "update_config",
-                    max_visible: parseInt(val)
+                    max_visible: maxVal,
+                    layout_mode: currentMode
                 }));
             }
         }
 
-        // 點擊關閉服務
         function stopOverlayService() {
             if (confirm("確定要結束並關閉此語音頻道的實況疊加畫面嗎？")) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
