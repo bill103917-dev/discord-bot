@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>實況語音疊加層 - 控制後台 (Channel {{ channel_id }})</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-100 p-4 md:p-8 flex items-center justify-center">
+
+    <div class="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-6 backdrop-blur-md">
+        
+        <!-- 標題與狀態 -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div class="flex items-center gap-2.5">
+                <span class="text-2xl">🎙️</span>
+                <div>
+                    <h1 class="font-bold text-lg text-white">語音疊加層控制後台</h1>
+                    <p class="text-xs text-slate-400">頻道 ID: {{ channel_id }}</p>
+                </div>
+            </div>
+            <span id="status-badge" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                🟢 服務運行中
+            </span>
+        </div>
+
+        <!-- 區塊 1：專屬 OBS 連結 -->
+        <div class="space-y-2">
+            <label class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                🔗 OBS 瀏覽器來源連結 (Browser Source)
+            </label>
+            <div class="flex items-center gap-2">
+                <input id="overlay-url" type="text" readonly value="" class="w-full bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded-lg px-3 py-2.5 focus:outline-none select-all font-mono">
+                <button onclick="copyOverlayUrl()" class="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-xs font-semibold text-white rounded-lg transition shadow-md whitespace-nowrap">
+                    複製連結
+                </button>
+            </div>
+            <p id="copy-msg" class="text-[11px] text-emerald-400 hidden">✅ 已成功複製連結至剪貼簿！</p>
+        </div>
+
+        <!-- 區塊 2：顯示人數限制調整 -->
+        <div class="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
+            <div class="flex justify-between items-center">
+                <label class="text-xs font-semibold text-slate-300">
+                    ⚙️ 橫向最多顯示人數
+                </label>
+                <span id="max-visible-val" class="text-sm font-bold text-indigo-400 font-mono">{{ max_visible }} 人</span>
+            </div>
+            <input id="max-visible-range" type="range" min="1" max="10" value="{{ max_visible }}" class="w-full accent-indigo-500 cursor-pointer" oninput="updateVisibleDisplay(this.value)" onchange="applyConfigChange(this.value)">
+            <p class="text-[11px] text-slate-400">超過此數量的成員將自動合併顯示為 <span class="text-indigo-400 font-bold">+N</span> 卡片。</p>
+        </div>
+
+        <!-- 區塊 3：結束並關閉 -->
+        <div class="pt-2 border-t border-slate-800">
+            <button onclick="stopOverlayService()" class="w-full py-3 bg-red-600/20 hover:bg-red-600 border border-red-500/40 hover:border-red-500 text-red-300 hover:text-white font-bold text-sm rounded-xl transition shadow-lg flex items-center justify-center gap-2">
+                🛑 結束並關閉疊加服務
+            </button>
+            <p class="text-[11px] text-slate-500 text-center mt-2">點擊後，已開啟的實況疊加畫面將進入 5 秒倒數並徹底關閉。</p>
+        </div>
+
+    </div>
+
+    <script>
+        const channelId = "{{ channel_id }}";
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${protocol}//${window.location.host}/ws/${channelId}`;
+        
+        let ws = null;
+
+        // 設定全網址
+        const fullOverlayUrl = `${window.location.origin}/overlay/${channelId}`;
+        document.getElementById("overlay-url").value = fullOverlayUrl;
+
+        function copyOverlayUrl() {
+            const input = document.getElementById("overlay-url");
+            input.select();
+            navigator.clipboard.writeText(fullOverlayUrl).then(() => {
+                const msg = document.getElementById("copy-msg");
+                msg.classList.remove("hidden");
+                setTimeout(() => msg.classList.add("hidden"), 2000);
+            });
+        }
+
+        function updateVisibleDisplay(val) {
+            document.getElementById("max-visible-val").innerText = `${val} 人`;
+        }
+
+        function connectWS() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.action === "close") {
+                        document.getElementById("status-badge").className = "px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20";
+                        document.getElementById("status-badge").innerText = "🛑 服務已關閉";
+                    }
+                } catch(e) {}
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectWS, 2000);
+            };
+        }
+
+        // 當滑動條放開時，即時透過 WebSocket 向後端更新設定
+        function applyConfigChange(val) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    action: "update_config",
+                    max_visible: parseInt(val)
+                }));
+            }
+        }
+
+        // 點擊關閉服務
+        function stopOverlayService() {
+            if (confirm("確定要結束並關閉此語音頻道的實況疊加畫面嗎？")) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ action: "stop_service" }));
+                }
+            }
+        }
+
+        connectWS();
+    </script>
+</body>
+</html>
+
