@@ -14,17 +14,17 @@ import logging
 log = logging.getLogger("MusicCog")
 
 # ==========================================
-# ⚙️ FFmpeg 與系統環境偵測 (自動路徑優化)
+# ⚙️ FFmpeg 與系統環境偵測
 # ==========================================
 FFMPEG_PATH = shutil.which("ffmpeg") or shutil.which("/usr/bin/ffmpeg") or shutil.which("/usr/local/bin/ffmpeg")
 
 if FFMPEG_PATH:
-    print(f"✅ [MusicCog] 成功偵測到 FFmpeg 執行檔！路徑為: {FFMPEG_PATH}")
+    print(f"✅ [MusicCog] 偵測到 FFmpeg：{FFMPEG_PATH}")
 else:
-    print("❌ [MusicCog] 警告：系統環境中未偵測到 FFmpeg！將無法播放直連音訊。")
+    print("❌ [MusicCog] 警告：未偵測到 FFmpeg，將無法進行音訊串流！")
 
 # ==========================================
-# ⚙️ yt-dlp 雙重配置與 Cookie 環境變數處理
+# ⚙️ yt-dlp 配置與 Cookie 處理
 # ==========================================
 YT_COOKIES_CONTENT = os.getenv("YT_COOKIES")
 COOKIE_FILE_PATH = "temp_cookies.txt"
@@ -33,29 +33,27 @@ if YT_COOKIES_CONTENT:
     try:
         with open(COOKIE_FILE_PATH, "w", encoding="utf-8") as f:
             f.write(YT_COOKIES_CONTENT)
-        log.info("成功自環境變數 YT_COOKIES 載入 Cookie 設定。")
+        log.info("已載入 YT_COOKIES 設定。")
     except Exception as e:
-        log.error(f"寫入暫存 Cookie 檔案失敗: {e}")
+        log.error(f"寫入暫存 Cookie 失敗: {e}")
         COOKIE_FILE_PATH = None
 else:
     COOKIE_FILE_PATH = None
-    log.warning("未偵測到 YT_COOKIES 環境變數，將自動對 YouTube 啟用備用重定向搜尋。")
 
-# 1. 優先配置 (YouTube 帶 Cookie 解析)
 YTDL_DIRECT_OPTIONS = {
     'format': 'bestaudio/best',
     'quiet': True,
     'no_warnings': True,
     'nocheckcertificate': True,
     'ignoreerrors': False,
+    'default_search': 'ytsearch',
 }
 if COOKIE_FILE_PATH:
     YTDL_DIRECT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
-# 2. 備用配置 (SoundCloud 免 Cookie 搜尋)
 YTDL_SEARCH_OPTIONS = {
     'format': 'bestaudio/best',
-    'default_search': 'scsearch5',
+    'default_search': 'ytsearch5',
     'quiet': True,
     'no_warnings': True,
     'nocheckcertificate': True,
@@ -73,23 +71,23 @@ class GuildPlayState:
     def __init__(self):
         self.queue = []            # 播放佇列
         self.history = []          # 播放歷史紀錄
-        self.current_song = None   # 當前正在播放的歌曲資訊
-        self.control_message = None# 控制面板的 Message 物件
-        self.lyrics_message = None # 歌詞面板的 Message 物件
-        self.show_lyrics = True    # 是否預設開啟歌詞顯示
-        self.parsed_lyrics = []    # 解析後的歌詞清單
-        self.start_time = 0        # 歌曲開始播放的時間點 (timestamp)
-        self.elapsed_time = 0      # 歌曲已播放的秒數
-        self.paused = False        # 是否處於暫停狀態
-        self.pause_start = 0       # 暫停開始的時間點 (timestamp)
-        self.total_paused_sec = 0  # 累積暫停的秒數
+        self.current_song = None   # 當前播放歌曲
+        self.control_message = None# 控制面板訊息
+        self.lyrics_message = None # 歌詞面板訊息
+        self.show_lyrics = True    # 開啟歌詞顯示
+        self.parsed_lyrics = []    # 解析後的歌詞
+        self.start_time = 0        # 開始播放時間點
+        self.elapsed_time = 0      # 已播放秒數
+        self.paused = False        # 暫停狀態
+        self.pause_start = 0       # 暫停開始時間
+        self.total_paused_sec = 0  # 累積暫停時間
         self.loop_mode = "off"     # "off", "single", "all"
         self.requester = None      # 點歌者
-        self.volume = 0.5          # 預設音量 50%
-        self.stream_start_time = 0 # 用於偵測 FFmpeg 是否閃退
+        self.volume = 0.5          # 音量預設 50%
+        self.stream_start_time = 0 # 用於崩潰偵測
 
 # ==========================================
-# 🎛️ 音樂多結果手動選擇選單 (Dropdown)
+# 🎛️ 音樂多結果選擇選單 (Dropdown)
 # ==========================================
 class SongSelectView(discord.ui.View):
     def __init__(self, cog, songs: list, requester: discord.Member):
@@ -103,7 +101,7 @@ class SongSelectView(discord.ui.View):
         for i, song in enumerate(songs[:5]):
             title = song.get('title', '未知音軌')[:90]
             artist = song.get('uploader') or song.get('artist') or '未知歌手'
-            artist = artist[:90]
+            artist = str(artist)[:90]
             
             options.append(discord.SelectOption(
                 label=f"{i+1}. {title}",
@@ -112,7 +110,7 @@ class SongSelectView(discord.ui.View):
             ))
 
         self.select = discord.ui.Select(
-            placeholder="🕵️‍♂️ 偵查兵尋獲多個結果，請點擊挑選...",
+            placeholder="搜尋到多個結果，請選擇...",
             options=options
         )
         self.select.callback = self.select_callback
@@ -120,7 +118,7 @@ class SongSelectView(discord.ui.View):
 
     async def select_callback(self, interaction: Interaction):
         if interaction.user.id != self.requester.id:
-            return await interaction.response.send_message("❌ 只有點歌的人可以使用這個選單！", ephemeral=True)
+            return await interaction.response.send_message("❌ 只有點歌者可以使用此選單！", ephemeral=True)
         
         await interaction.response.defer()
         idx = int(self.select.values[0])
@@ -128,7 +126,7 @@ class SongSelectView(discord.ui.View):
         self.stop()
 
 # ==========================================
-# 🎛️ 音樂控制台按鈕介面 (全功能整合版)
+# 🎛️ 音樂控制台按鈕介面
 # ==========================================
 class MusicControlView(discord.ui.View):
     def __init__(self, cog, guild_id: int):
@@ -177,7 +175,7 @@ class MusicControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
 
         if not vc or len(state.history) == 0:
-            return await interaction.followup.send("❌ 沒有播放歷史紀錄，無法播放上一首。", ephemeral=True)
+            return await interaction.followup.send("❌ 沒有播放歷史紀錄。", ephemeral=True)
 
         if state.current_song:
             state.queue.insert(0, state.current_song)
@@ -193,26 +191,22 @@ class MusicControlView(discord.ui.View):
         self.update_button_states()
         embed = self.cog.create_playing_embed(self.guild_id)
         await interaction.message.edit(embed=embed, view=self)
-        await interaction.followup.send("⏮️ 已切換回上一首歌曲", ephemeral=True)
+        await interaction.followup.send("⏮️ 已切換至上一首歌曲", ephemeral=True)
 
     @discord.ui.button(emoji="◀️", label="後退 30s", style=ButtonStyle.secondary, custom_id="btn_rewind", row=0)
     async def rewind_button(self, interaction: Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         vc = interaction.guild.voice_client
         if not vc or not vc.is_playing():
-            return await interaction.followup.send("❌ 目前沒有正在播放的歌曲，無法後退。", ephemeral=True)
+            return await interaction.followup.send("❌ 目前沒有正在播放的歌曲。", ephemeral=True)
 
         state = self.cog.get_state(self.guild_id)
-        if state.paused:
-            current_elapsed = state.pause_start - state.start_time - state.total_paused_sec
-        else:
-            current_elapsed = time.time() - state.start_time - state.total_paused_sec
-
+        current_elapsed = (state.pause_start if state.paused else time.time()) - state.start_time - state.total_paused_sec
         target_time = max(0, int(current_elapsed - 30))
 
         vc.stop()
         await self.cog.play_audio_stream(vc, interaction, state.current_song, start_sec=target_time)
-        await interaction.followup.send(f"◀️ 已成功後退 30 秒 (跳至 {target_time // 60:02d}:{target_time % 60:02d})", ephemeral=True)
+        await interaction.followup.send(f"◀️ 已後退 30 秒 ({target_time // 60:02d}:{target_time % 60:02d})", ephemeral=True)
 
     @discord.ui.button(emoji="⏸️", label="暫停", style=ButtonStyle.primary, custom_id="btn_play_pause", row=0)
     async def play_pause_button(self, interaction: Interaction, button: discord.ui.Button):
@@ -225,12 +219,12 @@ class MusicControlView(discord.ui.View):
             vc.pause()
             state.paused = True
             state.pause_start = time.time()
-            await interaction.response.send_message("⏸️ 播放已暫停", ephemeral=True)
+            await interaction.response.send_message("⏸️ 已暫停播放", ephemeral=True)
         elif vc.is_paused() and state.paused:
             vc.resume()
             state.paused = False
             state.total_paused_sec += time.time() - state.pause_start
-            await interaction.response.send_message("▶️ 播放已繼續", ephemeral=True)
+            await interaction.response.send_message("▶️ 已繼續播放", ephemeral=True)
 
         self.update_button_states()
         embed = self.cog.create_playing_embed(self.guild_id)
@@ -241,23 +235,19 @@ class MusicControlView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         vc = interaction.guild.voice_client
         if not vc or not vc.is_playing():
-            return await interaction.followup.send("❌ 目前沒有正在播放的歌曲，無法快進。", ephemeral=True)
+            return await interaction.followup.send("❌ 目前沒有正在播放的歌曲。", ephemeral=True)
 
         state = self.cog.get_state(self.guild_id)
-        if state.paused:
-            current_elapsed = state.pause_start - state.start_time - state.total_paused_sec
-        else:
-            current_elapsed = time.time() - state.start_time - state.total_paused_sec
-
+        current_elapsed = (state.pause_start if state.paused else time.time()) - state.start_time - state.total_paused_sec
         target_time = int(current_elapsed + 30)
 
-        if target_time >= state.current_song['duration'] and state.current_song['duration'] > 0:
+        if state.current_song['duration'] > 0 and target_time >= state.current_song['duration']:
             vc.stop()
-            return await interaction.followup.send("⏩ 快進已超出歌曲長度，直接播放下一首！", ephemeral=True)
+            return await interaction.followup.send("⏩ 已跳至下一首！", ephemeral=True)
 
         vc.stop()
         await self.cog.play_audio_stream(vc, interaction, state.current_song, start_sec=target_time)
-        await interaction.followup.send(f"▶️ 已成功快進 30 秒 (跳至 {target_time // 60:02d}:{target_time % 60:02d})", ephemeral=True)
+        await interaction.followup.send(f"▶️ 已快進 30 秒 ({target_time // 60:02d}:{target_time % 60:02d})", ephemeral=True)
 
     @discord.ui.button(emoji="⏭️", label="跳過", style=ButtonStyle.secondary, custom_id="btn_skip", row=0)
     async def skip_button(self, interaction: Interaction, button: discord.ui.Button):
@@ -271,17 +261,15 @@ class MusicControlView(discord.ui.View):
                 state.history.append(state.current_song)
                 
             vc.stop()
-            await interaction.response.send_message("⏭️ 已成功跳過當前歌曲", ephemeral=True)
+            await interaction.response.send_message("⏭️ 已跳過歌曲", ephemeral=True)
         else:
             await interaction.response.send_message("❌ 目前沒有正在播放的音樂。", ephemeral=True)
 
-    # --- 第二排按鈕：音量、歌詞與系統功能 ---
-
-    @discord.ui.button(emoji="🔉", label="小聲 10%", style=ButtonStyle.secondary, custom_id="btn_vol_down", row=1)
+    @discord.ui.button(emoji="🔉", label="-10%", style=ButtonStyle.secondary, custom_id="btn_vol_down", row=1)
     async def vol_down_button(self, interaction: Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if not vc:
-            return await interaction.response.send_message("❌ 機器人目前不在語音頻道中。", ephemeral=True)
+            return await interaction.response.send_message("❌ 機器人不在語音頻道中。", ephemeral=True)
 
         state = self.cog.get_state(self.guild_id)
         state.volume = max(0.0, state.volume - 0.1)
@@ -290,13 +278,13 @@ class MusicControlView(discord.ui.View):
 
         embed = self.cog.create_playing_embed(self.guild_id)
         await interaction.message.edit(embed=embed, view=self)
-        await interaction.response.send_message(f"🔉 音量已降低至 {int(state.volume * 100)}%", ephemeral=True)
+        await interaction.response.send_message(f"🔉 音量已微調至 {int(state.volume * 100)}%", ephemeral=True)
 
-    @discord.ui.button(emoji="🔊", label="大聲 10%", style=ButtonStyle.secondary, custom_id="btn_vol_up", row=1)
+    @discord.ui.button(emoji="🔊", label="+10%", style=ButtonStyle.secondary, custom_id="btn_vol_up", row=1)
     async def vol_up_button(self, interaction: Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if not vc:
-            return await interaction.response.send_message("❌ 機器人目前不在語音頻道中。", ephemeral=True)
+            return await interaction.response.send_message("❌ 機器人不在語音頻道中。", ephemeral=True)
 
         state = self.cog.get_state(self.guild_id)
         state.volume = min(2.0, state.volume + 0.1)
@@ -305,7 +293,7 @@ class MusicControlView(discord.ui.View):
 
         embed = self.cog.create_playing_embed(self.guild_id)
         await interaction.message.edit(embed=embed, view=self)
-        await interaction.response.send_message(f"🔊 音量已提高至 {int(state.volume * 100)}%", ephemeral=True)
+        await interaction.response.send_message(f"🔊 音量已微調至 {int(state.volume * 100)}%", ephemeral=True)
 
     @discord.ui.button(emoji="🎤", label="歌詞: 顯示", style=ButtonStyle.success, custom_id="btn_lyrics_toggle", row=1)
     async def lyrics_toggle_button(self, interaction: Interaction, button: discord.ui.Button):
@@ -318,9 +306,9 @@ class MusicControlView(discord.ui.View):
             except Exception:
                 pass
             state.lyrics_message = None
-            await interaction.response.send_message("🎤 已關閉動態歌詞顯示", ephemeral=True)
+            await interaction.response.send_message("🎤 已隱藏歌詞顯示", ephemeral=True)
         else:
-            await interaction.response.send_message("🎤 已開啟動態歌詞，將於下一秒自動輸出面板", ephemeral=True)
+            await interaction.response.send_message("🎤 已開啟歌詞顯示", ephemeral=True)
             
         self.update_button_states()
         embed = self.cog.create_playing_embed(self.guild_id)
@@ -331,13 +319,13 @@ class MusicControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
         if state.loop_mode == "off":
             state.loop_mode = "single"
-            await interaction.response.send_message("🔂 已切換為「單曲循環」模式", ephemeral=True)
+            await interaction.response.send_message("🔂 已切換為單曲循環", ephemeral=True)
         elif state.loop_mode == "single":
             state.loop_mode = "all"
-            await interaction.response.send_message("🔁 已切換為「佇列循環」模式", ephemeral=True)
+            await interaction.response.send_message("🔁 已切換為佇列循環", ephemeral=True)
         else:
             state.loop_mode = "off"
-            await interaction.response.send_message("➡️ 已關閉循環模式", ephemeral=True)
+            await interaction.response.send_message("➡️ 已關閉循環", ephemeral=True)
 
         self.update_button_states()
         embed = self.cog.create_playing_embed(self.guild_id)
@@ -347,7 +335,7 @@ class MusicControlView(discord.ui.View):
     async def stop_button(self, interaction: Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         await self.cog.cleanup_and_disconnect(self.guild_id, vc)
-        await interaction.response.send_message("⏹️ 已停止播放並關閉面板。", ephemeral=True)
+        await interaction.response.send_message("⏹️ 已停止播放並離開語音頻道。", ephemeral=True)
 
 # ==========================================
 # 🎵 音樂主核心 Cog (MusicCog)
@@ -372,9 +360,8 @@ class MusicCog(commands.Cog):
         return self.states[guild_id]
 
     async def fetch_synced_lyrics(self, title: str) -> list:
-        """非同步向 LRCLIB 請求解析帶時間戳的動態歌詞"""
         clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
-        url = f"https://lrclib.net/api/search?q={clean_title}"
+        url = f"https://lrclib.net/api/search?q={urllib.parse.quote(clean_title)}"
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -407,7 +394,7 @@ class MusicCog(commands.Cog):
     def get_current_lyric_lines(self, guild_id: int) -> str:
         state = self.get_state(guild_id)
         if not state.parsed_lyrics:
-            return "🎤 暫時無法獲取這首歌的動態歌詞..."
+            return "🎤 暫無此歌曲的動態歌詞"
 
         elapsed = state.elapsed_time
         current_idx = 0
@@ -452,20 +439,14 @@ class MusicCog(commands.Cog):
 
     def create_progress_bar(self, elapsed, duration):
         if duration == 0:
-            # 針對直連未知長度音訊 (Discord 影片或外部 CDN) 的專屬進度條
             elapsed_m, elapsed_s = divmod(int(elapsed), 60)
-            return f"`{elapsed_m:02d}:{elapsed_s:02d} / 網頁直連音軌`\n🔴 媒體檔案直接播放中..."
+            return f"`{elapsed_m:02d}:{elapsed_s:02d} / 網頁直連串流`\n🔴 串流播放中"
         
         bar_length = 15
         progress = int((elapsed / duration) * bar_length)
         progress = max(0, min(bar_length, progress))
         
-        bar = ""
-        for i in range(bar_length):
-            if i == progress:
-                bar += "🔘"
-            else:
-                bar += "▬"
+        bar = "".join(["🔘" if i == progress else "▬" for i in range(bar_length)])
         
         elapsed_m, elapsed_s = divmod(int(elapsed), 60)
         dur_m, dur_s = divmod(int(duration), 60)
@@ -483,7 +464,6 @@ class MusicCog(commands.Cog):
         else:
             state.elapsed_time = time.time() - state.start_time - state.total_paused_sec
 
-        # 核心優化：如果是直連媒體 (duration == 0)，不限制最大秒數
         if song['duration'] > 0:
             state.elapsed_time = max(0, min(song['duration'], state.elapsed_time))
         else:
@@ -497,17 +477,15 @@ class MusicCog(commands.Cog):
         
         embed.add_field(name="📼 播放進度", value=self.create_progress_bar(state.elapsed_time, song['duration']), inline=False)
         
-        loop_status = "關閉" if state.loop_mode == "off" else ("單曲 🔂" if state.loop_mode == "single" else "整個佇列 🔁")
-        
-        artist_display = song['artist'] if song['artist'] else "⚠️ 此首歌沒有演唱者資訊"
+        loop_status = "關閉" if state.loop_mode == "off" else ("單曲 🔂" if state.loop_mode == "single" else "佇列 🔁")
+        artist_display = song['artist'] if song['artist'] else "未知歌手"
         
         embed.add_field(name="👤 點歌者", value=state.requester.mention if state.requester else "未知", inline=True)
-        embed.add_field(name="🎤 演唱者 / 上傳者", value=artist_display, inline=True)
+        embed.add_field(name="🎤 演唱/上傳者", value=artist_display, inline=True)
         embed.add_field(name="🔄 循環模式", value=loop_status, inline=True)
-        embed.add_field(name="🔊 音量大小", value=f"{int(state.volume * 100)}%", inline=True)
-        embed.add_field(name="🎵 佇列剩餘", value=f"{len(state.queue)} 首歌曲", inline=True)
+        embed.add_field(name="🔊 音量", value=f"{int(state.volume * 100)}%", inline=True)
+        embed.add_field(name="🎵 佇列剩餘", value=f"{len(state.queue)} 首", inline=True)
         
-        embed.set_footer(text="數據源：SoundCloud / DirectStream • 已啟用雙重決策環境變數Cookie技術")
         if song.get('thumbnail'):
             embed.set_thumbnail(url=song['thumbnail'])
             
@@ -525,9 +503,12 @@ class MusicCog(commands.Cog):
 
     @tasks.loop(seconds=2)
     async def ui_update_loop(self):
-        for guild_id, state in self.states.items():
+        for guild_id, state in list(self.states.items()):
             if state.current_song:
-                vc = self.bot.get_guild(guild_id).voice_client
+                guild = self.bot.get_guild(guild_id)
+                if not guild or not guild.voice_client:
+                    continue
+                vc = guild.voice_client
                 if vc and (vc.is_playing() or vc.is_paused()):
                     try:
                         if state.control_message:
@@ -537,7 +518,7 @@ class MusicCog(commands.Cog):
                         
                         if state.show_lyrics and len(state.parsed_lyrics) > 0:
                             lyric_embed = discord.Embed(
-                                title="🎤 歌詞同步面板 (動態滾動)",
+                                title="🎤 動態歌詞",
                                 description=self.get_current_lyric_lines(guild_id),
                                 color=discord.Color.green()
                             )
@@ -555,31 +536,21 @@ class MusicCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     # =======================================================
-    # 🕵️‍♂️ 網址分流過濾 (判斷是否為 Discord 附件、影音直連檔)
+    # 網址分流與解析模組
     # =======================================================
     def is_direct_media_link(self, url: str) -> bool:
-        """判定此網址是否為可以直接由 FFmpeg 播放的影音檔案連結"""
-        if "discordapp.net" in url or "discordapp.com" in url:
+        if "cdn.discordapp.com" in url or "media.discordapp.net" in url:
             return True
             
         clean_url = url.split('?')[0].lower()
         media_extensions = ('.mp3', '.mp4', '.mov', '.wav', '.ogg', '.m4a', '.webm', '.aac', '.flac')
-        if clean_url.endswith(media_extensions):
-            return True
-            
-        return False
+        return clean_url.endswith(media_extensions)
 
-    # =======================================================
-    # 🕵️‍♂️ 雙重解析偵查模組 (直連過濾 + Cookie 優先 + SoundCloud 搜尋)
-    # =======================================================
     async def scout_music_dual_mode(self, query: str, interaction: Interaction) -> dict:
         loop = asyncio.get_event_loop()
 
-        # 🌟 A. 優先檢查：直連媒體連結 (直接派 FFmpeg 載入，繞過 yt-dlp)
+        # A. 直連影音連結
         if self.is_direct_media_link(query):
-            log.info(f"偵查兵判定為直連影音，繞過解析直接串流播放: {query}")
-            
-            # 擷取檔名
             filename = query.split('/')[-1].split('?')[0]
             try:
                 filename = urllib.parse.unquote(filename)
@@ -587,18 +558,17 @@ class MusicCog(commands.Cog):
                 pass
                 
             return {
-                'title': filename if filename else "直連影音音軌",
-                'artist': "Discord 附件 / 網頁直連",
+                'title': filename if filename else "直連影音",
+                'artist': "網頁直連 / 附件",
                 'url': query,
                 'duration': 0, 
                 'webpage_url': query,
-                'thumbnail': "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=200&auto=format&fit=crop"
+                'thumbnail': None
             }
 
-        # B. 優先配置 (YouTube/SoundCloud 使用環境變數 Cookie 直接解析)
-        if "youtube.com" in query or "youtu.be" in query or "soundcloud.com" in query:
+        # B. YouTube / Spotify / SoundCloud 網址處理
+        if any(domain in query for domain in ["youtube.com", "youtu.be", "spotify.com", "soundcloud.com"]):
             try:
-                log.info("偵查兵嘗試使用環境變數 Cookie 直接解析音軌...")
                 data = await loop.run_in_executor(None, lambda: ytdl_direct.extract_info(query, download=False))
                 
                 if 'entries' in data and len(data['entries']) > 0:
@@ -606,28 +576,25 @@ class MusicCog(commands.Cog):
                 else:
                     song_data = data
 
-                title = song_data.get('title', '⚠️ 此影片沒有標題資訊')
+                title = song_data.get('title', '未知歌曲')
                 artist = song_data.get('uploader') or song_data.get('artist') or song_data.get('creator')
                 
-                log.info(f"直接解析成功：{title}")
                 return {
                     'title': title,
-                    'artist': artist if artist else None,
+                    'artist': artist,
                     'url': song_data.get('url'),
                     'duration': song_data.get('duration', 0),
                     'webpage_url': song_data.get('webpage_url', query),
                     'thumbnail': song_data.get('thumbnail', None)
                 }
 
-            except Exception as e:
-                log.warning(f"直接解析失敗 ({e})。偵查兵啟動 SoundCloud 備用重定向與手動選歌計畫！")
-                await interaction.followup.send("⚠️ 原始連結遭阻擋或 Cookie 失效。正在為您搜尋備用音源...", ephemeral=True)
-                
+            except Exception:
+                # 若直接解析受阻，嘗試透過 Metadata/oEmbed 二次關鍵字搜尋
                 title, artist = await self.get_video_metadata_safely(query)
-                search_keyword = f"{title} {artist if artist else ''}"
+                search_keyword = f"{title} {artist if artist else ''}".strip()
                 return await self.search_and_select_song(search_keyword, interaction)
 
-        # C. 一般關鍵字搜尋
+        # C. 關鍵字搜尋
         else:
             return await self.search_and_select_song(query, interaction)
 
@@ -646,21 +613,19 @@ class MusicCog(commands.Cog):
 
     async def search_and_select_song(self, keyword: str, interaction: Interaction) -> dict:
         loop = asyncio.get_event_loop()
-        search_query = f"scsearch5:{keyword}"
-        
-        data = await loop.run_in_executor(None, lambda: ytdl_search.extract_info(search_query, download=False))
+        data = await loop.run_in_executor(None, lambda: ytdl_search.extract_info(f"ytsearch5:{keyword}", download=False))
         
         if 'entries' not in data or len(data['entries']) == 0:
-            raise Exception("偵查兵在網路上搜不到任何匹配的歌曲！")
+            raise Exception("未找到相關的音樂資訊。")
 
         entries = data['entries']
         
         if len(entries) == 1:
             song_data = entries[0]
-            artist = song_data.get('uploader') or song_data.get('artist') or song_data.get('creator')
+            artist = song_data.get('uploader') or song_data.get('artist')
             return {
                 'title': song_data.get('title', '未知音軌'),
-                'artist': artist if artist else None,
+                'artist': artist,
                 'url': song_data.get('url'),
                 'duration': song_data.get('duration', 0),
                 'webpage_url': song_data.get('webpage_url', ''),
@@ -669,7 +634,7 @@ class MusicCog(commands.Cog):
 
         select_view = SongSelectView(self, entries, interaction.user)
         menu_msg = await interaction.followup.send(
-            content="🔍 偵查兵尋獲了多個匹配的備用音源，請選擇你要播放的版本：",
+            content="搜尋到多個結果，請選擇要播放的版本：",
             view=select_view,
             ephemeral=True
         )
@@ -682,23 +647,23 @@ class MusicCog(commands.Cog):
             pass
 
         if select_view.selected_song is None:
-            raise Exception("❌ 超時未選擇歌曲，已取消點歌流程。")
+            raise Exception("已取消點歌流程。")
 
         chosen = select_view.selected_song
-        artist = chosen.get('uploader') or chosen.get('artist') or chosen.get('creator')
+        artist = chosen.get('uploader') or chosen.get('artist')
         return {
             'title': chosen.get('title', '未知音軌'),
-            'artist': artist if artist else None,
+            'artist': artist,
             'url': chosen.get('url'),
             'duration': chosen.get('duration', 0),
             'webpage_url': chosen.get('webpage_url', ''),
             'thumbnail': chosen.get('thumbnail', None)
         }
 
-    @app_commands.command(name="play", description="播放音樂 (雙重 Cookie 解析 + SoundCloud 多結果手動選取)")
+    @app_commands.command(name="play", description="播放音樂 (支援 YouTube, Spotify, 直連音訊)")
     async def play(self, interaction: Interaction, query: str):
         if not interaction.user.voice or not interaction.user.voice.channel:
-            return await interaction.response.send_message("❌ 你必須先加入一個語音頻道，才能使用播放指令！", ephemeral=True)
+            return await interaction.response.send_message("❌ 請先加入語音頻道！", ephemeral=True)
         
         await interaction.response.defer()
 
@@ -707,12 +672,12 @@ class MusicCog(commands.Cog):
         state = self.get_state(guild_id)
         state.requester = interaction.user
 
-        await interaction.followup.send("🕵️‍♂️ 專屬偵查兵正在搜尋與分析音軌中，請稍候...", ephemeral=True)
+        await interaction.followup.send("正在取得音樂...", ephemeral=True)
 
         try:
             song = await self.scout_music_dual_mode(query, interaction)
         except Exception as e:
-            log.error(f"解析音源失敗: {e}")
+            log.error(f"解析失敗: {e}")
             return await interaction.followup.send(f"❌ 點歌失敗：{str(e)}")
 
         state.queue.append(song)
@@ -725,19 +690,17 @@ class MusicCog(commands.Cog):
         if not vc.is_playing() and not vc.is_paused():
             await self.play_next(interaction, vc)
         else:
-            await interaction.followup.send(f"📥 已成功排入隊列：**{song['title']}**")
+            await interaction.followup.send(f"📥 已加入佇列：**{song['title']}**")
 
     async def play_audio_stream(self, vc, interaction, song, start_sec=0):
         guild_id = interaction.guild_id
         state = self.get_state(guild_id)
 
-        # 1. 安全攔截：若主機未成功裝載 FFmpeg，在此阻擋
         if not FFMPEG_PATH:
-            await interaction.channel.send("❌ 系統中未偵測到 FFmpeg 執行檔！音樂播放已遭系統攔截。")
+            await interaction.channel.send("❌ 未檢測到 FFmpeg 執行檔。")
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
-        # 2. 為 FFmpeg 套用最強抗干擾與高規格 PCM 重組，完美解決 AAC 崩潰與斷音
         ffmpeg_options = {
             'before_options': (
                 f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
@@ -756,30 +719,20 @@ class MusicCog(commands.Cog):
             )
             transformer = discord.PCMVolumeTransformer(audio_source, volume=state.volume)
         except Exception as e:
-            log.error(f"建立 FFmpeg 音訊來源失敗: {e}")
-            await interaction.channel.send(f"❌ 啟動音樂串流處理器失敗。詳細錯誤: `{str(e)}`")
+            log.error(f"建立音訊來源失敗: {e}")
+            await interaction.channel.send(f"❌ 無法啟動串流解碼: `{str(e)}`")
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
-        # 記錄本次播放開始的時間
         state.stream_start_time = time.time()
 
-        # 播放歌曲後的狀態回呼
         def after_playing(error):
             if error:
                 log.error(f"FFmpeg 錯誤: {error}")
             
             duration_played = time.time() - state.stream_start_time
-            
-            # 偵測是否剛開播 2.5 秒內就閃退 (表示解碼失敗或 Render 上有 FFmpeg 問題)
             if duration_played < 2.5:
-                err_msg = (
-                    "🚨 **[播放異常中斷診斷]**\n"
-                    "偵測到音訊串流在啟動後 2 秒內瞬間崩潰！這通常代表以下兩種情況之一：\n"
-                    "1. **Render 伺服器未安裝 FFmpeg** (請確認 Settings 內已添加 Buildpack)。\n"
-                    "2. **直連媒體網址已過期失效** (Discord 附件網址通常具有時效性，過期會回傳 403)。\n\n"
-                    "ℹ️ *為了防止無限循環崩潰，播放器已自動清理。*"
-                )
+                err_msg = "⚠️ 音訊串流異常中斷（可能是網址過期或格式不受支援）。"
                 self.bot.loop.create_task(interaction.channel.send(err_msg))
                 self.bot.loop.create_task(self.cleanup_and_disconnect(guild_id, vc))
                 return
@@ -789,8 +742,8 @@ class MusicCog(commands.Cog):
         try:
             vc.play(transformer, after=after_playing)
         except Exception as e:
-            log.error(f"調用 vc.play 失敗: {e}")
-            await interaction.channel.send(f"❌ 調用 Discord 語音播放器失敗: `{str(e)}`")
+            log.error(f"播放失敗: {e}")
+            await interaction.channel.send(f"❌ 播放器錯誤: `{str(e)}`")
             await self.cleanup_and_disconnect(guild_id, vc)
             return
 
@@ -844,9 +797,7 @@ class MusicCog(commands.Cog):
         guild_id = interaction.guild_id
         state = self.get_state(guild_id)
 
-        if not vc or not vc.is_connected():
-            return
-        if vc.is_playing():
+        if not vc or not vc.is_connected() or vc.is_playing():
             return
 
         if state.loop_mode == "single" and state.current_song:
