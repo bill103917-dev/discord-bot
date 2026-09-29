@@ -660,7 +660,7 @@ class MusicCog(commands.Cog):
             'thumbnail': chosen.get('thumbnail', None)
         }
 
-    @app_commands.command(name="play", description="播放音樂 (支援 YouTube, Spotify, 直連音訊)")
+    @app_commands.command(name="play", description="播放音樂")
     async def play(self, interaction: Interaction, query: str):
         if not interaction.user.voice or not interaction.user.voice.channel:
             return await interaction.response.send_message("❌ 請先加入語音頻道！", ephemeral=True)
