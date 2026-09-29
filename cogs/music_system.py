@@ -40,26 +40,35 @@ if YT_COOKIES_CONTENT:
 else:
     COOKIE_FILE_PATH = None
 
-YTDL_DIRECT_OPTIONS = {
-    'format': 'bestaudio/best',
+# 通用標頭：偽裝成真實瀏覽器請求
+COMMON_YTDL_OPTS = {
     'quiet': True,
     'no_warnings': True,
     'nocheckcertificate': True,
     'ignoreerrors': False,
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
+}
+
+YTDL_DIRECT_OPTIONS = {
+    **COMMON_YTDL_OPTS,
+    'format': 'bestaudio/best',
     'default_search': 'ytsearch',
 }
-if COOKIE_FILE_PATH:
-    YTDL_DIRECT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
 YTDL_SEARCH_OPTIONS = {
+    **COMMON_YTDL_OPTS,
     'format': 'bestaudio/best',
     'default_search': 'ytsearch5',
-    'quiet': True,
-    'no_warnings': True,
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
     'source_address': '0.0.0.0'
 }
+
+# 🌟 關鍵修正：讓 direct 與 search 都掛載 Cookie 檔案
+if COOKIE_FILE_PATH:
+    YTDL_DIRECT_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
+    YTDL_SEARCH_OPTIONS['cookiefile'] = COOKIE_FILE_PATH
 
 ytdl_direct = yt_dlp.YoutubeDL(YTDL_DIRECT_OPTIONS)
 ytdl_search = yt_dlp.YoutubeDL(YTDL_SEARCH_OPTIONS)
