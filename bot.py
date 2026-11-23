@@ -1253,6 +1253,7 @@ import random # 用於隨機邏輯 (儘管在此版本中已棄用)
 from utils.config_manager import load_config, save_config
 from utils.time_utils import safe_now
 from flask_sock import Sock  # 1. 補上這行匯入
+from urllib.parse import urlencode
 
 
 
@@ -1911,7 +1912,161 @@ def logs_data():
     # 🚨 這裡需要確保 COMMAND_LOGS 是在全局範圍內可訪問的
     return jsonify(COMMAND_LOGS) 
 
+#認證系統
+@app.route('/verify/<token>')
+def verify_landing_page(token):
+    verify_cog = getattr(bot, "verify_cog", None)
+    if not verify_cog or token not in verify_cog.pending_web_verifications:
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html lang="zh-Hant">
+            <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>驗證連結無效</title></head>
+            <body style="font-family: sans-serif; background:#0f172a; color:#f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;">
+                <div style="background:#1e293b; padding:32px; border-radius:16px; text-align:center; max-width:380px;">
+                    <h2>❌ 驗證連結已失效</h2>
+                    <p style="color:#94a3b8;">請回到 Discord 重新點擊驗證按鈕取得新連結。</p>
+                </div>
+            </body>
+            </html>
+        """), 400
 
+    client_id = os.getenv("DISCORD_CLIENT_ID", "")
+    base_url = os.getenv("RENDER_EXTERNAL_URL", request.host_url).rstrip("/")
+    redirect_uri = f"{base_url}/verify/callback"
+
+    oauth_params = urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "identify",
+        "state": token
+    })
+    discord_auth_url = f"https://discord.com/oauth2/authorize?{oauth_params}"
+
+    return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="zh-Hant">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Discord 身分認證</title>
+            <style>
+                body { font-family: 'PingFang TC', sans-serif; background:#0f172a; color:#f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+                .card { background:#1e293b; padding:36px; border-radius:16px; text-align:center; max-width:400px; width:90%; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+                .btn { display:inline-block; margin-top:20px; padding:12px 24px; background:#5865f2; color:#fff; text-decoration:none; border-radius:10px; font-weight:bold; }
+                .btn:hover { background:#4752c4; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>🛡️ 身分認證</h2>
+                <p style="color:#cbd5e1; font-size:14px;">點擊下方按鈕跳轉至 Discord 完成授權，系統將自動為您發放身分組。</p>
+                <a class="btn" href="{{ auth_url }}">使用 Discord 進行認證</a>
+            </div>
+        </body>
+        </html>
+    """, auth_url=discord_auth_url)
+
+
+@app.route('/verify/callback')
+def verify_oauth_callback():
+    code = request.args.get("code")
+    token = request.args.get("state")
+
+    if not code or not token:
+        return render_template_string("<h2>❌ 授權參數不完整，請重新驗證。</h2>"), 400
+
+    client_id = os.getenv("DISCORD_CLIENT_ID", "")
+    client_secret = os.getenv("DISCORD_CLIENT_SECRET", "")
+    base_url = os.getenv("RENDER_EXTERNAL_URL", request.host_url).rstrip("/")
+    redirect_uri = f"{base_url}/verify/callback"
+
+    async def complete_auth():
+        async with aiohttp.ClientSession() as session:
+            token_resp = await session.post(
+                "https://discord.com/api/oauth2/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            if token_resp.status != 200:
+                return False, "向 Discord 換取授權權杖失敗。"
+
+            token_json = await token_resp.json()
+            access_token = token_json.get("access_token")
+
+            user_resp = await session.get(
+                "https://discord.com/api/users/@me",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if user_resp.status != 200:
+                return False, "無法取得您的 Discord 帳號資訊。"
+
+            user_json = await user_resp.json()
+            oauth_user_id = str(user_json.get("id", ""))
+
+        verify_cog = getattr(bot, "verify_cog", None)
+        if not verify_cog:
+            return False, "機器人驗證模組尚未準備完成。"
+
+        return await verify_cog.grant_verified_role_by_token(token, oauth_user_id)
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(complete_auth(), bot.loop)
+        success, message = future.result(timeout=15)
+    except Exception as e:
+        success, message = False, f"處理驗證時發生錯誤：{e}"
+
+    if success:
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html lang="zh-Hant">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>認證成功</title>
+                <style>
+                    body { font-family: 'PingFang TC', sans-serif; background:#0f172a; color:#f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+                    .card { background:#1e293b; padding:36px; border-radius:16px; text-align:center; max-width:400px; width:90%; box-shadow:0 20px 40px rgba(0,0,0,0.4); }
+                    .ok { color:#4ade80; font-size:22px; font-weight:bold; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="ok">✅ 認證成功！</div>
+                    <p style="color:#cbd5e1; margin-top:12px;">{{ msg }}</p>
+                    <p style="color:#94a3b8; font-size:13px; margin-top:16px;">您現在可以關閉此視窗回到 Discord。</p>
+                </div>
+            </body>
+            </html>
+        """, msg=message)
+    else:
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html lang="zh-Hant">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>認證失敗</title>
+                <style>
+                    body { font-family: 'PingFang TC', sans-serif; background:#0f172a; color:#f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+                    .card { background:#1e293b; padding:36px; border-radius:16px; text-align:center; max-width:400px; width:90%; }
+                    .err { color:#f87171; font-size:20px; font-weight:bold; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="err">❌ 認證失敗</div>
+                    <p style="color:#cbd5e1; margin-top:12px;">{{ msg }}</p>
+                </div>
+            </body>
+            </html>
+        """, msg=message), 400
 # --------------------------
 # 服務條款與隱私
 # --------------------------
