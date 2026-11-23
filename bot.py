@@ -13,6 +13,7 @@ from cogs.stream_overlay import StreamOverlayCog
 from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
+from cogs.verify_system import VerifyCog
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
