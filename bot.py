@@ -14,6 +14,7 @@ log = logging.getLogger("VerifyCog")
 VERIFY_STORAGE_FILE = "verify_panels_config.json"
 
 
+
 # ==========================================
 # 📝 一般模式：驗證回答彈窗 (Modal)
 # ==========================================
