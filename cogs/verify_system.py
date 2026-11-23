@@ -4,9 +4,13 @@ from discord.ext import commands
 import random
 import os
 import time
+import json
+import asyncio
 import logging
 
 log = logging.getLogger("VerifyCog")
+
+VERIFY_STORAGE_FILE = "verify_panels_config.json"
 
 
 # ==========================================
@@ -59,16 +63,31 @@ class VerifyModal(ui.Modal, title="🤖 真人身分驗證"):
 
 
 # ==========================================
-# 🔘 一般模式按鈕視圖
+# 🔘 一般模式按鈕視圖 (支援持久化與重啟後自動解析身分組)
 # ==========================================
 class MathVerifyButtonView(ui.View):
-    def __init__(self, role_id: int):
+    def __init__(self, cog=None, role_id: int = 0):
         super().__init__(timeout=None)
+        self.cog = cog
         self.role_id = role_id
+
+    def _resolve_role_id(self, interaction: Interaction) -> int:
+        if self.role_id:
+            return self.role_id
+        if self.cog and interaction.message:
+            return self.cog.get_panel_role_id(interaction.message.id) or 0
+        return 0
 
     @ui.button(label="🛡️ 點擊進行驗證", style=discord.ButtonStyle.success, custom_id="btn_math_verify")
     async def start_math_verify(self, interaction: Interaction, button: ui.Button):
-        role = interaction.guild.get_role(self.role_id)
+        target_role_id = self._resolve_role_id(interaction)
+        if not target_role_id:
+            return await interaction.response.send_message(
+                "❌ 找不到此驗證面板的身分組設定，請聯繫管理員重新建立面板。",
+                ephemeral=True
+            )
+
+        role = interaction.guild.get_role(target_role_id)
         if role and role in interaction.user.roles:
             return await interaction.response.send_message(
                 f"✅ 您已經擁有 {role.mention} 身分組，無需重複驗證。",
@@ -87,35 +106,55 @@ class MathVerifyButtonView(ui.View):
             ans = big - small
             question = f"{big} - {small} 等於多少？"
 
-        modal = VerifyModal(expected_answer=str(ans), role_id=self.role_id, question_text=question)
+        modal = VerifyModal(expected_answer=str(ans), role_id=target_role_id, question_text=question)
         await interaction.response.send_modal(modal)
 
 
 # ==========================================
-# 🌐 網頁認證模式按鈕視圖
+# 🌐 網頁認證模式按鈕視圖 (支援持久化與重啟後自動解析身分組)
 # ==========================================
 class WebVerifyButtonView(ui.View):
-    def __init__(self, cog, guild_id: int, role_id: int):
+    def __init__(self, cog=None, guild_id: int = 0, role_id: int = 0):
         super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
         self.role_id = role_id
 
+    def _resolve_target(self, interaction: Interaction) -> tuple[int, int]:
+        guild_id = self.guild_id or (interaction.guild_id or 0)
+        role_id = self.role_id
+        if not role_id and self.cog and interaction.message:
+            role_id = self.cog.get_panel_role_id(interaction.message.id) or 0
+        return guild_id, role_id
+
     @ui.button(label="🌐 前往網頁認證", style=discord.ButtonStyle.primary, custom_id="btn_web_verify_open")
     async def open_web_verify(self, interaction: Interaction, button: ui.Button):
-        role = interaction.guild.get_role(self.role_id)
+        guild_id, target_role_id = self._resolve_target(interaction)
+        if not target_role_id:
+            return await interaction.response.send_message(
+                "❌ 找不到此驗證面板的身分組設定，請聯繫管理員重新建立面板。",
+                ephemeral=True
+            )
+
+        role = interaction.guild.get_role(target_role_id)
         if role and role in interaction.user.roles:
             return await interaction.response.send_message(
                 f"✅ 您已經擁有 {role.mention} 身分組，無需重複驗證。",
                 ephemeral=True
             )
 
+        if not self.cog:
+            return await interaction.response.send_message(
+                "❌ 驗證系統尚未初始化完成，請稍後再試。",
+                ephemeral=True
+            )
+
         base_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:10000").rstrip("/")
-        token = f"{interaction.user.id}_{self.guild_id}_{self.role_id}_{random.randint(100000, 999999)}"
+        token = f"{interaction.user.id}_{guild_id}_{target_role_id}_{random.randint(100000, 999999)}"
         self.cog.pending_web_verifications[token] = {
             "user_id": interaction.user.id,
-            "guild_id": self.guild_id,
-            "role_id": self.role_id,
+            "guild_id": guild_id,
+            "role_id": target_role_id,
             "expires_at": time.time() + 600
         }
 
@@ -137,7 +176,74 @@ class VerifyCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.pending_web_verifications = {}
+        # 持久化面板設定：{str(message_id): {"guild_id": int, "channel_id": int, "role_id": int, "mode": str}}
+        self.panels_config = self._load_panels_config()
+        self._persistent_views_registered = False
         bot.verify_cog = self
+
+    def _load_panels_config(self) -> dict:
+        if not os.path.exists(VERIFY_STORAGE_FILE):
+            return {}
+        try:
+            with open(VERIFY_STORAGE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception as e:
+            log.error(f"讀取驗證面板持久化設定失敗: {e}")
+            return {}
+
+    def _save_panels_config(self) -> None:
+        try:
+            with open(VERIFY_STORAGE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.panels_config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log.error(f"儲存驗證面板持久化設定失敗: {e}")
+
+    def register_panel_config(self, message_id: int, guild_id: int, channel_id: int, role_id: int, mode: str) -> None:
+        self.panels_config[str(message_id)] = {
+            "guild_id": int(guild_id),
+            "channel_id": int(channel_id),
+            "role_id": int(role_id),
+            "mode": mode
+        }
+        self._save_panels_config()
+
+    def get_panel_role_id(self, message_id: int) -> int | None:
+        info = self.panels_config.get(str(message_id))
+        if info and "role_id" in info:
+            return int(info["role_id"])
+        return None
+
+    async def cog_load(self):
+        # 註冊永久 View，確保重啟後舊按鈕不會出現「應用程式未即時回應」
+        if not self._persistent_views_registered:
+            self.bot.add_view(MathVerifyButtonView(cog=self))
+            self.bot.add_view(WebVerifyButtonView(cog=self))
+            self._persistent_views_registered = True
+        asyncio.create_task(self._restore_panel_views_on_ready())
+
+    async def _restore_panel_views_on_ready(self):
+        await self.bot.wait_until_ready()
+        for msg_id_str, info in list(self.panels_config.items()):
+            try:
+                msg_id = int(msg_id_str)
+                channel_id = int(info.get("channel_id", 0))
+                role_id = int(info.get("role_id", 0))
+                mode = info.get("mode", "math")
+
+                channel = self.bot.get_channel(channel_id)
+                if not channel and channel_id:
+                    channel = await self.bot.fetch_channel(channel_id)
+                if not channel:
+                    continue
+
+                partial_msg = channel.get_partial_message(msg_id)
+                view = MathVerifyButtonView(cog=self, role_id=role_id) if mode == "math" else WebVerifyButtonView(
+                    cog=self, guild_id=int(info.get("guild_id", 0)), role_id=role_id
+                )
+                await partial_msg.edit(view=view)
+            except Exception as e:
+                log.warning(f"重新掛載驗證面板 {msg_id_str} 狀態略過: {e}")
 
     async def grant_verified_role_by_token(self, token: str, oauth_user_id: str) -> tuple[bool, str]:
         record = self.pending_web_verifications.get(token)
@@ -219,13 +325,20 @@ class VerifyCog(commands.Cog):
         embed.set_footer(text=f"{interaction.guild.name} • 身分驗證系統")
 
         if selected_mode == "math":
-            view = MathVerifyButtonView(role_id=role.id)
+            view = MathVerifyButtonView(cog=self, role_id=role.id)
         else:
-            view = WebVerifyButtonView(self, guild_id=interaction.guild_id, role_id=role.id)
+            view = WebVerifyButtonView(cog=self, guild_id=interaction.guild_id, role_id=role.id)
 
-        await interaction.channel.send(embed=embed, view=view)
+        sent_msg = await interaction.channel.send(embed=embed, view=view)
+        self.register_panel_config(
+            message_id=sent_msg.id,
+            guild_id=interaction.guild_id,
+            channel_id=interaction.channel_id,
+            role_id=role.id,
+            mode=selected_mode
+        )
         await interaction.response.send_message(
-            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}）。",
+            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}），並已啟用重啟持久化。",
             ephemeral=True
         )
 
