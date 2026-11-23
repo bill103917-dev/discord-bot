@@ -1247,7 +1247,7 @@ import os
 import asyncio
 import requests
 import discord
-from flask import Flask, render_template, session, redirect, url_for, request, jsonify, flash, send_from_directory
+from flask import Flask, render_template, session, redirect, url_for, request, jsonify, flash, send_from_directory, render_template_string
 from werkzeug.utils import secure_filename
 import uuid # 用於生成獨特的檔案名
 import random # 用於隨機邏輯 (儘管在此版本中已棄用)
