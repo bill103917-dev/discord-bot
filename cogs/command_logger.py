@@ -42,6 +42,54 @@ class CommandLoggerCog(commands.Cog):
         env_channel_id = (os.getenv("COMMAND_LOG_CHANNEL_ID") or "").strip()
         try:
             self.admin_log_channel_id = int(env_channel_id) if env_channel_id else DEFAULT_ADMIN_LOG_CHANNEL_ID
+        except ValueError:
+            log.warning(f"無效的 COMMAND_LOG_CHANNEL_ID 設定: {env_channel_id}，改用預設值 {DEFAULT_ADMIN_LOG_CHANNEL_ID}")
+            self.admin_log_channel_id = DEFAULT_ADMIN_LOG_CHANNEL_ID
+
+        env_lookup_channel_id = (os.getenv("MESSAGE_LOOKUP_CHANNEL_ID") or "").strip()
+        try:
+            self.lookup_channel_id = int(env_lookup_channel_id) if env_lookup_channel_id else DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID
+        except ValueError:
+            log.warning(f"無效的 MESSAGE_LOOKUP_CHANNEL_ID 設定: {env_lookup_channel_id}，改用預設值 {DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID}")
+            self.lookup_channel_id = DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID
+
+    def _get_now_str(self) -> str:
+        """取得目前時間字串，優先使用專案內的 safe_now。"""
+        try:
+            from utils.time_utils import safe_now
+            val = safe_now()
+            if val:
+                return str(val)
+        except Exception:
+            pass
+        return _default_safe_now()
+
+    def _format_options(self, interaction: Interaction) -> str:
+        """整理斜線指令輸入參數為易讀文字。"""
+        try:
+            options = getattr(interaction.namespace, "__dict__", {}) or {}
+            items = []
+            for k, v in options.items():
+                if v is not None:
+                    items.append(f"{k}: {v}")
+            return ", ".join(items) if items else "無參數"
+        except Exception:
+            return "無參數"
+
+    def _get_log_viewer_ids(self) -> tuple[set[int], set[int]]:
+        """從 bot 屬性或主模組取得可查看日誌的使用者 ID 集合。"""
+        special_ids: set[int] = set()
+        viewer_ids: set[int] = set()
+        for attr_name, target_set in (("SPECIAL_USER_IDS", special_ids), ("LOG_VIEWER_IDS", viewer_ids)):
+            raw = getattr(self.bot, attr_name, None)
+            if isinstance(raw, (set, list, tuple)):
+                for item in raw:
+                    try:
+                        target_set.add(int(item))
+                    except (TypeError, ValueError):
+                        pass
+        return special_ids, viewer_ids
+
     def _append_command_log(
         self,
         text: str,
