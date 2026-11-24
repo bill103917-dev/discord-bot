@@ -1917,6 +1917,21 @@ def logs_data():
 
 log = logging.getLogger("WebVerifyRoutes")
 
+DEFAULT_VERIFY_REDIRECT_URI = "https://disecord-bot2.onrender.com/verify/callback"
+
+
+def _get_verify_redirect_uri() -> str:
+    """優先使用驗證專用的環境變數，避免與管理後台的 DISCORD_REDIRECT_URI 衝突。"""
+    custom_uri = (os.getenv("DISCORD_VERIFY_REDIRECT_URI") or "").strip()
+    if custom_uri:
+        return custom_uri
+
+    render_url = (os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if render_url:
+        return f"{render_url}/verify/callback"
+
+    return DEFAULT_VERIFY_REDIRECT_URI
+
 
 @app.route('/verify/<token>')
 def verify_landing_page(token):
@@ -1926,12 +1941,10 @@ def verify_landing_page(token):
 
         bot_instance = globals().get("bot")
         if bot_instance is None:
-            print("❌ [Verify Landing] 找不到全域變數 bot", flush=True)
             return render_template_string("<h2>❌ 機器人實例尚未初始化。</h2>"), 500
 
         verify_cog = getattr(bot_instance, "verify_cog", None)
         if verify_cog is None:
-            print("❌ [Verify Landing] bot.verify_cog 為 None（請確認已載入 cogs.verify_system）", flush=True)
             return render_template_string("<h2>❌ 驗證系統模組尚未載入。</h2>"), 500
 
         pending = getattr(verify_cog, "pending_web_verifications", None)
@@ -1953,10 +1966,7 @@ def verify_landing_page(token):
         if not client_id:
             return render_template_string("<h2>❌ 伺服器尚未設定 DISCORD_CLIENT_ID 環境變數。</h2>"), 500
 
-        redirect_uri = (os.getenv("DISCORD_VERIFY_REDIRECT_URI") or "").strip()
-        if not redirect_uri:
-            base_url = (os.getenv("RENDER_EXTERNAL_URL") or request.host_url or "").strip().rstrip("/")
-            redirect_uri = f"{base_url}/verify/callback"
+        redirect_uri = _get_verify_redirect_uri()
 
         oauth_params = urlencode({
             "client_id": client_id,
@@ -1992,7 +2002,7 @@ def verify_landing_page(token):
         """, auth_url=discord_auth_url)
 
     except Exception as e:
-        print(f"❌ [Verify Landing Error] {e}", flush=True)
+        log.error(f"載入驗證網頁錯誤: {e}", exc_info=True)
         return render_template_string("<h2>❌ 載入驗證網頁時發生錯誤：{{ err }}</h2>", err=str(e)), 500
 
 
@@ -2006,10 +2016,7 @@ def verify_oauth_callback():
 
     client_id = (os.getenv("DISCORD_CLIENT_ID") or "").strip()
     client_secret = (os.getenv("DISCORD_CLIENT_SECRET") or "").strip()
-    redirect_uri = (os.getenv("DISCORD_VERIFY_REDIRECT_URI") or "").strip()
-    if not redirect_uri:
-        base_url = (os.getenv("RENDER_EXTERNAL_URL") or request.host_url or "").strip().rstrip("/")
-        redirect_uri = f"{base_url}/verify/callback"
+    redirect_uri = _get_verify_redirect_uri()
 
     bot_instance = globals().get("bot")
 
@@ -2027,7 +2034,7 @@ def verify_oauth_callback():
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
             if token_resp.status != 200:
-                return False, "向 Discord 換取授權權杖失敗。"
+                return False, "向 Discord 換取授權權杖失敗，請確認 Redirect URI 設定是否一致。"
 
             token_json = await token_resp.json()
             access_token = token_json.get("access_token")
@@ -2055,7 +2062,7 @@ def verify_oauth_callback():
         future = asyncio.run_coroutine_threadsafe(complete_auth(), bot_instance.loop)
         success, message = future.result(timeout=15)
     except Exception as e:
-        print(f"❌ [Verify Callback Error] {e}", flush=True)
+        log.error(f"處理 OAuth 回呼失敗: {e}", exc_info=True)
         success, message = False, f"處理驗證時發生錯誤：{e}"
 
     if success:
@@ -2103,8 +2110,6 @@ def verify_oauth_callback():
             </body>
             </html>
         """, msg=message), 400
-
-        return render_template_string("<h2>❌ 載入驗證網頁時發生錯誤，請稍後再試。</h2>"), 500
 # --------------------------
 # 服務條款與隱私
 # --------------------------
