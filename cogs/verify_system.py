@@ -3,6 +3,7 @@ from discord import app_commands, Interaction, ui
 from discord.ext import commands
 import random
 import os
+import re
 import time
 import json
 import asyncio
@@ -11,6 +12,7 @@ import logging
 log = logging.getLogger("VerifyCog")
 
 VERIFY_STORAGE_FILE = "verify_panels_config.json"
+
 
 
 # ==========================================
@@ -75,7 +77,7 @@ class MathVerifyButtonView(ui.View):
         if self.role_id:
             return self.role_id
         if self.cog and interaction.message:
-            return self.cog.get_panel_role_id(interaction.message.id) or 0
+            return self.cog.resolve_and_recover_role_id(interaction.message) or 0
         return 0
 
     @ui.button(label="🛡️ 點擊進行驗證", style=discord.ButtonStyle.success, custom_id="btn_math_verify")
@@ -124,7 +126,7 @@ class WebVerifyButtonView(ui.View):
         guild_id = self.guild_id or (interaction.guild_id or 0)
         role_id = self.role_id
         if not role_id and self.cog and interaction.message:
-            role_id = self.cog.get_panel_role_id(interaction.message.id) or 0
+            role_id = self.cog.resolve_and_recover_role_id(interaction.message) or 0
         return guild_id, role_id
 
     @ui.button(label="🌐 前往網頁認證", style=discord.ButtonStyle.primary, custom_id="btn_web_verify_open")
@@ -212,6 +214,68 @@ class VerifyCog(commands.Cog):
         info = self.panels_config.get(str(message_id))
         if info and "role_id" in info:
             return int(info["role_id"])
+        return None
+
+    def resolve_and_recover_role_id(self, message: discord.Message) -> int | None:
+        """先查持久化設定；若重啟後遺失設定，則從面板 Embed 還原身分組 ID 並回寫存檔。"""
+        cached_role_id = self.get_panel_role_id(message.id)
+        if cached_role_id:
+            return cached_role_id
+
+        guild = message.guild
+        if not guild or not message.embeds:
+            return None
+
+        for embed in message.embeds:
+            text_blobs = [
+                embed.description or "",
+                embed.title or "",
+                embed.footer.text if embed.footer and embed.footer.text else "",
+            ]
+            for field in embed.fields:
+                text_blobs.append(field.name or "")
+                text_blobs.append(field.value or "")
+
+            combined_text = "\n".join(text_blobs)
+
+            # 1. 優先匹配 Discord 身分組提及格式 <@&123456789012345678>
+            mention_matches = re.findall(r"<@&(\d{15,22})>", combined_text)
+            for rid_str in mention_matches:
+                rid = int(rid_str)
+                if guild.get_role(rid):
+                    mode = "web" if any(
+                        isinstance(comp, discord.ui.Button) and comp.custom_id == "btn_web_verify_open"
+                        for row in message.components
+                        for comp in getattr(row, "children", [])
+                    ) else "math"
+                    self.register_panel_config(
+                        message_id=message.id,
+                        guild_id=guild.id,
+                        channel_id=message.channel.id,
+                        role_id=rid,
+                        mode=mode
+                    )
+                    return rid
+
+            # 2. 次要匹配純數字身分組 ID（排除 message.id 與 channel.id）
+            id_matches = re.findall(r"\b(\d{15,22})\b", combined_text)
+            for rid_str in id_matches:
+                rid = int(rid_str)
+                if rid not in (message.id, message.channel.id) and guild.get_role(rid):
+                    mode = "web" if any(
+                        isinstance(comp, discord.ui.Button) and comp.custom_id == "btn_web_verify_open"
+                        for row in message.components
+                        for comp in getattr(row, "children", [])
+                    ) else "math"
+                    self.register_panel_config(
+                        message_id=message.id,
+                        guild_id=guild.id,
+                        channel_id=message.channel.id,
+                        role_id=rid,
+                        mode=mode
+                    )
+                    return rid
+
         return None
 
     async def cog_load(self):
