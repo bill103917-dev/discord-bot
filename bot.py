@@ -1953,7 +1953,7 @@ def verify_landing_page(token):
         if not client_id:
             return render_template_string("<h2>❌ 伺服器尚未設定 DISCORD_CLIENT_ID 環境變數。</h2>"), 500
 
-        redirect_uri = (os.getenv("DISCORD_REDIRECT_URI") or "").strip()
+        redirect_uri = (os.getenv("DISCORD_VERIFY_REDIRECT_URI") or "").strip()
         if not redirect_uri:
             base_url = (os.getenv("RENDER_EXTERNAL_URL") or request.host_url or "").strip().rstrip("/")
             redirect_uri = f"{base_url}/verify/callback"
@@ -2006,7 +2006,7 @@ def verify_oauth_callback():
 
     client_id = (os.getenv("DISCORD_CLIENT_ID") or "").strip()
     client_secret = (os.getenv("DISCORD_CLIENT_SECRET") or "").strip()
-    redirect_uri = (os.getenv("DISCORD_REDIRECT_URI") or "").strip()
+    redirect_uri = (os.getenv("DISCORD_VERIFY_REDIRECT_URI") or "").strip()
     if not redirect_uri:
         base_url = (os.getenv("RENDER_EXTERNAL_URL") or request.host_url or "").strip().rstrip("/")
         redirect_uri = f"{base_url}/verify/callback"
