@@ -1136,7 +1136,7 @@ async def on_ready():
 
     # --- 1. 嘗試載入 Cogs ---
     cog_list = [
-        HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
+        HelpCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
         BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog, VerifyCog
     ]
