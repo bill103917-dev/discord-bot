@@ -339,10 +339,10 @@ active_games: Dict[int, RPSView] = {}
 # --- 1. 定義還原確認的 Discord 介面 (Modal) ---
 
 
-# 設定日誌
+
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("BackupSystem"
+logger = logging.getLogger("BackupSystem")
 
      
 
