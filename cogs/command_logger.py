@@ -7,28 +7,30 @@ import logging
 
 log = logging.getLogger("CommandLogger")
 
-# 供網頁後台 (/logs/all, /logs/data) 與 /logs 指令共用的全域指令紀錄列表（最多保留 200 筆）
+# 全域共用的指令紀錄列表（最多保留 200 筆）
 COMMAND_LOGS: list[dict] = []
 
 # 💬 請填寫「只有你看得到」的私人紀錄頻道 ID（也可在環境變數設定 COMMAND_LOG_CHANNEL_ID）
-DEFAULT_ADMIN_LOG_CHANNEL_ID = 1470291339118641253
+DEFAULT_ADMIN_LOG_CHANNEL_ID = 1574786199669833860
 
 
 def _default_safe_now() -> str:
-    """取得目前時間字串，若主程式有提供 safe_now 則優先沿用。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class CommandLoggerCog(commands.Cog):
     """
     全域斜線指令 (/) 自動監聽與日誌管理 Cog：
-    1. 透過 on_app_command_completion 自動捕捉所有 / 指令執行，免在個別指令內寫紀錄程式碼。
-    2. 只將 Embed 紀錄發送至管理員指定的私人頻道，不會推送到其他伺服器或使用者。
-    3. 同步更新 COMMAND_LOGS，讓 /logs 指令與網頁後台可即時檢視。
+    1. 透過 on_app_command_completion 自動捕捉所有 / 指令執行。
+    2. 同時同步寫入 bot.command_logs 與模組層級 COMMAND_LOGS，避免不同 import 路徑造成分家。
+    3. 僅發送至管理員指定的私人頻道，不會推送到其他伺服器或使用者。
     """
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        if not hasattr(self.bot, "command_logs") or not isinstance(self.bot.command_logs, list):
+            self.bot.command_logs = COMMAND_LOGS
+
         env_channel_id = (os.getenv("COMMAND_LOG_CHANNEL_ID") or "").strip()
         try:
             self.admin_log_channel_id = int(env_channel_id) if env_channel_id else DEFAULT_ADMIN_LOG_CHANNEL_ID
@@ -36,7 +38,6 @@ class CommandLoggerCog(commands.Cog):
             self.admin_log_channel_id = DEFAULT_ADMIN_LOG_CHANNEL_ID
 
     def _get_now_str(self) -> str:
-        """嘗試呼叫全域 safe_now()，若不存在則使用本地時間格式化。"""
         safe_now_fn = getattr(self.bot, "safe_now", None) or globals().get("safe_now")
         if callable(safe_now_fn):
             try:
@@ -46,13 +47,11 @@ class CommandLoggerCog(commands.Cog):
         return _default_safe_now()
 
     def _get_log_viewer_ids(self) -> tuple[set[int], set[int]]:
-        """取得允許查看 /logs 指令的特殊權限與日誌檢視者 ID 集合。"""
         special_ids = set(getattr(self.bot, "special_user_ids", ()) or ())
         viewer_ids = set(getattr(self.bot, "log_viewer_ids", ()) or ())
         return special_ids, viewer_ids
 
     def _format_options(self, interaction: Interaction) -> str:
-        """自動解析並整理使用者在斜線指令中輸入的參數。"""
         options = interaction.data.get("options", []) if interaction.data else []
         if not options:
             return "無參數"
@@ -70,13 +69,18 @@ class CommandLoggerCog(commands.Cog):
         return "、".join(parsed) if parsed else "無參數"
 
     def _append_command_log(self, text: str, time_str: str):
-        """將指令執行紀錄寫入 COMMAND_LOGS（最多保留最新 200 筆）。"""
-        COMMAND_LOGS.append({"time": time_str, "text": text})
+        entry = {"time": time_str, "text": text}
+        COMMAND_LOGS.append(entry)
         if len(COMMAND_LOGS) > 200:
             COMMAND_LOGS.pop(0)
 
+        bot_logs = getattr(self.bot, "command_logs", None)
+        if isinstance(bot_logs, list) and bot_logs is not COMMAND_LOGS:
+            bot_logs.append(entry)
+            if len(bot_logs) > 200:
+                bot_logs.pop(0)
+
     async def _send_to_admin_channel(self, embed: discord.Embed):
-        """僅將紀錄發送至指定的私人管理頻道。"""
         if not self.admin_log_channel_id:
             return
 
@@ -104,7 +108,6 @@ class CommandLoggerCog(commands.Cog):
         interaction: Interaction,
         command: app_commands.Command | app_commands.ContextMenu
     ):
-        """全域斜線指令完成事件：自動記錄所有本機器人的 / 指令執行。"""
         try:
             if interaction.client.user and self.bot.user and interaction.client.user.id != self.bot.user.id:
                 return
@@ -148,7 +151,6 @@ class CommandLoggerCog(commands.Cog):
 
     @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
     async def logs(self, interaction: Interaction):
-        """查詢最近 10 筆指令執行紀錄（僅限授權管理員使用）。"""
         user_id = int(interaction.user.id)
         special_ids, viewer_ids = self._get_log_viewer_ids()
 
@@ -166,11 +168,15 @@ class CommandLoggerCog(commands.Cog):
                 pass
             return
 
+        logs_source = getattr(self.bot, "command_logs", None)
+        if not isinstance(logs_source, list) or not logs_source:
+            logs_source = COMMAND_LOGS
+
         logs_text = "📜 **最近的指令紀錄**\n\n"
-        if not COMMAND_LOGS:
+        if not logs_source:
             logs_text += "目前沒有任何紀錄。"
         else:
-            logs_text += "\n".join([f"`{entry['time']}`: {entry['text']}" for entry in COMMAND_LOGS[-10:]])
+            logs_text += "\n".join([f"`{entry['time']}`: {entry['text']}" for entry in logs_source[-10:]])
 
         try:
             await interaction.response.send_message(logs_text, ephemeral=True)
