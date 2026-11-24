@@ -14,6 +14,7 @@ from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
 from cogs.verify_system import VerifyCog
+from cogs.command_logger import CommandLoggerCog
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
@@ -1205,7 +1206,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-        BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog, VerifyCog
+        BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog, VerifyCog, CommandLoggerCog
     ]
 
     for cog in cog_list:
