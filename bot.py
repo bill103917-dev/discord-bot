@@ -1808,6 +1808,53 @@ def update_bot_status():
         
     return jsonify({"success": True, "message": msg})
 
+#日誌----------------------
+
+
+from cogs.command_logger import COMMAND_LOGS
+
+# 日誌
+@app.route("/logs/all")
+def all_guild_logs():
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds") or []
+    if not user_data:
+        return redirect(url_for('index'))
+
+    user_id = int(user_data['id'])
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any(
+            isinstance(g, dict) and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
+            for g in guilds_data
+        )
+    )
+    if not can_view_logs:
+        return "❌ 您沒有權限訪問這個頁面。", 403
+
+    return render_template('all_logs.html', logs=COMMAND_LOGS)
+
+@app.route("/logs/data")
+def logs_data():
+    user_data = session.get("discord_user")
+    guilds_data = session.get("discord_guilds") or []
+    if not user_data:
+        return jsonify({"error": "請先登入"}), 401
+
+    user_id = int(user_data['id'])
+    can_view_logs = (
+        user_id in SPECIAL_USER_IDS or
+        user_id in LOG_VIEWER_IDS or
+        any(
+            isinstance(g, dict) and (int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION
+            for g in guilds_data
+        )
+    )
+    if not can_view_logs:
+        return jsonify({"error": "您沒有權限訪問此資料"}), 403
+
+    return jsonify(COMMAND_LOGS)
 
 #認證系統
 
