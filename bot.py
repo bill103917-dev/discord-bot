@@ -1835,6 +1835,7 @@ def all_guild_logs():
 
     return render_template('all_logs.html', logs=COMMAND_LOGS)
 
+# 在 bot.py 的 /logs/data 路由中，優先從 bot.command_logs 讀取（若無則用 COMMAND_LOGS）：
 @app.route("/logs/data")
 def logs_data():
     user_data = session.get("discord_user")
@@ -1854,8 +1855,11 @@ def logs_data():
     if not can_view_logs:
         return jsonify({"error": "您沒有權限訪問此資料"}), 403
 
-    return jsonify(COMMAND_LOGS)
-
+    bot_instance = globals().get("bot")
+    bot_logs = getattr(bot_instance, "command_logs", None) if bot_instance else None
+    data = bot_logs if isinstance(bot_logs, list) else COMMAND_LOGS
+    return jsonify(data)
+    
 #認證系統
 
 log = logging.getLogger("WebVerifyRoutes")
