@@ -3,8 +3,8 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 from datetime import datetime
 import os
-import logging
 import re
+import logging
 
 log = logging.getLogger("CommandLogger")
 
@@ -16,6 +16,10 @@ DEFAULT_ADMIN_LOG_CHANNEL_ID = 1574786199669833860
 
 # 💬 在此頻道輸入「訊息 ID」，機器人會自動查詢是誰發送的
 DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID = 1574796011346468894
+
+# 自動記錄機器人看過的訊息索引（最多保留最新 5000 筆，避免記憶體無限膨脹）
+MESSAGE_INDEX: dict[int, dict] = {}
+MAX_MESSAGE_INDEX = 5000
 
 
 def _default_safe_now() -> str:
@@ -46,6 +50,55 @@ class CommandLoggerCog(commands.Cog):
             self.lookup_channel_id = int(env_lookup_id) if env_lookup_id else DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID
         except ValueError:
             self.lookup_channel_id = DEFAULT_MESSAGE_LOOKUP_CHANNEL_ID
+
+        if not hasattr(self.bot, "message_index") or not isinstance(self.bot.message_index, dict):
+            self.bot.message_index = MESSAGE_INDEX
+
+    def _record_message_index(self, message: discord.Message):
+        """記錄看過的訊息 ID 與發送者/頻道資訊，方便日後直接以訊息 ID 查詢。"""
+        if not message or not message.id or message.author.bot:
+            return
+
+        author = message.author
+        guild = message.guild
+        channel = message.channel
+
+        content_preview = (message.content or "").strip()
+        if not content_preview and message.attachments:
+            content_preview = f"[附件：{', '.join(a.filename for a in message.attachments)}]"
+        elif not content_preview and message.embeds:
+            content_preview = "[內嵌卡片 Embed]"
+        elif not content_preview:
+            content_preview = "[無純文字內容]"
+
+        record = {
+            "message_id": message.id,
+            "author_id": author.id,
+            "author_mention": author.mention,
+            "author_display_name": author.display_name,
+            "author_name": author.name,
+            "author_avatar": author.display_avatar.url,
+            "guild_id": guild.id if guild else None,
+            "guild_name": guild.name if guild else None,
+            "channel_id": channel.id if hasattr(channel, "id") else None,
+            "channel_mention": channel.mention if hasattr(channel, "mention") else None,
+            "created_at": message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "content": content_preview[:1000],
+            "jump_url": getattr(message, "jump_url", None),
+        }
+
+        MESSAGE_INDEX[message.id] = record
+        if isinstance(self.bot.message_index, dict) and self.bot.message_index is not MESSAGE_INDEX:
+            self.bot.message_index[message.id] = record
+
+        while len(MESSAGE_INDEX) > MAX_MESSAGE_INDEX:
+            oldest_key = next(iter(MESSAGE_INDEX))
+            MESSAGE_INDEX.pop(oldest_key, None)
+
+        if isinstance(self.bot.message_index, dict):
+            while len(self.bot.message_index) > MAX_MESSAGE_INDEX:
+                oldest_key = next(iter(self.bot.message_index))
+                self.bot.message_index.pop(oldest_key, None)
 
     def _get_now_str(self) -> str:
         safe_now_fn = getattr(self.bot, "safe_now", None) or globals().get("safe_now")
@@ -219,18 +272,24 @@ class CommandLoggerCog(commands.Cog):
                 msg = await ch.fetch_message(message_id)
                 if msg:
                     return msg
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            except discord.NotFound:
+                # 該頻道內無此訊息（HTTP 404 / error code 10008），繼續搜尋下一個頻道
+                continue
+            except (discord.Forbidden, discord.HTTPException):
                 continue
 
         return None
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """在指定的私人查詢頻道輸入訊息 ID，自動查詢是誰發送的該則訊息。"""
+        """自動索引看過的訊息；若在指定的私人查詢頻道輸入訊息 ID，則查詢發送者。"""
         try:
             if message.author.bot:
                 return
+
+            # 只要不是在查詢頻道輸入純 ID/連結的查詢指令，就順手把這則訊息記進索引
             if message.channel.id != self.lookup_channel_id:
+                self._record_message_index(message)
                 return
 
             raw_content = (message.content or "").strip()
@@ -242,24 +301,59 @@ class CommandLoggerCog(commands.Cog):
             else:
                 id_match = re.fullmatch(r"\d{15,22}", raw_content)
                 if not id_match:
+                    self._record_message_index(message)
                     return
                 target_channel_id = None
                 target_message_id = int(id_match.group(0))
 
             status_msg = await message.reply(f"🔍 正在搜尋訊息 ID `{target_message_id}` 的發送者...", mention_author=False)
 
+            # 1. 優先從已記錄的訊息索引快取查詢
+            cached = MESSAGE_INDEX.get(target_message_id)
+            if not cached and isinstance(self.bot.message_index, dict):
+                cached = self.bot.message_index.get(target_message_id)
+
+            if cached:
+                guild_info = f"{cached['guild_name']} (`{cached['guild_id']}`)" if cached.get("guild_id") else "私訊 (DM)"
+                channel_info = (
+                    f"{cached['channel_mention']} (`{cached['channel_id']}`)"
+                    if cached.get("channel_mention")
+                    else f"頻道 ID: `{cached.get('channel_id')}`"
+                )
+                embed = discord.Embed(
+                    title="🔎 訊息發送者查詢結果（索引紀錄）",
+                    color=discord.Color.green(),
+                    timestamp=discord.utils.utcnow()
+                )
+                embed.set_author(
+                    name=f"{cached['author_display_name']} ({cached['author_name']})",
+                    icon_url=cached["author_avatar"]
+                )
+                embed.add_field(name="👤 發送者", value=f"{cached['author_mention']}\n`{cached['author_id']}`", inline=True)
+                embed.add_field(name="🆔 訊息 ID", value=f"`{cached['message_id']}`", inline=True)
+                embed.add_field(name="🏠 所在伺服器", value=guild_info, inline=False)
+                embed.add_field(name="📍 所在頻道", value=channel_info, inline=False)
+                embed.add_field(name="🕒 發送時間", value=f"`{cached['created_at']}`", inline=False)
+                embed.add_field(name="💬 訊息內容", value=cached["content"][:1000], inline=False)
+                if cached.get("jump_url"):
+                    embed.add_field(name="🔗 跳轉連結", value=f"[點我前往該則訊息]({cached['jump_url']})", inline=False)
+
+                await status_msg.edit(content=None, embed=embed)
+                return
+
+            # 2. 索引中沒有時，再向指定頻道或各頻道撈取
             found_msg = None
             if target_channel_id:
                 ch = self.bot.get_channel(target_channel_id)
                 if not ch:
                     try:
                         ch = await self.bot.fetch_channel(target_channel_id)
-                    except Exception:
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                         ch = None
                 if ch and hasattr(ch, "fetch_message"):
                     try:
                         found_msg = await ch.fetch_message(target_message_id)
-                    except Exception:
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                         found_msg = None
 
             if not found_msg:
@@ -269,10 +363,12 @@ class CommandLoggerCog(commands.Cog):
                 await status_msg.edit(
                     content=(
                         f"❌ 找不到訊息 ID `{target_message_id}`。\n"
-                        "可能原因：訊息已被刪除、不在機器人可查看的頻道內，或伺服器頻道數量較多尚未掃描到。"
+                        "可能原因：該則訊息是在機器人啟動/記錄索引前發送的、已被刪除，或不在機器人可查看的頻道內。"
                     )
                 )
                 return
+
+            self._record_message_index(found_msg)
 
             author = found_msg.author
             guild_info = f"{found_msg.guild.name} (`{found_msg.guild.id}`)" if found_msg.guild else "私訊 (DM)"
