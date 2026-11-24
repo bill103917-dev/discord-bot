@@ -2,30 +2,64 @@ import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 from datetime import datetime
+import os
 import logging
 
 log = logging.getLogger("CommandLogger")
 
+# 供網頁後台 (/logs/all, /logs/data) 與 /logs 指令共用的全域指令紀錄列表（最多保留 200 筆）
+COMMAND_LOGS: list[dict] = []
+
+# 💬 請填寫「只有你看得到」的私人紀錄頻道 ID（也可在環境變數設定 COMMAND_LOG_CHANNEL_ID）
+DEFAULT_ADMIN_LOG_CHANNEL_ID = 1470291339118641253
+
+
+def _default_safe_now() -> str:
+    """取得目前時間字串，若主程式有提供 safe_now 則優先沿用。"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 class CommandLoggerCog(commands.Cog):
     """
-    全域斜線指令 (/) 自動監聽器：
-    只會捕捉「你這隻機器人」自己的斜線指令，完全不會收到其他機器人的指令。
-    無需在任何指令內額外加入紀錄程式碼。
+    全域斜線指令 (/) 自動監聽與日誌管理 Cog：
+    1. 透過 on_app_command_completion 自動捕捉所有 / 指令執行，免在個別指令內寫紀錄程式碼。
+    2. 只將 Embed 紀錄發送至管理員指定的私人頻道，不會推送到其他伺服器或使用者。
+    3. 同步更新 COMMAND_LOGS，讓 /logs 指令與網頁後台可即時檢視。
     """
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        env_channel_id = (os.getenv("COMMAND_LOG_CHANNEL_ID") or "").strip()
+        try:
+            self.admin_log_channel_id = int(env_channel_id) if env_channel_id else DEFAULT_ADMIN_LOG_CHANNEL_ID
+        except ValueError:
+            self.admin_log_channel_id = DEFAULT_ADMIN_LOG_CHANNEL_ID
+
+    def _get_now_str(self) -> str:
+        """嘗試呼叫全域 safe_now()，若不存在則使用本地時間格式化。"""
+        safe_now_fn = getattr(self.bot, "safe_now", None) or globals().get("safe_now")
+        if callable(safe_now_fn):
+            try:
+                return str(safe_now_fn())
+            except Exception:
+                pass
+        return _default_safe_now()
+
+    def _get_log_viewer_ids(self) -> tuple[set[int], set[int]]:
+        """取得允許查看 /logs 指令的特殊權限與日誌檢視者 ID 集合。"""
+        special_ids = set(getattr(self.bot, "special_user_ids", ()) or ())
+        viewer_ids = set(getattr(self.bot, "log_viewer_ids", ()) or ())
+        return special_ids, viewer_ids
 
     def _format_options(self, interaction: Interaction) -> str:
-        """自動解析並整理使用者在斜線指令中輸入的所有參數"""
+        """自動解析並整理使用者在斜線指令中輸入的參數。"""
         options = interaction.data.get("options", []) if interaction.data else []
         if not options:
             return "無參數"
 
-        parsed = []
+        parsed: list[str] = []
 
-        def extract_opts(opt_list):
+        def extract_opts(opt_list: list[dict]):
             for opt in opt_list:
                 if "options" in opt:
                     extract_opts(opt["options"])
@@ -35,39 +69,34 @@ class CommandLoggerCog(commands.Cog):
         extract_opts(options)
         return "、".join(parsed) if parsed else "無參數"
 
-    async def _dispatch_to_log_channel(self, guild: discord.Guild, embed: discord.Embed):
-        """自動尋找該伺服器設定的 Log 頻道並發送紀錄"""
-        if not guild:
+    def _append_command_log(self, text: str, time_str: str):
+        """將指令執行紀錄寫入 COMMAND_LOGS（最多保留最新 200 筆）。"""
+        COMMAND_LOGS.append({"time": time_str, "text": text})
+        if len(COMMAND_LOGS) > 200:
+            COMMAND_LOGS.pop(0)
+
+    async def _send_to_admin_channel(self, embed: discord.Embed):
+        """僅將紀錄發送至指定的私人管理頻道。"""
+        if not self.admin_log_channel_id:
             return
 
-        log_channel = None
-        logs_cog = self.bot.get_cog("LogsCog")
-
-        if logs_cog:
-            for attr_name in ("log_channels", "guild_logs", "config", "log_config", "settings"):
-                mapping = getattr(logs_cog, attr_name, None)
-                if isinstance(mapping, dict) and guild.id in mapping:
-                    val = mapping[guild.id]
-                    channel_id = val[0] if isinstance(val, (list, tuple)) else (
-                        val.get("channel_id") if isinstance(val, dict) else val
-                    )
-                    if channel_id:
-                        log_channel = guild.get_channel(int(channel_id))
-                        break
-
-        if not log_channel:
-            for ch in guild.text_channels:
-                if any(k in ch.name.lower() for k in ("bot-log", "command-log", "日誌", "指令紀錄")):
-                    log_channel = ch
-                    break
-
-        if log_channel:
+        channel = self.bot.get_channel(self.admin_log_channel_id)
+        if not channel:
             try:
-                await log_channel.send(embed=embed)
+                channel = await self.bot.fetch_channel(self.admin_log_channel_id)
             except discord.Forbidden:
-                log.warning(f"無權限發送指令紀錄至 {guild.name} 的 #{log_channel.name}")
+                log.warning(f"無權限讀取管理員紀錄頻道 {self.admin_log_channel_id}")
+                return
             except Exception as e:
-                log.error(f"發送指令紀錄失敗: {e}")
+                log.error(f"取得管理員紀錄頻道失敗: {e}")
+                return
+
+        try:
+            await channel.send(embed=embed)
+        except discord.Forbidden:
+            log.warning(f"無權限發送指令紀錄至頻道 {self.admin_log_channel_id}")
+        except Exception as e:
+            log.error(f"發送指令紀錄至私人頻道失敗: {e}")
 
     @commands.Cog.listener()
     async def on_app_command_completion(
@@ -75,25 +104,31 @@ class CommandLoggerCog(commands.Cog):
         interaction: Interaction,
         command: app_commands.Command | app_commands.ContextMenu
     ):
-        # 雙重保險：確保指令確實屬於本機器人的指令樹
-        if interaction.client.user and self.bot.user and interaction.client.user.id != self.bot.user.id:
-            return
+        """全域斜線指令完成事件：自動記錄所有本機器人的 / 指令執行。"""
+        try:
+            if interaction.client.user and self.bot.user and interaction.client.user.id != self.bot.user.id:
+                return
 
-        user = interaction.user
-        guild = interaction.guild
-        channel = interaction.channel
-        cmd_name = f"/{command.qualified_name}"
-        params_text = self._format_options(interaction)
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            user = interaction.user
+            guild = interaction.guild
+            channel = interaction.channel
+            cmd_name = f"/{command.qualified_name}"
+            params_text = self._format_options(interaction)
+            now_str = self._get_now_str()
 
-        guild_label = f"{guild.name} ({guild.id})" if guild else "私訊 (DM)"
-        channel_label = f"#{channel.name}" if hasattr(channel, "name") else "DM"
-        log.info(f"[指令紀錄] {user} ({user.id}) 在 {guild_label} {channel_label} 執行了 {cmd_name} | 參數: {params_text}")
-        print(f"📜 [{now_str}] [指令執行] {user.display_name} ({user.id}) -> {cmd_name} ({params_text})")
+            guild_name = guild.name if guild else "DM"
+            guild_id = guild.id if guild else None
+            guild_text = f"{guild_name} (`{guild_id}`)" if guild else "私訊 (DM)"
+            channel_text = f"{channel.mention} (`{channel.id}`)" if hasattr(channel, "mention") else "私訊 (DM)"
 
-        if guild:
+            summary_text = f"{user} 在 {guild_name}({guild_id}) 執行 {cmd_name} ({params_text})"
+            self._append_command_log(summary_text, now_str)
+
+            log.info(f"[指令紀錄] {user} ({user.id}) @ {guild_text} {channel_text} -> {cmd_name} | {params_text}")
+            print(f"📜 [{now_str}] [指令執行] {user.display_name} ({user.id}) -> {cmd_name} ({params_text})")
+
             embed = discord.Embed(
-                title="📜 指令使用紀錄",
+                title="📜 指令使用紀錄（管理員專用）",
                 color=discord.Color.blurple(),
                 timestamp=discord.utils.utcnow()
             )
@@ -103,15 +138,47 @@ class CommandLoggerCog(commands.Cog):
             )
             embed.add_field(name="👤 執行者", value=f"{user.mention}\n`{user.id}`", inline=True)
             embed.add_field(name="⌨️ 使用指令", value=f"**`{cmd_name}`**", inline=True)
-            embed.add_field(
-                name="📍 執行頻道",
-                value=channel.mention if hasattr(channel, "mention") else "私訊",
-                inline=True
-            )
+            embed.add_field(name="🏠 所在伺服器", value=guild_text, inline=True)
+            embed.add_field(name="📍 所在頻道", value=channel_text, inline=True)
             embed.add_field(name="⚙️ 輸入參數", value=params_text[:1000], inline=False)
-            embed.set_footer(text=f"伺服器：{guild.name}")
 
-            await self._dispatch_to_log_channel(guild, embed)
+            await self._send_to_admin_channel(embed)
+        except Exception as e:
+            log.error(f"記錄斜線指令時發生未預期錯誤: {e}", exc_info=True)
+
+    @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
+    async def logs(self, interaction: Interaction):
+        """查詢最近 10 筆指令執行紀錄（僅限授權管理員使用）。"""
+        user_id = int(interaction.user.id)
+        special_ids, viewer_ids = self._get_log_viewer_ids()
+
+        if special_ids or viewer_ids:
+            if user_id not in special_ids and user_id not in viewer_ids:
+                try:
+                    await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+                except Exception:
+                    pass
+                return
+        elif not interaction.user.guild_permissions.administrator:
+            try:
+                await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        logs_text = "📜 **最近的指令紀錄**\n\n"
+        if not COMMAND_LOGS:
+            logs_text += "目前沒有任何紀錄。"
+        else:
+            logs_text += "\n".join([f"`{entry['time']}`: {entry['text']}" for entry in COMMAND_LOGS[-10:]])
+
+        try:
+            await interaction.response.send_message(logs_text, ephemeral=True)
+        except Exception:
+            try:
+                await interaction.followup.send(logs_text, ephemeral=True)
+            except Exception:
+                log.warning("Logs: 無法回應 /logs 指令")
 
 
 async def setup(bot: commands.Bot):
