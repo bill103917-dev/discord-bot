@@ -355,7 +355,7 @@ class VerifyCog(commands.Cog):
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="🧮 一般模式（點擊按鈕跳出數學題）", value="math"),
-        app_commands.Choice(name="🌐 網頁模式（開網頁 → 跳轉 DC 授權 → 完成給身分組）", value="web")
+        app_commands.Choice(name="🌐 網頁模式", value="web")
     ])
     @app_commands.default_permissions(administrator=True)
     async def setup_verify(
@@ -402,7 +402,7 @@ class VerifyCog(commands.Cog):
             mode=selected_mode
         )
         await interaction.response.send_message(
-            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}），並已啟用重啟持久化。",
+            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}）。",
             ephemeral=True
         )
 
