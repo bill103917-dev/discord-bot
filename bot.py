@@ -14,6 +14,7 @@ from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
 from cogs.verify_system import VerifyCog
+from cogs.command_logger import COMMAND_LOGS
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
@@ -1811,7 +1812,7 @@ def update_bot_status():
 #日誌----------------------
 
 
-from cogs.command_logger import COMMAND_LOGS
+
 
 # 日誌
 @app.route("/logs/all")
