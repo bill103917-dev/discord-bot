@@ -340,7 +340,9 @@ active_games: Dict[int, RPSView] = {}
 
 
 # 設定日誌
-
+# 設定日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("BackupSystem"
 
      
 
