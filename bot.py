@@ -14,7 +14,6 @@ from cogs.music_system import MusicCog
 from cogs.support_system import SupportCog
 from cogs.image_draw import ImageDrawCog
 from cogs.verify_system import VerifyCog
-from cogs.command_logger import CommandLoggerCog
 import logging # 用於記錄錯誤
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict, Tuple, Literal 
@@ -91,27 +90,6 @@ def to_thread(func):
         return await asyncio.to_thread(func, *args, **kwargs)
     return wrapper
 
-async def log_command(interaction, command_name: str):
-    try:
-        guild_name = interaction.guild.name if interaction.guild else "DM"
-        guild_id = interaction.guild.id if interaction.guild else None
-        entry = {"time": safe_now(), "text": f"{interaction.user} 在 {guild_name}({guild_id}) 執行 {command_name}"}
-        COMMAND_LOGS.append(entry)
-        # keep max 200 logs
-        if len(COMMAND_LOGS) > 200:
-            COMMAND_LOGS.pop(0)
-        print(f"[LOG] {entry['time']} - {entry['text']}")
-    except Exception:
-        print(f"[LOG] {safe_now()} - {command_name} executed (no interaction details).")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s:%(levelname)s:%(name)s: %(message)s',
-    handlers=[
-        logging.FileHandler(filename='bot.log', encoding='utf-8', mode='a'), # 寫入檔案
-        logging.StreamHandler() # 同時顯示在終端機
-    ]
-)
 
 # Shared globals
 channel_max_visible = {}
@@ -362,8 +340,6 @@ active_games: Dict[int, RPSView] = {}
 
 
 # 設定日誌
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("BackupSystem")
 
 
      
@@ -376,7 +352,6 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="顯示所有可用的指令")
     async def help(self, interaction: Interaction):
-        await log_command(interaction, "/help")
         try:
             await interaction.response.defer(ephemeral=True)
         except Exception:
@@ -396,36 +371,6 @@ class HelpCog(commands.Cog):
             except Exception:
                 print("Help: interaction expired")
 
-# ---- LogsCog (/logs) ----
-class LogsCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-
-    @app_commands.command(name="logs", description="在 Discord 訊息中顯示最近的指令紀錄")
-    async def logs(self, interaction: Interaction):
-        await log_command(interaction, "/logs")
-        user_id = int(interaction.user.id)
-        if user_id not in SPECIAL_USER_IDS and user_id not in LOG_VIEWER_IDS:
-            try:
-                await interaction.response.send_message("❌ 你沒有權限使用此指令", ephemeral=True)
-            except Exception:
-                pass
-            return
-
-        logs_text = "📜 **最近的指令紀錄**\n\n"
-        if not COMMAND_LOGS:
-            logs_text += "目前沒有任何紀錄。"
-        else:
-            logs_text += "\n".join([f"`{log['time']}`: {log['text']}" for log in COMMAND_LOGS[-10:]])
-        try:
-            await interaction.response.send_message(logs_text, ephemeral=True)
-        except Exception:
-            try:
-                await interaction.followup.send(logs_text, ephemeral=True)
-            except Exception:
-                print("Logs: cannot respond")
-
-
 
 # ---- PingCog (/ping) ----
 class PingCog(commands.Cog):
@@ -434,7 +379,6 @@ class PingCog(commands.Cog):
 
     @app_commands.command(name="ping", description="測試機器人是否在線")
     async def ping(self, interaction: Interaction):
-        await log_command(interaction, "/ping")
         try:
             await interaction.response.defer(ephemeral=True)
         except Exception:
@@ -456,7 +400,6 @@ class ReactionRoleCog(commands.Cog):
 
     @app_commands.command(name="reactionrole", description="新增反應身分組（管理員用）")
     async def reactionrole(self, interaction: Interaction, message: str, emoji: str, role: discord.Role, channel: Optional[discord.TextChannel] = None):
-        await log_command(interaction, "/reactionrole")
         await interaction.response.defer(ephemeral=True)
 
         if not interaction.user.guild_permissions.administrator:
@@ -564,7 +507,6 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="announce", description="發布公告（管理員限定）")
     async def announce(self, interaction: Interaction, content: str, title: Optional[str] = "公告📣", channel: Optional[discord.TextChannel] = None, ping_everyone: bool = False):
-        await log_command(interaction, "/announce")
         await interaction.response.defer(ephemeral=True)
 
         if not interaction.user.guild_permissions.administrator:
@@ -580,7 +522,6 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="calc", description="簡單計算器")
     async def calc(self, interaction: Interaction, expr: str):
-        await log_command(interaction, "/calc")
         try:
             allowed = "0123456789+-*/(). "
             if not all(c in allowed for c in expr):
@@ -592,7 +533,6 @@ class UtilityCog(commands.Cog):
 
     @app_commands.command(name="delete", description="刪除訊息（管理員限定）")
     async def delete(self, interaction: Interaction, amount: int):
-        await log_command(interaction, "/delete")
         await interaction.response.defer(ephemeral=True)
         if not interaction.user.guild_permissions.administrator and interaction.user.id not in SPECIAL_USER_IDS:
             await interaction.followup.send("❌ 只有管理員可以刪除訊息", ephemeral=True)
@@ -621,7 +561,6 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="踢出", description="將成員踢出伺服器（需要權限）")
     @app_commands.checks.has_permissions(kick_members=True)
     async def kick_member(self, interaction: Interaction, member: discord.Member, reason: Optional[str] = "無"):
-        await log_command(interaction, "/踢出")
         await interaction.response.defer(ephemeral=True)
         if member.top_role >= interaction.user.top_role and member.id != interaction.user.id:
             await interaction.followup.send(f"❌ 無法踢出：{member.display_name} 的身分組高於或等於你。", ephemeral=True)
@@ -637,7 +576,6 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="封鎖", description="將成員封鎖（需要權限）")
     @app_commands.checks.has_permissions(ban_members=True)
     async def ban_member(self, interaction: Interaction, user_id: str, reason: Optional[str] = "無"):
-        await log_command(interaction, "/封鎖")
         await interaction.response.defer(ephemeral=True)
         try:
             member = await self.bot.fetch_user(int(user_id))
@@ -656,7 +594,6 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="禁言", description="將成員禁言一段時間 (Timeout)（需要權限）")
     @app_commands.checks.has_permissions(moderate_members=True)
     async def timeout_member(self, interaction: Interaction, member: discord.Member, duration: int, time_unit: str, reason: Optional[str] = "無"):
-        await log_command(interaction, "/禁言")
         await interaction.response.defer(ephemeral=True)
         unit_seconds = {"秒": 1, "分鐘": 60, "小時": 3600, "天": 86400}
         if time_unit not in unit_seconds:
@@ -684,7 +621,6 @@ class ModerationCog(commands.Cog):
     @app_commands.command(name="解除禁言", description="解除成員的禁言狀態")
     @app_commands.checks.has_permissions(moderate_members=True)
     async def untimeout_member(self, interaction: Interaction, member: discord.Member):
-        await log_command(interaction, "/解除禁言")
         await interaction.response.defer(ephemeral=True)
         if not member.timed_out:
             await interaction.followup.send(f"❌ {member.display_name} 目前沒有被禁言。", ephemeral=True)
@@ -704,8 +640,6 @@ class FunCog(commands.Cog):
         
     @app_commands.command(name="gay", description="測試一個人的隨機同性戀機率 (1-100%)")
     async def gay_probability(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
-        # 紀錄指令使用
-        await log_command(interaction, "/gay")
         
         target_user = user if user else interaction.user
         
@@ -741,7 +675,6 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="rps", description="剪刀石頭布對戰")
     async def rps(self, interaction: Interaction, rounds: int = 3, opponent: Optional[discord.User] = None, vs_bot: bool = False):
-        await log_command(interaction, "/rps")
         await interaction.response.defer()
         if not opponent and not vs_bot:
             await interaction.followup.send("❌ 你必須選擇對手或開啟 vs_bot!", ephemeral=True)
@@ -771,19 +704,16 @@ class FunCog(commands.Cog):
 
     @app_commands.command(name="氣泡紙", description="發送一個巨大的氣泡紙，來戳爆它吧！")
     async def bubble_wrap_command(self, interaction: Interaction):
-        await log_command(interaction, "/氣泡紙")
         bubble = "||啪||" * 199
         await interaction.response.send_message(f"點擊這些氣泡來戳爆它們！\n{bubble}")
 
     @app_commands.command(name="dice", description="擲一顆 1-6 的骰子")
     async def dice(self, interaction: Interaction):
-        await log_command(interaction, "/dice")
         number = random.randint(1, 6)
         await interaction.response.send_message(f"🎲 {interaction.user.mention} 擲出了 **{number}**！")
 
     @app_commands.command(name="抽籤", description="在多個選項中做出隨機決定。選項之間用逗號（,）分隔")
     async def choose(self, interaction: Interaction, options: str):
-        await log_command(interaction, "/抽籤")
         choices = [opt.strip() for opt in options.split(',') if opt.strip()]
         if len(choices) < 2:
             await interaction.response.send_message("❌ 請提供至少兩個選項，並用逗號 (,) 分隔。", ephemeral=True)
@@ -1206,7 +1136,7 @@ async def on_ready():
     cog_list = [
         HelpCog, LogsCog, PingCog, ReactionRoleCog, UtilityCog,
         MinesweeperTextCog, ModerationCog, FunCog, SupportCog,
-        BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog, VerifyCog, CommandLoggerCog
+        BackupSystem, ImageDrawCog, MusicCog, StreamOverlayCog, VerifyCog
     ]
 
     for cog in cog_list:
@@ -1876,43 +1806,6 @@ def update_bot_status():
         
     return jsonify({"success": True, "message": msg})
 
-# 日誌
-@app.route("/logs/all")
-def all_guild_logs():
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
-    if not user_data:
-        return redirect(url_for('index'))
-
-    user_id = int(user_data['id'])
-    can_view_logs = (
-        user_id in SPECIAL_USER_IDS or
-        user_id in LOG_VIEWER_IDS or
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
-    )
-    if not can_view_logs:
-        return "❌ 您沒有權限訪問這個頁面。", 403
-
-    return render_template('all_logs.html', logs=COMMAND_LOGS)
-
-@app.route("/logs/data")
-def logs_data():
-    user_data = session.get("discord_user")
-    guilds_data = session.get("discord_guilds")
-    if not user_data:
-        return jsonify({"error": "請先登入"}), 401
-
-    user_id = int(user_data['id'])
-    can_view_logs = (
-        user_id in SPECIAL_USER_IDS or
-        user_id in LOG_VIEWER_IDS or
-        any((int(g.get('permissions', '0')) & ADMINISTRATOR_PERMISSION) == ADMINISTRATOR_PERMISSION for g in guilds_data)
-    )
-    if not can_view_logs:
-        return jsonify({"error": "您沒有權限訪問此資料"}), 403
-
-    # 🚨 這裡需要確保 COMMAND_LOGS 是在全局範圍內可訪問的
-    return jsonify(COMMAND_LOGS) 
 
 #認證系統
 
