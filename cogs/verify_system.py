@@ -14,7 +14,6 @@ log = logging.getLogger("VerifyCog")
 VERIFY_STORAGE_FILE = "verify_panels_config.json"
 
 
-
 # ==========================================
 # 📝 一般模式：驗證回答彈窗 (Modal)
 # ==========================================
@@ -355,9 +354,10 @@ class VerifyCog(commands.Cog):
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="🧮 一般模式（點擊按鈕跳出數學題）", value="math"),
-        app_commands.Choice(name="🌐 網頁模式", value="web")
+        app_commands.Choice(name="🌐 網頁模式（開網頁 → 跳轉 DC 授權 → 完成給身分組）", value="web")
     ])
     @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def setup_verify(
         self,
         interaction: Interaction,
@@ -366,6 +366,12 @@ class VerifyCog(commands.Cog):
         title: str = "🛡️ 伺服器身分驗證",
         description: str = "請點擊下方按鈕完成驗證，通過後系統將自動發放身分組。"
     ):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message(
+                "❌ 權限不足：只有伺服器「管理員（Administrator）」才能建立驗證面板。",
+                ephemeral=True
+            )
+
         if not interaction.guild.me.guild_permissions.manage_roles:
             return await interaction.response.send_message(
                 "❌ 機器人缺少「管理身分組」權限，請先在伺服器設定中開啟。",
@@ -402,7 +408,7 @@ class VerifyCog(commands.Cog):
             mode=selected_mode
         )
         await interaction.response.send_message(
-            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}）。",
+            f"✅ 已在 {interaction.channel.mention} 建立驗證面板（模式：{mode_label}），並已啟用重啟持久化。",
             ephemeral=True
         )
 
